@@ -1,6 +1,6 @@
 # eyeShell 產品規格書
 
-- 文件版本：v0.2
+- 文件版本：v0.3
 - 狀態：Initial Baseline
 - 更新日期：2026-07-31
 - 專案：`sawaichi9527/eyeShell`
@@ -163,12 +163,14 @@
 
 | 項目 | 建議方案 |
 |---|---|
-| 主要語言 | Kotlin/JVM |
-| Build | Gradle Kotlin DSL |
+| 主要語言 | Kotlin/JVM 2.4.10 |
+| Build | Gradle 9.5.0 + Kotlin DSL |
 | Bytecode baseline | Java 21 |
+| Development JDK | Eclipse Temurin 21.0.12+8 x64 |
 | Windows Runtime | 經驗證的 JBR/OpenJDK 21 x64 |
 | Linux Runtime | 支援 WLToolkit 的經驗證 JBR 25 x64，或後續等效 Runtime |
-| UI | Swing + FlatLaf |
+| UI | Swing + FlatLaf 3.7.2 |
+| Test | JUnit Jupiter 6.1.2 |
 | Layout | MigLayout 或自有 Layout abstraction |
 | Terminal | JediTerm minimal fork |
 | SSH/SFTP | Apache MINA SSHD 穩定版 2.x |
@@ -215,6 +217,7 @@ eyeShell/
 - Kotlin compiler 由鎖定版本的 Gradle Plugin 提供，不要求全域 Kotlin 安裝。
 - Local launcher 只能為該次子程序設定 `JAVA_HOME`、`PATH` 與 `GRADLE_USER_HOME`，不得修改 shell profile、Registry 或系統環境變數。
 - JDK 與其他下載型 toolchain 必須鎖定來源與版本，並驗證供應商發布的 SHA-256 或等效 checksum。
+- Gradle Plugin、Kotlin compiler 與 Maven dependencies 必須使用 Repository 內的 Gradle dependency verification metadata 記錄 SHA-256；新增或升級依賴時必須審查 metadata diff。
 - 不使用 `curl | sh`、`wget | sh` 或其他未先驗證內容的 pipe-to-shell 安裝方式。
 - Gradle repositories 不使用 `mavenLocal()`，避免隱性依賴開發者家目錄中的 artifact。
 - 刪除 `.local/`、`.gradle/` 與各 module 的 `build/` 後，應可移除所有專案開發 toolchain、cache 與編譯產物。
@@ -222,9 +225,50 @@ eyeShell/
 - 正式安裝包透過 `jlink`／`jpackage` 附帶經驗證 Runtime，不依賴使用者已安裝 Java。
 - 若 Wayland、Secret Service 或 Packaging 驗證需要額外系統套件，必須先說明用途並取得使用者同意，不得由 bootstrap script 自動安裝。
 
+M0 toolchain checksum：
+
+| Artifact | SHA-256 |
+|---|---|
+| Temurin 21.0.12+8 Linux x64 tar.gz | `e4446ff06a276155697597cc0f1b15da004ff083f4964a35271ecee567177370` |
+| Temurin 21.0.12+8 Windows x64 ZIP | `9ba963ee2371874a74185d18bc7bb2ab9407df7683300855ed7606e0662321d0` |
+| Gradle 9.5.0 binary distribution | `553c78f50dafcd54d65b9a444649057857469edf836431389695608536d6b746` |
+| Gradle 9.5.0 Wrapper JAR | `497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7` |
+
 ---
 
 ## 6. 整體架構
+
+### 6.1 Desktop Workbench Layout
+
+桌面框架參考 [FinalShell 官方介紹頁](https://www.hostbuf.com/t/988.html) 所呈現的高密度伺服器工作台資訊架構，但採用 eyeShell 自有實作、視覺語言與產品範圍：
+
+```text
+┌──────────────── Session Tabs ────────────────┐
+│ Monitor │                                    │
+│ 常駐左欄 │          Terminal Workspace        │
+│         │                                    │
+│         ├──────── Command / Toolbar ─────────┤
+│         │ SFTP / Commands 可收合工具區        │
+└─────────┴────────────────────────────────────┘
+```
+
+布局原則：
+
+- 頂部顯示可切換的 Session tabs。
+- 左側 Monitor 區保持常駐，不提供整欄收合；寬度可由使用者調整。
+- 中央 Terminal workspace 是主要伸展區域，優先保留顯示寬度與高度。
+- 底部 SFTP／Commands dock 預設收合，需要時向上展開。
+- 未連線時只顯示明確 Empty State，不顯示偽造的 CPU、記憶體、網路、磁碟或檔案資料。
+- Host／Connection Manager 由工作台入口開啟，不永久占用 Monitor 欄位。
+- 首版預設使用 FlatLaf 深色工作台，後續可提供主題切換。
+- M0 只建立布局、可調整分隔與 dock 展開／收合；SSH、Terminal emulation、SFTP、Monitoring 與 Commands 功能在後續里程碑實作。
+
+參考邊界：
+
+- 不複製 FinalShell 的程式碼、圖示、圖片、配色資產、文案、品牌或其他受保護素材。
+- 不因布局參考加入雲端同步、RDP、SSH 加速、Zmodem、macOS／ARM 支援或其他 eyeShell 規格外能力。
+
+### 6.2 Capability Architecture
 
 ```text
 eyeShell Desktop Application
@@ -880,6 +924,7 @@ Repaint
 | Cloud backend | 不建立 |
 | 開發工具鏈 | Project-local JDK／Gradle／Kotlin，不修改系統全域環境 |
 | Repository License | MIT |
+| Desktop 工作台 | 左側常駐 Monitor、中央 Terminal、頂部 Session tabs、底部可收合 SFTP／Commands |
 
 ---
 

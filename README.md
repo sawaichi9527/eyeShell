@@ -76,9 +76,46 @@ eyeShell 的本機開發工具鏈採 project-local 隔離，不要求開發者�
 - Kotlin compiler 由 Gradle Plugin 提供，不安裝全域 Kotlin。
 - 專案啟動腳本只在該次程序設定 `JAVA_HOME`、`PATH` 與 `GRADLE_USER_HOME`，不修改使用者或系統設定。
 - Toolchain archive 必須鎖定版本並驗證官方 checksum；不得使用未驗證的 pipe-to-shell 安裝方式。
+- Kotlin Plugin 與 Maven dependencies 由 `gradle/verification-metadata.xml` 記錄 SHA-256，後續解析採 Gradle strict dependency verification。
 - `.local/` 不提交 Git，刪除該目錄即可移除本機 toolchain 與 cache。
 
 CI runner 與正式發布所附帶的 Runtime 是獨立環境，不依賴開發者電腦的全域 Java／Gradle／Kotlin 安裝。
+
+Pinned M0 development versions:
+
+| Component | Version |
+|---|---|
+| Eclipse Temurin JDK | 21.0.12+8 |
+| Gradle Wrapper | 9.5.0 |
+| Kotlin JVM Plugin | 2.4.10 |
+| FlatLaf | 3.7.2 |
+| JUnit Jupiter | 6.1.2 |
+
+### Local setup and validation
+
+Linux x86_64:
+
+```bash
+./scripts/bootstrap-jdk.sh
+./scripts/gradlew-local.sh test
+./scripts/gradlew-local.sh check
+./scripts/gradlew-local.sh run
+```
+
+Windows x64 PowerShell:
+
+```powershell
+.\scripts\bootstrap-jdk.ps1
+.\scripts\gradlew-local.ps1 test
+.\scripts\gradlew-local.ps1 check
+.\scripts\gradlew-local.ps1 run
+```
+
+Use `./scripts/gradlew-local.sh --stop` or `.\scripts\gradlew-local.ps1 --stop` to stop the project-local Gradle daemon. The standard `gradlew` and `gradlew.bat` remain available for isolated CI runners.
+
+## Workbench layout
+
+eyeShell 的桌面工作台參考 [FinalShell 官方介紹頁](https://www.hostbuf.com/t/988.html) 所呈現的資訊架構：頂部 Session tabs、左側常駐 Monitor、中央 Terminal workspace，以及底部預設收合的 SFTP／Commands dock。這項參考僅限布局概念，不複製 FinalShell 的程式碼、圖示、圖片、品牌或其他介面資產。
 
 ## Documentation
 
@@ -86,4 +123,4 @@ CI runner 與正式發布所附帶的 Runtime 是獨立環境，不依賴開發�
 
 ## Status
 
-目前處於產品規格與架構基線整理階段，尚未開始正式功能實作。
+M0 桌面骨架已建立：project-local JDK／Gradle、Kotlin build、深色 FlatLaf 工作台與 headless Swing layout test 可用。SSH、Terminal emulation、SFTP、Monitoring、Persistence 與 Packaging 尚未實作。

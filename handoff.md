@@ -2,7 +2,7 @@
 
 ## Current Status
 
-The repository contains the initial product specification and OpenCode project rules. Project-local development toolchain isolation is now an explicit engineering requirement. Kotlin/Gradle implementation has not started.
+The M0 desktop scaffold is buildable and tested on Ubuntu 26.04 x86_64. It uses a fully project-local Temurin/Gradle environment and provides a dark FlatLaf workbench shell with a persistent Monitor area, Terminal workspace, Session tabs, and a collapsible SFTP/Commands dock.
 
 ## Completed
 
@@ -11,6 +11,13 @@ The repository contains the initial product specification and OpenCode project r
 - Initialized local OpenCode project rules and handoff tracking.
 - Added the MIT license and a Kotlin/Gradle-oriented `.gitignore`.
 - Defined project-local isolation for JDK, Gradle, Kotlin, dependencies, daemon state, and build caches.
+- Pinned Temurin 21.0.12+8, Gradle 9.5.0, Kotlin 2.4.10, FlatLaf 3.7.2, and JUnit Jupiter 6.1.2.
+- Added checksum-verifying Linux and Windows JDK bootstrap scripts.
+- Added local Gradle launchers that scope `JAVA_HOME`, `PATH`, and `GRADLE_USER_HOME` to child processes.
+- Added the Gradle Wrapper with distribution checksum verification.
+- Added strict SHA-256 dependency verification metadata for the Kotlin toolchain and Maven dependencies.
+- Added the M0 Swing workbench and a headless layout/dock behavior test.
+- Documented the FinalShell-inspired layout reference and its intellectual-property/product-scope boundaries.
 
 ## In Progress
 
@@ -18,23 +25,24 @@ The repository contains the initial product specification and OpenCode project r
 
 ## Next Actions
 
-- Select and pin the Java 21 distribution, download URL, and vendor checksum.
-- Add Linux and Windows bootstrap/local Gradle launcher scripts.
-- Confirm the Kotlin group/package name.
-- Define the first implementation milestone and minimal Gradle module structure.
-- Select and pin dependency versions only when their first use is implemented.
+- Request explicit user approval before pushing the project baseline and M0 commits.
+- Validate the PowerShell bootstrap and launcher scripts on Windows 10/11 x64.
+- Validate the build and Swing fallback path on Ubuntu 24.04 X11.
+- Define M1 around the first real SSH/Terminal vertical slice without creating unused architecture modules.
+- Select and pin Apache MINA SSHD and the JediTerm fork commit when M1 begins.
 
 ## Validation Evidence
 
-- Commands: `git diff --check`; no-index whitespace checks for `.gitignore`, `AGENTS.md`, `LICENSE`, and `handoff.md` using `git diff --no-index --check /dev/null <file>`.
+- Commands: `./scripts/bootstrap-jdk.sh`; `./scripts/gradlew-local.sh --version`; `./scripts/gradlew-local.sh --write-verification-metadata sha256 test`; `./scripts/gradlew-local.sh test --rerun-tasks`; `./scripts/gradlew-local.sh check`; `bash -n scripts/bootstrap-jdk.sh scripts/gradlew-local.sh`; Gradle Wrapper JAR SHA-256 check; 8-second `./scripts/gradlew-local.sh run` smoke with expected timeout; system `java`/`gradle` lookup; `git diff --check`.
 - Executed at: 2026-07-31
 - Exit code: 0
-- Result: Passed; tracked documentation changes and all four new files reported no whitespace errors. A raw no-index diff returns 1 because each file is new, so the validation wrapper treated empty diagnostic output as success.
-- Test environment: Ubuntu 26.04 x86_64.
-- Remaining unverified scope: Windows, Ubuntu 24.04, Java runtime, build, tests, packaging, SSH, terminal, persistence, and UI behavior.
+- Result: Temurin bootstrap installed and then passed exact vendor/build and executable idempotency checks; Gradle 9.5.0 ran on Temurin 21.0.12+8; strict SHA-256 dependency verification passed; 1 test passed with 0 failures/skips; `check` passed; shell scripts passed syntax validation; the Wrapper JAR matched the official checksum; the GUI remained running for the 8-second smoke window; system `java`, global Gradle home, and system `gradle` remained absent.
+- Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
+- Test report: `build/reports/tests/test/index.html`; XML result: `build/test-results/test/TEST-io.github.sawaichi9527.eyeshell.ui.WorkbenchPanelTest.xml`.
+- Remaining unverified scope: Windows scripts/runtime, Ubuntu 24.04 X11, native Wayland/JBR 25, visual review across DPI scales, packaging, SSH, terminal emulation, SFTP, monitoring, persistence, and secret stores.
 
 ## Known Issues
 
-- The project-local Java and Gradle toolchain has not been provisioned yet.
-- The bootstrap and local Gradle launcher scripts do not exist yet.
-- The package namespace and concrete dependency versions remain undecided.
+- PowerShell scripts are present but have not been executed on Windows.
+- M0 contains layout placeholders only; it does not connect to hosts or display fabricated monitoring/SFTP data.
+- Native Wayland behavior is not covered by the Temurin 21 M0 runtime; the current Linux baseline can use XWayland fallback until the JBR 25 runtime is evaluated.

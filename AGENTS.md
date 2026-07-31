@@ -21,7 +21,7 @@ The product baseline and scope are defined in `docs/PRODUCT_SPEC.md`. Changes mu
 - Target Kotlin/JVM with Java 21 bytecode and Gradle Kotlin DSL.
 - Keep the development JDK, Gradle distribution, Kotlin compiler, dependencies, and build caches project-local under `.local/`; do not require global JDK, Gradle, or Kotlin installations.
 - Use repository launchers that set `JAVA_HOME`, `PATH`, and `GRADLE_USER_HOME` only for their child process. Do not persist these values outside the project.
-- Pin downloaded toolchain versions and verify vendor checksums. Do not use pipe-to-shell installers or `mavenLocal()`.
+- Pin downloaded toolchain versions and verify vendor checksums. Preserve strict Gradle dependency verification and review metadata changes when dependencies change. Do not use pipe-to-shell installers or `mavenLocal()`.
 - Keep the first implementation minimal; do not create every module listed in the architecture proposal before it is needed.
 - Preserve capability boundaries between terminal, SSH/SFTP, monitoring, persistence, secrets, and platform services.
 - Swing UI work must not block the Event Dispatch Thread with SSH, file transfer, monitoring, regex scanning, or large export operations.
