@@ -115,7 +115,7 @@ Use `./scripts/gradlew-local.sh --stop` or `.\scripts\gradlew-local.ps1 --stop` 
 
 ## Workbench layout
 
-eyeShell 的桌面工作台參考 [FinalShell 官方介紹頁](https://www.hostbuf.com/t/988.html) 所呈現的資訊架構：頂部 Session tabs、左側常駐 Monitor、中央 Terminal workspace，以及底部預設收合的 SFTP／Commands dock。這項參考僅限布局概念，不複製 FinalShell 的程式碼、圖示、圖片、品牌或其他介面資產。
+eyeShell 的桌面工作台參考 [FinalShell 官方介紹頁](https://www.hostbuf.com/t/988.html) 所呈現的資訊架構：左側常駐 Monitor，右側工作區頂部顯示 Session tabs，中央是 Terminal workspace；Command Input 同列右方提供快捷工具按鈕，底部 SFTP／Commands dock 預設收合。這項參考僅限布局概念，不複製 FinalShell 的程式碼、圖示、圖片、品牌或其他介面資產。
 
 ## Documentation
 

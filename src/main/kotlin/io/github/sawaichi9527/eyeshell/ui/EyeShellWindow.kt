@@ -3,7 +3,6 @@ package io.github.sawaichi9527.eyeshell.ui
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
-import java.awt.FlowLayout
 import java.awt.Font
 import javax.swing.BorderFactory
 import javax.swing.Box
@@ -28,31 +27,39 @@ class EyeShellWindow : JFrame("eyeShell") {
 
 class WorkbenchPanel : JPanel(BorderLayout()) {
     private val toolDock = CollapsibleToolDock()
+    private val toolDockToggle = JButton("Show tools").apply {
+        name = "toolDockToggle"
+        getAccessibleContext().accessibleName = "Toggle session tools"
+        addActionListener {
+            toolDock.setExpanded(!toolDock.isExpanded)
+            text = if (toolDock.isExpanded) "Hide tools" else "Show tools"
+        }
+    }
 
     init {
         name = "workbench"
-        add(createSessionTabs(), BorderLayout.CENTER)
+        add(createWorkbenchSplit(), BorderLayout.CENTER)
     }
 
     val isToolDockExpanded: Boolean
         get() = toolDock.isExpanded
 
-    private fun createSessionTabs(): JTabbedPane = JTabbedPane(JTabbedPane.TOP).apply {
-        name = "sessionTabs"
-        getAccessibleContext().accessibleName = "Sessions"
-        addTab("Start", createSessionWorkspace())
-    }
-
-    private fun createSessionWorkspace(): JSplitPane = JSplitPane(
+    private fun createWorkbenchSplit(): JSplitPane = JSplitPane(
         JSplitPane.HORIZONTAL_SPLIT,
         createMonitorPanel(),
-        createTerminalArea(),
+        createSessionTabs(),
     ).apply {
-        name = "sessionWorkspace"
+        name = "workbenchSplit"
         dividerLocation = 230
         resizeWeight = 0.0
         isOneTouchExpandable = false
         border = BorderFactory.createEmptyBorder()
+    }
+
+    private fun createSessionTabs(): JTabbedPane = JTabbedPane(JTabbedPane.TOP).apply {
+        name = "sessionTabs"
+        getAccessibleContext().accessibleName = "Sessions"
+        addTab("Start", createTerminalArea())
     }
 
     private fun createMonitorPanel(): JPanel = JPanel().apply {
@@ -91,6 +98,7 @@ class WorkbenchPanel : JPanel(BorderLayout()) {
             BorderFactory.createEmptyBorder(8, 12, 8, 12),
         )
         add(JLabel("Command input is available after connecting."), BorderLayout.CENTER)
+        add(toolDockToggle, BorderLayout.EAST)
     }
 
     private fun sectionTitle(text: String): JLabel = JLabel(text).apply {
@@ -112,8 +120,6 @@ private class CollapsibleToolDock : JPanel(BorderLayout()) {
         addTab("Commands", emptyToolPanel("Saved commands will appear here."))
         isVisible = false
     }
-    private val toggle = JButton("Show tools")
-
     var isExpanded: Boolean = false
         private set
 
@@ -121,13 +127,6 @@ private class CollapsibleToolDock : JPanel(BorderLayout()) {
         name = "toolDock"
         getAccessibleContext().accessibleName = "Session tools"
         border = BorderFactory.createMatteBorder(1, 0, 0, 0, foreground)
-        add(JPanel(FlowLayout(FlowLayout.RIGHT, 8, 5)).apply {
-            name = "toolDockHeader"
-            toggle.name = "toolDockToggle"
-            toggle.getAccessibleContext().accessibleName = "Toggle session tools"
-            toggle.addActionListener { setExpanded(!isExpanded) }
-            add(toggle)
-        }, BorderLayout.NORTH)
         add(content, BorderLayout.CENTER)
     }
 
@@ -135,7 +134,6 @@ private class CollapsibleToolDock : JPanel(BorderLayout()) {
         if (isExpanded == expanded) return
         isExpanded = expanded
         content.isVisible = expanded
-        toggle.text = if (expanded) "Hide tools" else "Show tools"
         revalidate()
         repaint()
     }

@@ -1,6 +1,6 @@
 # eyeShell 產品規格書
 
-- 文件版本：v0.3
+- 文件版本：v0.4
 - 狀態：Initial Baseline
 - 更新日期：2026-07-31
 - 專案：`sawaichi9527/eyeShell`
@@ -243,20 +243,21 @@ M0 toolchain checksum：
 桌面框架參考 [FinalShell 官方介紹頁](https://www.hostbuf.com/t/988.html) 所呈現的高密度伺服器工作台資訊架構，但採用 eyeShell 自有實作、視覺語言與產品範圍：
 
 ```text
-┌──────────────── Session Tabs ────────────────┐
-│ Monitor │                                    │
-│ 常駐左欄 │          Terminal Workspace        │
-│         │                                    │
-│         ├──────── Command / Toolbar ─────────┤
-│         │ SFTP / Commands 可收合工具區        │
-└─────────┴────────────────────────────────────┘
+┌─ Monitor ─┬────────── Session Tabs ──────────┐
+│           │                                  │
+│ 常駐左欄   │         Terminal Workspace       │
+│           │                                  │
+│           ├─ Command Input ─── Quick Tools ──┤
+│           │ SFTP / Commands 可收合工具區      │
+└───────────┴──────────────────────────────────┘
 ```
 
 布局原則：
 
-- 頂部顯示可切換的 Session tabs。
-- 左側 Monitor 區保持常駐，不提供整欄收合；寬度可由使用者調整。
+- 左側 Monitor 區位於 Session pages 外層並保持常駐，不提供整欄收合；寬度可由使用者調整。
+- Session tabs 只顯示在右側工作區頂部，不得跨越或包住 Monitor 區。
 - 中央 Terminal workspace 是主要伸展區域，優先保留顯示寬度與高度。
+- Quick Tools 按鈕位於 Command Input 同一列右方，不建立額外的獨立按鈕列。
 - 底部 SFTP／Commands dock 預設收合，需要時向上展開。
 - 未連線時只顯示明確 Empty State，不顯示偽造的 CPU、記憶體、網路、磁碟或檔案資料。
 - Host／Connection Manager 由工作台入口開啟，不永久占用 Monitor 欄位。
@@ -924,7 +925,7 @@ Repaint
 | Cloud backend | 不建立 |
 | 開發工具鏈 | Project-local JDK／Gradle／Kotlin，不修改系統全域環境 |
 | Repository License | MIT |
-| Desktop 工作台 | 左側常駐 Monitor、中央 Terminal、頂部 Session tabs、底部可收合 SFTP／Commands |
+| Desktop 工作台 | 左側 Monitor 位於 pages 外層；右側頂部 Session tabs、中央 Terminal、Command Input 同列 Quick Tools、底部可收合 SFTP／Commands |
 
 ---
 
