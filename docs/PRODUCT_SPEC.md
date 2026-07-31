@@ -1,7 +1,7 @@
 # eyeShell 產品規格書
 
-- 文件版本：v0.5
-- 狀態：M1A Terminal Baseline
+- 文件版本：v0.6
+- 狀態：M1B SSH Terminal Baseline
 - 更新日期：2026-08-01
 - 專案：`sawaichi9527/eyeShell`
 
@@ -173,7 +173,7 @@
 | Test | JUnit Jupiter 6.1.2 |
 | Layout | MigLayout 或自有 Layout abstraction |
 | Terminal | JediTerm 3.74 pinned core/ui source |
-| SSH/SFTP | Apache MINA SSHD 穩定版 2.x |
+| SSH/SFTP | Apache MINA SSHD 2.19.0 |
 | 即時 Regex | RE2/J-compatible engine |
 | Database | SQLite + Xerial SQLite JDBC |
 | Windows Secret | Windows Credential Manager |
@@ -368,7 +368,7 @@ optional-relay-api
 
 ### 8.1 SSH Engine
 
-採用 Apache MINA SSHD 穩定版 2.x 作為主要 SSH/SFTP Engine。
+採用 Apache MINA SSHD 2.19.0 作為主要 SSH/SFTP Engine。
 
 ### 8.2 驗證方式
 
@@ -381,6 +381,18 @@ optional-relay-api
 - `ssh-agent`
 - Known Hosts
 - Host Key Fingerprint 確認
+
+M1B 先完成以下最小 vertical slice：
+
+- Direct TCP
+- Password authentication；Password 僅存在本次連線記憶體，不寫入設定、SQLite 或 Log
+- 每次連線顯示並確認 Host Key Algorithm 與 SHA-256 Fingerprint
+- Session-only Host Key acceptance；尚未宣告為持久化 Known Hosts
+- 單一 authenticated transport 上的 interactive PTY shell
+- UTF-8 雙向 I/O 與 terminal resize
+- connect、host-key confirmation wait 與 authentication 不阻塞 Swing EDT
+
+Public Key、Private Key Passphrase、keyboard-interactive、`ssh-agent` 與持久化 Known Hosts 在後續 Phase 1 vertical slice 實作，不加入空介面或假流程。
 
 ### 8.3 Transport 共用
 
@@ -926,7 +938,7 @@ Repaint
 | 32-bit | 完全移除 |
 | 主 UI | Swing + FlatLaf |
 | Terminal | JediTerm 3.74 pinned at `377b76e`; fork deferred until a patch is required |
-| SSH/SFTP | Apache MINA SSHD 2.x |
+| SSH/SFTP | Apache MINA SSHD 2.19.0 |
 | Database | SQLite |
 | Cloud backend | 不建立 |
 | 開發工具鏈 | Project-local JDK／Gradle／Kotlin，不修改系統全域環境 |
@@ -939,7 +951,6 @@ Repaint
 
 - 正式 Logo、圖示與品牌色。
 - Java/JBR 的具體 Distribution 與更新政策。
-- Apache MINA SSHD 的鎖定版本。
 - RE2/J-compatible Engine 的具體 Library。
 - Windows Installer 是否同時提供 MSI 與 Portable ZIP。
 - Linux 是否同時提供 DEB 與 Portable tar.gz。

@@ -6,6 +6,7 @@ import java.awt.Component
 import java.awt.Container
 import java.awt.Dimension
 import java.io.Writer
+import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JPanel
@@ -20,6 +21,30 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class WorkbenchPanelTest {
+    @Test
+    fun `connect action and terminal attachment update the empty workspace`() {
+        SwingUtilities.invokeAndWait {
+            val connectCount = AtomicInteger()
+            val terminalView = TestTerminalView(JPanel().apply { name = "testTerminal" })
+            val panel = WorkbenchPanel(terminalView, connectCount::incrementAndGet)
+            val connectButton = panel.findByName("connectButton") as? JButton
+            val connectionStatus = panel.findByName("connectionStatus") as? javax.swing.JLabel
+            val session = TestTerminalSession()
+
+            assertNotNull(connectButton)
+            assertNotNull(connectionStatus)
+            assertTrue(connectButton!!.isEnabled)
+            assertEquals("Not connected", connectionStatus!!.text)
+            connectButton.doClick()
+            assertEquals(1, connectCount.get())
+
+            panel.attachTerminal(session)
+            assertSame(session, terminalView.attachedSession)
+            assertFalse(connectButton.isEnabled)
+            assertEquals("Connected to test-session", connectionStatus.text)
+        }
+    }
+
     @Test
     fun `terminal view is embedded without exposing its implementation to the workbench`() {
         SwingUtilities.invokeAndWait {
@@ -107,11 +132,34 @@ class WorkbenchPanelTest {
     private class TestTerminalView(
         override val component: JComponent,
     ) : TerminalView {
-        override fun attach(session: TerminalSession) = Unit
+        var attachedSession: TerminalSession? = null
+
+        override fun attach(session: TerminalSession) {
+            attachedSession = session
+        }
 
         override fun writeAllOutput(writer: Writer) = Unit
 
         override fun clearScrollback() = Unit
+
+        override fun close() = Unit
+    }
+
+    private class TestTerminalSession : TerminalSession {
+        override val name: String = "test-session"
+        override val isOpen: Boolean = true
+
+        override fun read(buffer: CharArray, offset: Int, length: Int): Int = -1
+
+        override fun write(bytes: ByteArray) = Unit
+
+        override fun write(text: String) = Unit
+
+        override fun resize(columns: Int, rows: Int) = Unit
+
+        override fun ready(): Boolean = false
+
+        override fun awaitExit(): Int = 0
 
         override fun close() = Unit
     }

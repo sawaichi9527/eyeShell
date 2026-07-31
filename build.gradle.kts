@@ -19,6 +19,7 @@ application {
 
 dependencies {
     implementation("com.formdev:flatlaf:3.7.2")
+    implementation("org.apache.sshd:sshd-core:2.19.0")
     implementation(project(":jediterm-core"))
     implementation(project(":jediterm-ui"))
     runtimeOnly("org.slf4j:slf4j-jdk14:2.0.9")

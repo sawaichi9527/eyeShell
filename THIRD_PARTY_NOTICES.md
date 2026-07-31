@@ -11,3 +11,12 @@
 - License text: `third-party/jediterm/LICENSE-APACHE-2.0.txt`
 
 eyeShell compiles only JediTerm's `core` and `ui` source directories. The standalone application, Pty4J, and local terminal support are not included.
+
+## Apache MINA SSHD
+
+- Project: Apache MINA SSHD
+- Source: https://github.com/apache/mina-sshd
+- Version: 2.19.0
+- Copyright: The Apache Software Foundation
+- License: Apache License 2.0
+- License text: https://www.apache.org/licenses/LICENSE-2.0
