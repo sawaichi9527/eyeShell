@@ -67,6 +67,19 @@ RDP 與雲端 SSH Relay 暫列低優先，首版不實作。
 - Freedesktop Secret Service
 - `jlink` + `jpackage`
 
+## Development environment isolation
+
+eyeShell 的本機開發工具鏈採 project-local 隔離，不要求開發者將 JDK、Gradle 或 Kotlin 安裝到作業系統全域：
+
+- JDK 21 放在專案的 `.local/jdk-21/`。
+- Gradle distribution、dependency cache 與 daemon state 放在 `.local/gradle-home/`。
+- Kotlin compiler 由 Gradle Plugin 提供，不安裝全域 Kotlin。
+- 專案啟動腳本只在該次程序設定 `JAVA_HOME`、`PATH` 與 `GRADLE_USER_HOME`，不修改使用者或系統設定。
+- Toolchain archive 必須鎖定版本並驗證官方 checksum；不得使用未驗證的 pipe-to-shell 安裝方式。
+- `.local/` 不提交 Git，刪除該目錄即可移除本機 toolchain 與 cache。
+
+CI runner 與正式發布所附帶的 Runtime 是獨立環境，不依賴開發者電腦的全域 Java／Gradle／Kotlin 安裝。
+
 ## Documentation
 
 - [產品規格書](docs/PRODUCT_SPEC.md)

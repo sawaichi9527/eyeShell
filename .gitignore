@@ -1,0 +1,26 @@
+# Gradle and Kotlin
+.local/
+.gradle/
+.kotlin/
+build/
+**/build/
+
+# IDEs
+.idea/
+*.iml
+out/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+local.properties
+
+# Runtime artifacts
+*.log
+hs_err_pid*
+replay_pid*
+
+# Operating systems
+.DS_Store
+Thumbs.db

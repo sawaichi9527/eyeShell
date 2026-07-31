@@ -1,6 +1,6 @@
 # eyeShell 產品規格書
 
-- 文件版本：v0.1
+- 文件版本：v0.2
 - 狀態：Initial Baseline
 - 更新日期：2026-07-31
 - 專案：`sawaichi9527/eyeShell`
@@ -39,6 +39,7 @@
 7. **Protocol capability separation**：Terminal、SFTP、Remote Exec、Monitoring 與 Port Forwarding 應使用清楚的能力介面。
 8. **安全預設**：密碼、Private Key Passphrase 等 Secret 不得明文存入 SQLite。
 9. **不為低優先功能增加首版依賴**：RDP 與雲端 Relay 不得影響核心架構與安裝包。
+10. **開發工具鏈隔離**：本機開發所需的 JDK、Gradle、Kotlin compiler 與 dependency cache 預設限制在專案目錄，不修改作業系統全域環境。
 
 ---
 
@@ -185,6 +186,41 @@
 - Compose + Swing Interop 會增加 Focus、IME、Popup 與渲染層問題。
 - Skiko／Skia 增加 Native Library 與 GPU 相容矩陣。
 - 首版優先目標是 Terminal 穩定、大量輸出處理與平台相容性。
+
+### 5.2 Project-local 開發工具鏈
+
+本機開發環境預設採完整 project-local 隔離。除非使用者明確同意，不得透過系統套件管理器或全域工具管理器安裝 JDK、Gradle 或 Kotlin，也不得永久修改系統或使用者層級的 `JAVA_HOME`、`KOTLIN_HOME`、`PATH`。
+
+預定目錄：
+
+```text
+eyeShell/
+├─ .local/
+│  ├─ jdk-21/
+│  └─ gradle-home/
+├─ gradle/wrapper/
+├─ gradlew
+├─ gradlew.bat
+└─ scripts/
+   ├─ bootstrap-jdk.sh
+   ├─ bootstrap-jdk.ps1
+   ├─ gradlew-local.sh
+   └─ gradlew-local.ps1
+```
+
+必須遵守：
+
+- Project-local JDK 放在 `.local/jdk-21/`，不得提交 Binary 到 Git。
+- `GRADLE_USER_HOME` 指向 `.local/gradle-home/`，使 Gradle distribution、dependency cache、daemon state 與 Kotlin Plugin 留在專案內。
+- Kotlin compiler 由鎖定版本的 Gradle Plugin 提供，不要求全域 Kotlin 安裝。
+- Local launcher 只能為該次子程序設定 `JAVA_HOME`、`PATH` 與 `GRADLE_USER_HOME`，不得修改 shell profile、Registry 或系統環境變數。
+- JDK 與其他下載型 toolchain 必須鎖定來源與版本，並驗證供應商發布的 SHA-256 或等效 checksum。
+- 不使用 `curl | sh`、`wget | sh` 或其他未先驗證內容的 pipe-to-shell 安裝方式。
+- Gradle repositories 不使用 `mavenLocal()`，避免隱性依賴開發者家目錄中的 artifact。
+- 刪除 `.local/`、`.gradle/` 與各 module 的 `build/` 後，應可移除所有專案開發 toolchain、cache 與編譯產物。
+- CI 可使用 runner 提供的隔離式 JDK/tool cache，但 Build 必須由 Repository 內的 Gradle Wrapper 驅動。
+- 正式安裝包透過 `jlink`／`jpackage` 附帶經驗證 Runtime，不依賴使用者已安裝 Java。
+- 若 Wayland、Secret Service 或 Packaging 驗證需要額外系統套件，必須先說明用途並取得使用者同意，不得由 bootstrap script 自動安裝。
 
 ---
 
@@ -842,6 +878,8 @@ Repaint
 | SSH/SFTP | Apache MINA SSHD 2.x |
 | Database | SQLite |
 | Cloud backend | 不建立 |
+| 開發工具鏈 | Project-local JDK／Gradle／Kotlin，不修改系統全域環境 |
+| Repository License | MIT |
 
 ---
 
@@ -855,4 +893,4 @@ Repaint
 - Windows Installer 是否同時提供 MSI 與 Portable ZIP。
 - Linux 是否同時提供 DEB 與 Portable tar.gz。
 - Phase 1 的量化效能門檻與驗收設備矩陣。
-- Repository License 與貢獻政策。
+- 貢獻政策。
