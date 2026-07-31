@@ -1,16 +1,26 @@
 package io.github.sawaichi9527.eyeshell.ui
 
+import io.github.sawaichi9527.eyeshell.ssh.ChangedHostKey
+import io.github.sawaichi9527.eyeshell.ssh.ChangedHostKeyHandler
+import io.github.sawaichi9527.eyeshell.ssh.EyeShellPaths
 import io.github.sawaichi9527.eyeshell.ssh.HostKeyVerifier
+import io.github.sawaichi9527.eyeshell.ssh.KnownHostsStore
 import io.github.sawaichi9527.eyeshell.ssh.MinaSshConnection
 import io.github.sawaichi9527.eyeshell.ssh.PresentedHostKey
+import io.github.sawaichi9527.eyeshell.ssh.SshAuthentication
 import io.github.sawaichi9527.eyeshell.ssh.SshEndpoint
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
+import java.nio.file.Path
 import java.util.Arrays
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import javax.swing.JButton
+import javax.swing.JComboBox
+import javax.swing.JFileChooser
 import javax.swing.JLabel
 import javax.swing.JOptionPane
 import javax.swing.JPanel
@@ -23,6 +33,7 @@ import javax.swing.SwingUtilities
 class SshConnectionController : AutoCloseable {
     private val executor = Executors.newVirtualThreadPerTaskExecutor()
     private val closed = AtomicBoolean()
+    private val knownHostsStore = KnownHostsStore(EyeShellPaths.knownHostsFile())
     private var connectionTask: Future<*>? = null
 
     fun connect(owner: EyeShellWindow) {
@@ -33,11 +44,14 @@ class SshConnectionController : AutoCloseable {
         owner.setConnectionState("Connecting to ${request.endpoint.displayName}...", true)
         connectionTask = executor.submit {
             request.use {
+                val changedHostKey = AtomicReference<ChangedHostKey>()
                 try {
                     val connection = MinaSshConnection.connect(
                         endpoint = request.endpoint,
-                        password = request.password,
-                        hostKeyVerifier = HostKeyVerifier { confirmHostKey(owner, it) },
+                        authentication = request.authentication,
+                        knownHostsStore = knownHostsStore,
+                        unknownHostVerifier = HostKeyVerifier { confirmHostKey(owner, it) },
+                        changedHostKeyHandler = ChangedHostKeyHandler(changedHostKey::set),
                     )
                     val terminal = connection.openTerminal()
                     SwingUtilities.invokeLater {
@@ -51,9 +65,11 @@ class SshConnectionController : AutoCloseable {
                     SwingUtilities.invokeLater {
                         if (owner.isDisplayable && !closed.get()) {
                             owner.setConnectionState("Connection failed", false)
+                            val changedKey = changedHostKey.get()
                             JOptionPane.showMessageDialog(
                                 owner,
-                                failure.message ?: failure.javaClass.simpleName,
+                                changedKey?.let(::changedHostKeyMessage)
+                                    ?: (failure.message ?: failure.javaClass.simpleName),
                                 "SSH connection failed",
                                 JOptionPane.ERROR_MESSAGE,
                             )
@@ -77,7 +93,8 @@ class SshConnectionController : AutoCloseable {
                 Algorithm: ${hostKey.algorithm}
                 Fingerprint: ${hostKey.fingerprint}
 
-                Accept this key for this session only?
+                Accept and save this key to:
+                ${knownHostsStore.file}
                 """.trimIndent(),
                 "Verify SSH host key",
                 JOptionPane.YES_NO_OPTION,
@@ -97,12 +114,42 @@ class SshConnectionController : AutoCloseable {
         val hostField = JTextField(24)
         val portSpinner = JSpinner(SpinnerNumberModel(22, 1, 65535, 1))
         val usernameField = JTextField(24)
+        val authenticationField = JComboBox(AuthenticationMethod.entries.toTypedArray())
         val passwordField = JPasswordField(24)
+        val keyFileField = JTextField(24)
+        val keyFileButton = JButton("Browse...")
+        val keyFilePanel = JPanel(java.awt.BorderLayout(6, 0)).apply {
+            add(keyFileField, java.awt.BorderLayout.CENTER)
+            add(keyFileButton, java.awt.BorderLayout.EAST)
+        }
+        val passphraseField = JPasswordField(24)
         val panel = JPanel(GridBagLayout())
         addField(panel, 0, "Host", hostField)
         addField(panel, 1, "Port", portSpinner)
         addField(panel, 2, "Username", usernameField)
-        addField(panel, 3, "Password", passwordField)
+        addField(panel, 3, "Authentication", authenticationField)
+        addField(panel, 4, "Password", passwordField)
+        addField(panel, 5, "Private key", keyFilePanel)
+        addField(panel, 6, "Passphrase", passphraseField)
+
+        fun updateAuthenticationFields() {
+            val usePassword = authenticationField.selectedItem == AuthenticationMethod.PASSWORD
+            passwordField.isEnabled = usePassword
+            keyFileField.isEnabled = !usePassword
+            keyFileButton.isEnabled = !usePassword
+            passphraseField.isEnabled = !usePassword
+        }
+        authenticationField.addActionListener { updateAuthenticationFields() }
+        keyFileButton.addActionListener {
+            JFileChooser().apply {
+                fileSelectionMode = JFileChooser.FILES_ONLY
+                dialogTitle = "Select SSH private key"
+                if (showOpenDialog(owner) == JFileChooser.APPROVE_OPTION) {
+                    keyFileField.text = selectedFile.toPath().toString()
+                }
+            }
+        }
+        updateAuthenticationFields()
 
         if (JOptionPane.showConfirmDialog(
                 owner,
@@ -113,25 +160,35 @@ class SshConnectionController : AutoCloseable {
             ) != JOptionPane.OK_OPTION
         ) {
             Arrays.fill(passwordField.password, '\u0000')
+            Arrays.fill(passphraseField.password, '\u0000')
             return null
         }
 
         val password = passwordField.password
+        val passphrase = passphraseField.password
         return try {
-            ConnectionRequest(
-                endpoint = SshEndpoint(
-                    host = hostField.text.trim(),
-                    port = portSpinner.value as Int,
-                    username = usernameField.text.trim(),
-                ),
-                password = password,
-            ).also {
-                require(password.isNotEmpty()) { "SSH password must not be empty" }
+            val endpoint = SshEndpoint(
+                host = hostField.text.trim(),
+                port = portSpinner.value as Int,
+                username = usernameField.text.trim(),
+            )
+            val authentication = when (authenticationField.selectedItem as AuthenticationMethod) {
+                AuthenticationMethod.PASSWORD -> SshAuthentication.Password(password)
+                AuthenticationMethod.PUBLIC_KEY -> {
+                    require(keyFileField.text.isNotBlank()) { "Private key file must not be blank" }
+                    SshAuthentication.PublicKey(Path.of(keyFileField.text.trim()), passphrase)
+                }
             }
+            ConnectionRequest(
+                endpoint = endpoint,
+                authentication = authentication,
+            )
         } catch (failure: IllegalArgumentException) {
-            Arrays.fill(password, '\u0000')
             JOptionPane.showMessageDialog(owner, failure.message, "Invalid SSH connection", JOptionPane.ERROR_MESSAGE)
             null
+        } finally {
+            Arrays.fill(password, '\u0000')
+            Arrays.fill(passphrase, '\u0000')
         }
     }
 
@@ -153,10 +210,32 @@ class SshConnectionController : AutoCloseable {
 
     private class ConnectionRequest(
         val endpoint: SshEndpoint,
-        val password: CharArray,
+        val authentication: SshAuthentication,
     ) : AutoCloseable {
         override fun close() {
-            Arrays.fill(password, '\u0000')
+            authentication.close()
         }
     }
+
+    private enum class AuthenticationMethod(
+        private val label: String,
+    ) {
+        PASSWORD("Password"),
+        PUBLIC_KEY("Private key"),
+        ;
+
+        override fun toString(): String = label
+    }
+
+    private fun changedHostKeyMessage(hostKey: ChangedHostKey): String = """
+        The SSH host key has changed. The connection was rejected.
+
+        Address: ${hostKey.remoteAddress}
+        Algorithm: ${hostKey.algorithm}
+        Expected: ${hostKey.expectedFingerprint}
+        Actual: ${hostKey.actualFingerprint}
+
+        Verify the server outside eyeShell before editing:
+        ${knownHostsStore.file}
+    """.trimIndent()
 }

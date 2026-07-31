@@ -127,4 +127,4 @@ eyeShell 的桌面工作台參考 [FinalShell 官方介紹頁](https://www.hostb
 
 ## Status
 
-M1B SSH terminal vertical slice 已建立：使用者可輸入 Host、Port、Username 與 session-only Password，確認伺服器 Host Key Fingerprint 後開啟真實 SSH PTY shell。連線與驗證不阻塞 Swing EDT，並以 embedded SSH server 測試 host-key reject、password reject、UTF-8 雙向 I/O 與 resize。Public Key、keyboard-interactive、`ssh-agent`、持久化 Known Hosts、SFTP、Monitoring、Persistence 與 Packaging 尚未實作。
+M1C SSH authentication baseline 已建立：支援 session-only Password，以及由使用者選取 Private Key File 的 Public Key authentication 與 optional Passphrase。Unknown Host Key 經確認後寫入 eyeShell 專用的 OpenSSH-compatible `known_hosts`；Changed Host Key 顯示 expected/actual fingerprint 並拒絕連線。`known_hosts` 位於 Linux `$XDG_CONFIG_HOME/eyeShell/known_hosts`（fallback `~/.config`）或 Windows `%APPDATA%\eyeShell\known_hosts`。keyboard-interactive、`ssh-agent`、OS Credential Store、SFTP、Monitoring、SQLite 與 Packaging 尚未實作。

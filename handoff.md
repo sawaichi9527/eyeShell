@@ -2,7 +2,7 @@
 
 ## Current Status
 
-The M1B SSH terminal vertical slice is implemented. The workbench starts in an honest disconnected state, collects direct SSH connection details, confirms the presented host-key fingerprint, and opens an Apache MINA SSHD-backed interactive PTY in JediTerm without blocking the Swing EDT.
+The M1C SSH authentication baseline is implemented. Password and user-selected private-key authentication share the M1B transport; unknown host keys can be confirmed and persisted to an app-specific OpenSSH-compatible Known Hosts file, while changed keys fail closed.
 
 ## Completed
 
@@ -34,6 +34,13 @@ The M1B SSH terminal vertical slice is implemented. The workbench starts in an h
 - Moved connect/auth work to virtual threads and kept host-key confirmation on the Swing EDT.
 - Replaced the startup synthetic demo with an explicit disconnected state and real `Connect...` flow.
 - Added process-free embedded SSH tests for accepted/rejected host keys, accepted/rejected passwords, shell I/O, Unicode, resize, and connection lifecycle.
+- Added Password and Public Key authentication request types that copy and clear session-only secret arrays without exposing them through generated `toString` methods.
+- Added encrypted OpenSSH private-key loading with optional session-only passphrase and immediate removal of authentication identities after auth.
+- Added OpenSSH-style strict POSIX permission validation before loading a Private Key File.
+- Added cross-platform app-specific Known Hosts paths for Linux/XDG and Windows/Roaming AppData.
+- Added strict Known Hosts preparation with POSIX `0700`/`0600`, symbolic-link rejection, fail-closed write errors, and no automatic changed-key replacement.
+- Extended the connection dialog with authentication selection, private-key file chooser, and optional passphrase.
+- Added embedded tests for Known Hosts persistence/reuse, changed-key rejection, encrypted private-key authentication, and platform path resolution without committed key fixtures.
 
 ## In Progress
 
@@ -44,17 +51,17 @@ The M1B SSH terminal vertical slice is implemented. The workbench starts in an h
 - Validate the PowerShell bootstrap and launcher scripts on Windows 10/11 x64.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
 - Create the project-controlled JediTerm fork only when the first necessary upstream patch is identified; GitHub MCP currently lacks fork/create-repository permission.
-- Define M1C around persistent Known Hosts and the next authentication method without storing secrets in project data.
+- Define M1D around keyboard-interactive and `ssh-agent` integration without adding a project-local secret vault.
 
 ## Validation Evidence
 
-- Commands: `./scripts/gradlew-local.sh --write-verification-metadata sha256 compileKotlin`; `./scripts/gradlew-local.sh test --rerun-tasks`; `./scripts/gradlew-local.sh check`; `./scripts/gradlew-local.sh dependencies --configuration runtimeClasspath`; 8-second `timeout --signal=TERM 8s ./scripts/gradlew-local.sh run`; `git diff --check`.
+- Commands: `./scripts/gradlew-local.sh test --rerun-tasks`; `./scripts/gradlew-local.sh check`; 8-second `timeout --signal=TERM 8s ./scripts/gradlew-local.sh run`; secret-pattern searches; `git diff --check`.
 - Executed at: 2026-08-01
-- Exit codes: 0 for dependency metadata generation, tests, check, dependency report, and diff check; 124 expected for the bounded GUI smoke timeout.
-- Result: strict SHA-256 verification passed; 8 tests passed with 0 failures/skips; `check` passed. Tests cover the M0/M1A layout and terminal behavior plus embedded SSH host-key acceptance/rejection, password acceptance/rejection, authenticated UTF-8 shell I/O, resize, close, and disconnected-to-connected UI state. Runtime dependencies add only Apache MINA SSHD core/common and its logging bridge; Pty4J/JNA remain absent. Swing launched in the disconnected state, remained alive until the expected timeout, and left no application process behind.
+- Exit codes: 0 for tests, check, secret-pattern searches, and diff check; 124 expected for the bounded GUI smoke timeout.
+- Result: 13 tests passed with 0 failures/skips; `check` passed. M1C tests use runtime-generated credentials and cover first-use Known Hosts persistence, known-key reuse without prompting, changed-key rejection with both fingerprints, encrypted OpenSSH RSA private-key authentication, and Linux/Windows app-data path resolution. No private key or fixed credential fixture is stored in the repository. Swing launched in the disconnected state, remained alive until the expected timeout, and left no application process behind.
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
-- Remaining unverified scope: Windows scripts/runtime, Ubuntu 24.04 X11, native Wayland/JBR 25, visual review across DPI scales, packaging, external OpenSSH interoperability, adverse network behavior, large-output performance, SFTP, monitoring, persistence, and secret stores.
+- Remaining unverified scope: Windows scripts/runtime and ACL behavior, Ubuntu 24.04 X11, native Wayland/JBR 25, visual review of authentication dialogs, packaging, non-RSA key formats/providers, external OpenSSH interoperability, adverse network behavior, large-output performance, SFTP, monitoring, SQLite, and OS secret stores.
 
 ## Known Issues
 
@@ -63,5 +70,6 @@ The M1B SSH terminal vertical slice is implemented. The workbench starts in an h
 - Native Wayland behavior is not covered by the Temurin 21 M0 runtime; the current Linux baseline can use XWayland fallback until the JBR 25 runtime is evaluated.
 - GitHub MCP's PAT returned 403 for both fork and repository creation. M1A therefore uses the pinned, unmodified official submodule; a project-controlled fork remains pending until a patch is required.
 - Main-buffer export and scrollback clearing fail fast while an alternate screen is active because upstream JediTerm exposes only the active buffer. Phase 1 needs a narrowly documented fork patch before enabling those actions inside applications such as `vim` or `top`.
-- M1B supports direct TCP and password authentication only. Host-key acceptance lasts for one connection and is not yet written to a Known Hosts store.
-- M1B has only been tested against the embedded Apache MINA server; interoperability with OpenSSH servers and network failure behavior remain unverified.
+- Passwords and Private Key Passphrases remain session-only; OS Credential Store integration is not implemented.
+- Public Key authentication is covered with a runtime-generated encrypted RSA OpenSSH key; other key formats/providers and external OpenSSH interoperability remain unverified.
+- Changed Host Keys require manual verification and Known Hosts file editing outside eyeShell; automatic replacement is intentionally unavailable.

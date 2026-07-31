@@ -3,18 +3,25 @@ package io.github.sawaichi9527.eyeshell.ssh
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.security.KeyPair
 import java.time.Duration
+import java.util.Arrays
 import java.util.EnumSet
 import java.util.concurrent.atomic.AtomicBoolean
 import org.apache.sshd.client.SshClient
 import org.apache.sshd.client.auth.password.UserAuthPasswordFactory
+import org.apache.sshd.client.auth.pubkey.UserAuthPublicKeyFactory
 import org.apache.sshd.client.channel.ChannelShell
 import org.apache.sshd.client.channel.ClientChannelEvent
 import org.apache.sshd.client.config.hosts.HostConfigEntryResolver
 import org.apache.sshd.client.session.ClientSession
 import org.apache.sshd.common.channel.StreamingChannel
+import org.apache.sshd.common.config.keys.FilePasswordProvider
 import org.apache.sshd.common.config.keys.KeyUtils
 import org.apache.sshd.common.keyprovider.KeyIdentityProvider
+import org.apache.sshd.common.util.io.resource.PathResource
+import org.apache.sshd.common.util.security.SecurityUtils
 
 class MinaSshConnection private constructor(
     private val client: SshClient,
@@ -58,44 +65,86 @@ class MinaSshConnection private constructor(
 
         fun connect(
             endpoint: SshEndpoint,
-            password: CharArray,
-            hostKeyVerifier: HostKeyVerifier,
+            authentication: SshAuthentication,
+            knownHostsStore: KnownHostsStore,
+            unknownHostVerifier: HostKeyVerifier,
+            changedHostKeyHandler: ChangedHostKeyHandler = ChangedHostKeyHandler {},
         ): MinaSshConnection {
-            require(password.isNotEmpty()) { "SSH password must not be empty" }
+            val publicKeys = if (authentication is SshAuthentication.PublicKey) {
+                loadPublicKeyIdentities(authentication)
+            } else {
+                emptyList()
+            }
 
             val client = SshClient.setUpDefaultClient().apply {
                 hostConfigEntryResolver = HostConfigEntryResolver.EMPTY
                 keyIdentityProvider = KeyIdentityProvider.EMPTY_KEYS_PROVIDER
-                userAuthFactories = listOf(UserAuthPasswordFactory.INSTANCE)
-                serverKeyVerifier = org.apache.sshd.client.keyverifier.ServerKeyVerifier { _, remoteAddress, serverKey ->
-                    hostKeyVerifier.verify(
-                        PresentedHostKey(
-                            remoteAddress = remoteAddress.toString(),
-                            algorithm = KeyUtils.getKeyType(serverKey),
-                            fingerprint = KeyUtils.getFingerPrint(serverKey),
-                        ),
-                    )
+                userAuthFactories = when (authentication) {
+                    is SshAuthentication.Password -> listOf(UserAuthPasswordFactory.INSTANCE)
+                    is SshAuthentication.PublicKey -> listOf(UserAuthPublicKeyFactory.INSTANCE)
                 }
+                serverKeyVerifier = knownHostsStore.createServerKeyVerifier(
+                    unknownHostVerifier,
+                    changedHostKeyHandler,
+                )
             }
             client.start()
 
             var session: ClientSession? = null
             try {
-                session = client.connect(endpoint.username, endpoint.host, endpoint.port)
+                val connectedSession = client.connect(endpoint.username, endpoint.host, endpoint.port)
                     .verify(CONNECT_TIMEOUT)
                     .session
-                val passwordIdentity = String(password)
-                session.addPasswordIdentity(passwordIdentity)
+                session = connectedSession
+                var passwordIdentity: String? = null
                 try {
-                    session.auth().verify(AUTH_TIMEOUT)
+                    passwordIdentity = if (authentication is SshAuthentication.Password) {
+                        val password = authentication.copyValue()
+                        try {
+                            String(password).also(connectedSession::addPasswordIdentity)
+                        } finally {
+                            Arrays.fill(password, '\u0000')
+                        }
+                    } else {
+                        null
+                    }
+                    publicKeys.forEach(connectedSession::addPublicKeyIdentity)
+                    connectedSession.auth().verify(AUTH_TIMEOUT)
                 } finally {
-                    session.removePasswordIdentity(passwordIdentity)
+                    passwordIdentity?.let(connectedSession::removePasswordIdentity)
+                    publicKeys.forEach(connectedSession::removePublicKeyIdentity)
                 }
-                return MinaSshConnection(client, session, endpoint)
+                return MinaSshConnection(client, connectedSession, endpoint)
             } catch (failure: Exception) {
                 session?.close(true)
                 client.close(true)
                 throw failure
+            }
+        }
+
+        private fun loadPublicKeyIdentities(authentication: SshAuthentication.PublicKey): List<KeyPair> {
+            require(Files.isRegularFile(authentication.privateKeyFile)) {
+                "Private key file does not exist: ${authentication.privateKeyFile}"
+            }
+            val permissionViolation = KeyUtils.validateStrictKeyFilePermissions(authentication.privateKeyFile)
+            require(permissionViolation == null) {
+                "Private key file permissions are not secure: ${permissionViolation.key}"
+            }
+            val passphrase = authentication.copyPassphrase()
+            try {
+                val passwordProvider = if (passphrase.isEmpty()) {
+                    FilePasswordProvider.EMPTY
+                } else {
+                    FilePasswordProvider { _, _, _ -> String(passphrase) }
+                }
+                val resource = PathResource(authentication.privateKeyFile)
+                val identities = resource.openInputStream().use { input ->
+                    SecurityUtils.loadKeyPairIdentities(null, resource, input, passwordProvider).toList()
+                }
+                require(identities.isNotEmpty()) { "Private key file contains no identities" }
+                return identities
+            } finally {
+                Arrays.fill(passphrase, '\u0000')
             }
         }
     }

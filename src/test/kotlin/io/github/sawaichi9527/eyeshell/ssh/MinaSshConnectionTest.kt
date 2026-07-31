@@ -4,9 +4,16 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
+import java.nio.file.attribute.PosixFilePermission
+import java.security.KeyPair
+import java.security.KeyPairGenerator
 import java.time.Duration
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import org.apache.sshd.common.config.keys.KeyUtils
+import org.apache.sshd.common.config.keys.writer.openssh.OpenSSHKeyEncryptionContext
+import org.apache.sshd.common.config.keys.writer.openssh.OpenSSHKeyPairResourceWriter
 import org.apache.sshd.server.Environment
 import org.apache.sshd.server.ExitCallback
 import org.apache.sshd.server.SshServer
@@ -29,24 +36,32 @@ class MinaSshConnectionTest {
 
     private lateinit var server: SshServer
     private lateinit var password: CharArray
+    private lateinit var userKeyPair: KeyPair
 
     @BeforeEach
     fun startServer() {
         password = UUID.randomUUID().toString().toCharArray()
-        server = SshServer.setUpDefaultServer().apply {
+        userKeyPair = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
+        server = createServer(0, temporaryDirectory.resolve("host-key.ser"))
+    }
+
+    private fun createServer(serverPort: Int, hostKeyFile: Path): SshServer =
+        SshServer.setUpDefaultServer().apply {
             host = "127.0.0.1"
-            port = 0
-            keyPairProvider = SimpleGeneratorHostKeyProvider(temporaryDirectory.resolve("host-key.ser")).apply {
+            port = serverPort
+            keyPairProvider = SimpleGeneratorHostKeyProvider(hostKeyFile).apply {
                 algorithm = "RSA"
                 keySize = 2048
             }
             passwordAuthenticator = org.apache.sshd.server.auth.password.PasswordAuthenticator { username, candidate, _ ->
                 username == USERNAME && password.contentEquals(candidate.toCharArray())
             }
+            publickeyAuthenticator = org.apache.sshd.server.auth.pubkey.PublickeyAuthenticator { username, key, _ ->
+                username == USERNAME && KeyUtils.compareKeys(userKeyPair.public, key)
+            }
             shellFactory = ShellFactory { EchoShellCommand() }
             start()
         }
-    }
 
     @AfterEach
     fun stopServer() {
@@ -58,9 +73,16 @@ class MinaSshConnectionTest {
     fun `opens authenticated shell after explicit host key acceptance`() {
         val presentedKey = AtomicReference<PresentedHostKey>()
         val endpoint = SshEndpoint("127.0.0.1", server.port, USERNAME)
-        val connection = MinaSshConnection.connect(endpoint, password.copyOf()) { hostKey ->
-            presentedKey.set(hostKey)
-            true
+        val connection = SshAuthentication.Password(password).use { authentication ->
+            MinaSshConnection.connect(
+                endpoint = endpoint,
+                authentication = authentication,
+                knownHostsStore = knownHostsStore(),
+                unknownHostVerifier = HostKeyVerifier { hostKey ->
+                    presentedKey.set(hostKey)
+                    true
+                },
+            )
         }
         val terminal = connection.openTerminal(columns = 100, rows = 30)
 
@@ -85,7 +107,14 @@ class MinaSshConnectionTest {
         val endpoint = SshEndpoint("127.0.0.1", server.port, USERNAME)
 
         assertThrows(Exception::class.java) {
-            MinaSshConnection.connect(endpoint, password.copyOf()) { false }
+            SshAuthentication.Password(password).use { authentication ->
+                MinaSshConnection.connect(
+                    endpoint,
+                    authentication,
+                    knownHostsStore(),
+                    HostKeyVerifier { false },
+                )
+            }
         }
     }
 
@@ -94,9 +123,109 @@ class MinaSshConnectionTest {
         val endpoint = SshEndpoint("127.0.0.1", server.port, USERNAME)
 
         assertThrows(Exception::class.java) {
-            MinaSshConnection.connect(endpoint, UUID.randomUUID().toString().toCharArray()) { true }
+            SshAuthentication.Password(UUID.randomUUID().toString().toCharArray()).use { authentication ->
+                MinaSshConnection.connect(
+                    endpoint,
+                    authentication,
+                    knownHostsStore(),
+                    HostKeyVerifier { true },
+                )
+            }
         }
     }
+
+    @Test
+    fun `persists accepted host key and rejects a changed key`() {
+        val endpoint = SshEndpoint("127.0.0.1", server.port, USERNAME)
+        val knownHosts = knownHostsStore()
+        val prompts = AtomicInteger()
+
+        connectWithPassword(endpoint, knownHosts) {
+            prompts.incrementAndGet()
+            true
+        }.close()
+        assertTrue(knownHosts.file.toFile().readText().contains("ssh-rsa"))
+
+        connectWithPassword(endpoint, knownHosts) {
+            prompts.incrementAndGet()
+            false
+        }.close()
+        assertEquals(1, prompts.get())
+
+        val port = server.port
+        server.stop(true)
+        server = createServer(port, temporaryDirectory.resolve("changed-host-key.ser"))
+        val changedKey = AtomicReference<ChangedHostKey>()
+        assertThrows(Exception::class.java) {
+            SshAuthentication.Password(password).use { authentication ->
+                MinaSshConnection.connect(
+                    endpoint = endpoint,
+                    authentication = authentication,
+                    knownHostsStore = knownHosts,
+                    unknownHostVerifier = HostKeyVerifier { true },
+                    changedHostKeyHandler = ChangedHostKeyHandler(changedKey::set),
+                )
+            }
+        }
+        assertTrue(changedKey.get().expectedFingerprint.startsWith("SHA256:"))
+        assertTrue(changedKey.get().actualFingerprint.startsWith("SHA256:"))
+        assertFalse(changedKey.get().expectedFingerprint == changedKey.get().actualFingerprint)
+    }
+
+    @Test
+    fun `authenticates with encrypted OpenSSH private key`() {
+        val passphrase = UUID.randomUUID().toString().toCharArray()
+        val privateKeyFile = temporaryDirectory.resolve("client-key")
+        val encryption = OpenSSHKeyEncryptionContext().apply {
+            setPassword(String(passphrase))
+            cipherName = "AES"
+            cipherMode = "CTR"
+            cipherType = "256"
+        }
+        java.nio.file.Files.newOutputStream(privateKeyFile).use { output ->
+            OpenSSHKeyPairResourceWriter.INSTANCE.writePrivateKey(userKeyPair, "", encryption, output)
+        }
+        try {
+            java.nio.file.Files.setPosixFilePermissions(
+                privateKeyFile,
+                setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE),
+            )
+        } catch (_: UnsupportedOperationException) {
+            // Windows ACLs are outside this Linux-focused test assertion.
+        }
+        val connection = try {
+            val endpoint = SshEndpoint("127.0.0.1", server.port, USERNAME)
+            SshAuthentication.PublicKey(privateKeyFile, passphrase).use { authentication ->
+                MinaSshConnection.connect(
+                    endpoint,
+                    authentication,
+                    knownHostsStore(),
+                    HostKeyVerifier { true },
+                )
+            }
+        } finally {
+            encryption.setPassword("")
+            passphrase.fill('\u0000')
+        }
+
+        val terminal = connection.openTerminal()
+        try {
+            assertTrue(readUntil(terminal, "ready\r\n").contains("ready\r\n"))
+        } finally {
+            terminal.close()
+        }
+    }
+
+    private fun connectWithPassword(
+        endpoint: SshEndpoint,
+        knownHosts: KnownHostsStore,
+        verifier: HostKeyVerifier,
+    ): MinaSshConnection = SshAuthentication.Password(password).use { authentication ->
+        MinaSshConnection.connect(endpoint, authentication, knownHosts, verifier)
+    }
+
+    private fun knownHostsStore(): KnownHostsStore =
+        KnownHostsStore(temporaryDirectory.resolve("config").resolve("known_hosts"))
 
     private fun readUntil(
         terminal: io.github.sawaichi9527.eyeshell.terminal.TerminalSession,

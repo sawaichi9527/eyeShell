@@ -1,7 +1,7 @@
 # eyeShell 產品規格書
 
-- 文件版本：v0.6
-- 狀態：M1B SSH Terminal Baseline
+- 文件版本：v0.7
+- 狀態：M1C SSH Authentication Baseline
 - 更新日期：2026-08-01
 - 專案：`sawaichi9527/eyeShell`
 
@@ -392,7 +392,19 @@ M1B 先完成以下最小 vertical slice：
 - UTF-8 雙向 I/O 與 terminal resize
 - connect、host-key confirmation wait 與 authentication 不阻塞 Swing EDT
 
-Public Key、Private Key Passphrase、keyboard-interactive、`ssh-agent` 與持久化 Known Hosts 在後續 Phase 1 vertical slice 實作，不加入空介面或假流程。
+M1C 增加：
+
+- Public Key authentication，由使用者明確選取 Private Key File
+- Optional Private Key Passphrase，僅存在本次連線記憶體，不寫入設定、SQLite 或 Log
+- POSIX Private Key File 必須通過 OpenSSH-style strict permission validation
+- eyeShell 專用、OpenSSH-compatible Known Hosts file
+- Linux 路徑：`$XDG_CONFIG_HOME/eyeShell/known_hosts`，未設定時使用 `~/.config/eyeShell/known_hosts`
+- Windows 路徑：`%APPDATA%\eyeShell\known_hosts`，未設定時使用 `%USERPROFILE%\AppData\Roaming\eyeShell\known_hosts`
+- Unknown Host Key 經使用者確認後才 append；若無法安全寫入則連線失敗
+- Changed Host Key 一律拒絕，顯示 expected／actual SHA-256 fingerprint，不提供自動覆寫
+- POSIX app directory／file 權限分別限制為 `0700`／`0600`；拒絕 app directory 或 Known Hosts file symbolic link
+
+keyboard-interactive 與 `ssh-agent` 在後續 Phase 1 vertical slice 實作，不加入空介面或假流程。
 
 ### 8.3 Transport 共用
 
