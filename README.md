@@ -90,12 +90,14 @@ Pinned M0 development versions:
 | Kotlin JVM Plugin | 2.4.10 |
 | FlatLaf | 3.7.2 |
 | JUnit Jupiter | 6.1.2 |
+| JediTerm | 3.74 (`377b76e682a5f86bcbb18a318386f530dbebf5c1`) |
 
 ### Local setup and validation
 
 Linux x86_64:
 
 ```bash
+git submodule update --init --recursive
 ./scripts/bootstrap-jdk.sh
 ./scripts/gradlew-local.sh test
 ./scripts/gradlew-local.sh check
@@ -105,6 +107,7 @@ Linux x86_64:
 Windows x64 PowerShell:
 
 ```powershell
+git submodule update --init --recursive
 .\scripts\bootstrap-jdk.ps1
 .\scripts\gradlew-local.ps1 test
 .\scripts\gradlew-local.ps1 check
@@ -123,4 +126,4 @@ eyeShell 的桌面工作台參考 [FinalShell 官方介紹頁](https://www.hostb
 
 ## Status
 
-M0 桌面骨架已建立：project-local JDK／Gradle、Kotlin build、深色 FlatLaf 工作台與 headless Swing layout test 可用。SSH、Terminal emulation、SFTP、Monitoring、Persistence 與 Packaging 尚未實作。
+M1A synthetic terminal baseline 已建立：project-local JDK／Gradle、深色 FlatLaf 工作台，以及 pinned JediTerm core/ui terminal emulation 可用。Deterministic tests 覆蓋 ANSI、Unicode/CJK、scrollback、soft-wrap、hard break、alternate screen、純文字 streaming export 與 terminal view layout boundary。SSH、SFTP、Monitoring、Persistence 與 Packaging 尚未實作。

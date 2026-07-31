@@ -1,5 +1,6 @@
 package io.github.sawaichi9527.eyeshell.ui
 
+import io.github.sawaichi9527.eyeshell.terminal.TerminalView
 import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Dimension
@@ -15,17 +16,26 @@ import javax.swing.JSplitPane
 import javax.swing.JTabbedPane
 import javax.swing.SwingConstants
 
-class EyeShellWindow : JFrame("eyeShell") {
+class EyeShellWindow(
+    private val terminalView: TerminalView,
+) : JFrame("eyeShell") {
     init {
-        defaultCloseOperation = EXIT_ON_CLOSE
+        defaultCloseOperation = DISPOSE_ON_CLOSE
         minimumSize = Dimension(960, 640)
         size = Dimension(1280, 800)
-        contentPane = WorkbenchPanel()
+        contentPane = WorkbenchPanel(terminalView)
         setLocationRelativeTo(null)
+    }
+
+    override fun dispose() {
+        terminalView.close()
+        super.dispose()
     }
 }
 
-class WorkbenchPanel : JPanel(BorderLayout()) {
+class WorkbenchPanel(
+    private val terminalView: TerminalView? = null,
+) : JPanel(BorderLayout()) {
     private val toolDock = CollapsibleToolDock()
     private val toolDockToggle = JButton("Show tools").apply {
         name = "toolDockToggle"
@@ -81,8 +91,12 @@ class WorkbenchPanel : JPanel(BorderLayout()) {
         add(JPanel(BorderLayout()).apply {
             name = "terminalWorkspace"
             getAccessibleContext().accessibleName = "Terminal workspace"
-            border = BorderFactory.createEmptyBorder(24, 24, 24, 24)
-            add(emptyState("No active terminal session."), BorderLayout.CENTER)
+            if (terminalView == null) {
+                border = BorderFactory.createEmptyBorder(24, 24, 24, 24)
+                add(emptyState("No active terminal session."), BorderLayout.CENTER)
+            } else {
+                add(terminalView.component, BorderLayout.CENTER)
+            }
         }, BorderLayout.CENTER)
         add(JPanel(BorderLayout()).apply {
             name = "terminalBottom"

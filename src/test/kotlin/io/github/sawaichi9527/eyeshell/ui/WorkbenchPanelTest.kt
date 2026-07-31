@@ -1,9 +1,13 @@
 package io.github.sawaichi9527.eyeshell.ui
 
+import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
+import io.github.sawaichi9527.eyeshell.terminal.TerminalView
 import java.awt.Component
 import java.awt.Container
 import java.awt.Dimension
+import java.io.Writer
 import javax.swing.JButton
+import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.JSplitPane
 import javax.swing.JTabbedPane
@@ -16,6 +20,17 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class WorkbenchPanelTest {
+    @Test
+    fun `terminal view is embedded without exposing its implementation to the workbench`() {
+        SwingUtilities.invokeAndWait {
+            val terminal = JPanel().apply { name = "testTerminal" }
+            val panel = WorkbenchPanel(TestTerminalView(terminal))
+
+            assertSame(terminal, panel.findByName("testTerminal"))
+            assertSame(panel.findByName("terminalWorkspace"), terminal.parent)
+        }
+    }
+
     @Test
     fun `monitor stays visible while tool dock toggles`() {
         SwingUtilities.invokeAndWait {
@@ -88,4 +103,16 @@ class WorkbenchPanelTest {
         components.any { component ->
             component === target || (component is Container && component.containsComponent(target))
         }
+
+    private class TestTerminalView(
+        override val component: JComponent,
+    ) : TerminalView {
+        override fun attach(session: TerminalSession) = Unit
+
+        override fun writeAllOutput(writer: Writer) = Unit
+
+        override fun clearScrollback() = Unit
+
+        override fun close() = Unit
+    }
 }

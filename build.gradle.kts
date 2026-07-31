@@ -19,6 +19,9 @@ application {
 
 dependencies {
     implementation("com.formdev:flatlaf:3.7.2")
+    implementation(project(":jediterm-core"))
+    implementation(project(":jediterm-ui"))
+    runtimeOnly("org.slf4j:slf4j-jdk14:2.0.9")
 
     testImplementation(platform("org.junit:junit-bom:6.1.2"))
     testImplementation("org.junit.jupiter:junit-jupiter")

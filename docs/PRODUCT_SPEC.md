@@ -1,8 +1,8 @@
 # eyeShell 產品規格書
 
-- 文件版本：v0.4
-- 狀態：Initial Baseline
-- 更新日期：2026-07-31
+- 文件版本：v0.5
+- 狀態：M1A Terminal Baseline
+- 更新日期：2026-08-01
 - 專案：`sawaichi9527/eyeShell`
 
 ## 1. 產品定位
@@ -172,7 +172,7 @@
 | UI | Swing + FlatLaf 3.7.2 |
 | Test | JUnit Jupiter 6.1.2 |
 | Layout | MigLayout 或自有 Layout abstraction |
-| Terminal | JediTerm minimal fork |
+| Terminal | JediTerm 3.74 pinned core/ui source |
 | SSH/SFTP | Apache MINA SSHD 穩定版 2.x |
 | 即時 Regex | RE2/J-compatible engine |
 | Database | SQLite + Xerial SQLite JDBC |
@@ -416,7 +416,16 @@ Cloud Relay Transport 不列入首版。
 
 ### 9.1 Terminal Engine
 
-首版採用 JediTerm，並建立專案控制的 minimal fork。
+首版採用 JediTerm。M1A 以官方 Repository 的 pinned submodule 提供未修改的 core/ui source；出現第一個必要 patch 前不建立無差異 fork。
+
+M1A 鎖定：
+
+- Upstream：`JetBrains/jediterm`
+- Version：`3.74`
+- Commit：`377b76e682a5f86bcbb18a318386f530dbebf5c1`
+- License option：Apache-2.0
+- Included source：`core`、`ui`
+- Excluded：JediTerm standalone、Pty4J 與 local terminal support
 
 Fork 原則：
 
@@ -427,21 +436,18 @@ Fork 原則：
 
 ### 9.2 Terminal 抽象介面
 
-UI 不得直接依賴 JediTerm 具體實作。
+UI 不得直接依賴 JediTerm 具體實作。M1A 先建立目前 vertical slice 所需的最小邊界：
 
 ```kotlin
-interface TerminalView {
+interface TerminalView : AutoCloseable {
+    val component: JComponent
     fun attach(session: TerminalSession)
-    fun selectVisible()
-    fun selectAllOutput()
-    fun copySelection()
-    fun copyAllOutput()
+    fun writeAllOutput(writer: Writer)
     fun clearScrollback()
-    fun applyHighlightRules(rules: List<HighlightRule>)
 }
 ```
 
-第一版實作為 `JediTermTerminalView`。未來若有足夠效益，才評估 Skia 或 WebGL Renderer。
+Phase 1 依功能實作進度擴充 `selectVisible`、`selectAllOutput`、`copySelection`、`copyAllOutput` 與 `applyHighlightRules`，不預先加入空實作。第一版實作為 `JediTermTerminalView`。未來若有足夠效益，才評估 Skia 或 WebGL Renderer。
 
 ### 9.3 Buffer 分離
 
@@ -919,7 +925,7 @@ Repaint
 | XWayland | 正式 fallback |
 | 32-bit | 完全移除 |
 | 主 UI | Swing + FlatLaf |
-| Terminal | JediTerm minimal fork |
+| Terminal | JediTerm 3.74 pinned at `377b76e`; fork deferred until a patch is required |
 | SSH/SFTP | Apache MINA SSHD 2.x |
 | Database | SQLite |
 | Cloud backend | 不建立 |
@@ -933,7 +939,6 @@ Repaint
 
 - 正式 Logo、圖示與品牌色。
 - Java/JBR 的具體 Distribution 與更新政策。
-- JediTerm fork 的起始 Commit。
 - Apache MINA SSHD 的鎖定版本。
 - RE2/J-compatible Engine 的具體 Library。
 - Windows Installer 是否同時提供 MSI 與 Portable ZIP。

@@ -1,0 +1,3 @@
+[submodule "third-party/jediterm"]
+	path = third-party/jediterm
+	url = https://github.com/JetBrains/jediterm.git

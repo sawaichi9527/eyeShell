@@ -15,3 +15,7 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "eyeShell"
+
+include(":jediterm-core", ":jediterm-ui")
+project(":jediterm-core").projectDir = file("gradle/jediterm/core")
+project(":jediterm-ui").projectDir = file("gradle/jediterm/ui")
