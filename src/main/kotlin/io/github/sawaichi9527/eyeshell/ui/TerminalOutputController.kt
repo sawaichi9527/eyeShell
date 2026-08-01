@@ -33,11 +33,17 @@ internal class TerminalOutputController(
     private var activeTask: Future<*>? = null
     private var outputTask: OutputTask? = null
 
-    fun install(owner: Component) {
+    fun install(
+        owner: Component,
+        addHighlightRule: (() -> Unit)? = null,
+        manageHighlightRules: (() -> Unit)? = null,
+    ) {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal output actions must be installed on the Swing EDT" }
         terminalView.setContextActions(TerminalContextActions(
             copyAllOutput = { copyAll(owner) },
             saveAllOutput = { saveAll(owner) },
+            addHighlightRule = addHighlightRule,
+            manageHighlightRules = manageHighlightRules,
         ))
     }
 

@@ -174,7 +174,7 @@
 | Layout | MigLayout 或自有 Layout abstraction |
 | Terminal | JediTerm 3.74 pinned core/ui source |
 | SSH/SFTP | Apache MINA SSHD 2.19.0 |
-| 即時 Regex | RE2/J-compatible engine |
+| 即時 Regex | Google RE2/J 1.8 |
 | Database | SQLite + Xerial SQLite JDBC |
 | Windows Secret | Windows Credential Manager |
 | Linux Secret | Freedesktop Secret Service |
@@ -465,7 +465,7 @@ M1E-A fork：
 
 - Repository：`sawaichi9527/jediterm`
 - Upstream base：`377b76e682a5f86bcbb18a318386f530dbebf5c1`
-- Pinned fork commit：`c8222751d6105c10043f34dab6bae3d85ef09646`
+- Pinned fork commit：`05ed2077746ed99494709f7e7d98ee85cc2543fd`
 - Buffer patch：在 model lock 內擷取 immutable main-buffer line snapshot，alternate screen active 時讀取 retained main buffer
 - Selection patch：revisioned retained-main bounds、active／all-main／search-main selection scope
 - Search patch：popup override、coordinate result rendering 與 custom Find handler
@@ -632,6 +632,18 @@ Regex 標記只能作為 Renderer Overlay，不可把新的 ANSI Code 寫回原�
 - 不支援跨行 Regex。
 - 不支援高風險 backtracking 特性。
 - 新增規則後先掃描可視範圍，其餘內容以低優先背景工作處理。
+
+M1F Current Session baseline：
+
+- 規則 model 明確限定 `Current Session` scope；Global、Host Group、Specific Host 與 Workspace 留待 persistence/host model 完成後加入
+- 使用 Google RE2/J 1.8，拒絕 backreference 等非 RE2-compatible、高風險 backtracking 語法
+- RE2 match 在背景 virtual thread 執行，規則替換與 renderer publication 在 Swing EDT；invalid pattern 不替換既有 active rules
+- 先發布目前 viewport 的 logical-line spans，再掃描完整 retained main buffer；未變更 logical-line text 透過 bounded one-generation match cache 重用結果
+- 沿用 main-buffer revision、generation、cooperative cancellation 與 coalesced model notification，拒絕 stale renderer overlay
+- soft-wrap 視為同一 logical line、hard break 阻止跨行 match，DWC marker 不參與 regex 並映射回 Unicode/CJK terminal cells
+- Highlight 是獨立 coordinate renderer overlay，繪製順序為 Highlight、Search、Selection、Cursor；alternate screen active 時不顯示 retained-main highlight
+- `Merge` 保留原 ANSI style 並疊加規則；`Override` 清除原 ANSI style 與較低優先 highlight，再由規則指定 color/bold/italic/underline
+- 規則只存在目前 application session，不寫入 SQLite、log 或其他持久儲存
 
 ---
 
@@ -992,8 +1004,9 @@ Repaint
 | XWayland | 正式 fallback |
 | 32-bit | 完全移除 |
 | 主 UI | Swing + FlatLaf |
-| Terminal | JediTerm 3.74 project fork pinned at `c822275` (upstream base `377b76e`) |
+| Terminal | JediTerm 3.74 project fork pinned at `05ed207` (upstream base `377b76e`) |
 | SSH/SFTP | Apache MINA SSHD 2.19.0 |
+| 即時 Regex | Google RE2/J 1.8 |
 | Database | SQLite |
 | Cloud backend | 不建立 |
 | 開發工具鏈 | Project-local JDK／Gradle／Kotlin，不修改系統全域環境 |
@@ -1006,7 +1019,6 @@ Repaint
 
 - 正式 Logo、圖示與品牌色。
 - Java/JBR 的具體 Distribution 與更新政策。
-- RE2/J-compatible Engine 的具體 Library。
 - Windows Installer 是否同時提供 MSI 與 Portable ZIP。
 - Linux 是否同時提供 DEB 與 Portable tar.gz。
 - Phase 1 的量化效能門檻與驗收設備矩陣。

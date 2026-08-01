@@ -25,6 +25,7 @@ class EyeShellWindow(
     private val closeAction: () -> Unit = {},
 ) : JFrame("eyeShell") {
     private val outputController = TerminalOutputController(terminalView)
+    private val highlightController = TerminalHighlightController(terminalView)
     private val workbench = WorkbenchPanel(
         terminalView,
         connectAction?.let { action -> { action(this) } },
@@ -36,7 +37,11 @@ class EyeShellWindow(
         size = Dimension(1280, 800)
         contentPane = workbench
         setLocationRelativeTo(null)
-        outputController.install(this)
+        outputController.install(
+            this,
+            addHighlightRule = { highlightController.addRule(this) },
+            manageHighlightRules = { highlightController.manageRules(this) },
+        )
     }
 
     fun attachTerminal(session: TerminalSession) {

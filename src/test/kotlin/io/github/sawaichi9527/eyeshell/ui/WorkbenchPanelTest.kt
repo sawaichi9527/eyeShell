@@ -2,6 +2,7 @@ package io.github.sawaichi9527.eyeshell.ui
 
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
+import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
 import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputSnapshot
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
 import java.awt.Component
@@ -149,6 +150,8 @@ class WorkbenchPanelTest {
         override fun selectAllOutput() = Unit
 
         override fun showSearch() = Unit
+
+        override fun setHighlightRules(rules: List<TerminalHighlightRule>) = Unit
 
         override fun clearScrollback() = Unit
 

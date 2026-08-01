@@ -50,6 +50,20 @@ class JediTermSearchControllerTest {
         assertTrue(searchMainBuffer(snapshot, "info", ignoreCase = false).matches.size == 1)
     }
 
+    @Test
+    fun `visible logical line scan includes both sides of a soft wrap`() {
+        val snapshot = MainBufferSnapshot(
+            1,
+            emptyList(),
+            listOf(line("soft", wrapped = true), line("wrap"), line("outside")),
+        )
+        val scanned = mutableListOf<String>()
+
+        snapshot.forEachLogicalLineInRows(1, 1) { text, _ -> scanned += text }
+
+        assertEquals(listOf("softwrap"), scanned)
+    }
+
     private fun line(text: String, wrapped: Boolean = false): TerminalLineSnapshot =
         TerminalLineSnapshot(text, wrapped, text.isEmpty())
 }

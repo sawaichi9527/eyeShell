@@ -2,6 +2,8 @@ package io.github.sawaichi9527.eyeshell.terminal.jediterm
 
 import io.github.sawaichi9527.eyeshell.terminal.SyntheticTerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
+import io.github.sawaichi9527.eyeshell.terminal.HighlightMergeMode
+import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
 import java.io.StringWriter
 import java.awt.Component
 import java.awt.Container
@@ -116,12 +118,51 @@ class JediTermTerminalViewTest {
     }
 
     @Test
+    fun `background highlight publishes a revisioned main buffer overlay`() {
+        val view = onEdt {
+            JediTermTerminalView(columns = 40, rows = 3).also {
+                it.attach(SyntheticTerminalSession.fromText("INFO error INFO\r\n"))
+            }
+        }
+
+        try {
+            await(Duration.ofSeconds(5)) { !view.isSessionRunning }
+            onEdt {
+                view.setHighlightRules(listOf(TerminalHighlightRule(
+                    name = "Errors",
+                    pattern = "error",
+                    matchCase = false,
+                    enabled = true,
+                    priority = 0,
+                    foregroundRgb = 0xFFFFFF,
+                    backgroundRgb = 0xAA0000,
+                    bold = true,
+                    italic = false,
+                    underline = false,
+                    mergeMode = HighlightMergeMode.MERGE,
+                )))
+            }
+            await(Duration.ofSeconds(5)) { onEdt { view.coordinateHighlightResult?.getSpans(0)?.size == 1 } }
+            assertEquals(1, onEdt { view.coordinateHighlightResult?.getSpans(0)?.size })
+        } finally {
+            onEdt { view.close() }
+        }
+    }
+
+    @Test
     fun `context output actions enable after a session is attached`() {
         val copyCount = AtomicInteger()
         val saveCount = AtomicInteger()
+        val addHighlightCount = AtomicInteger()
+        val manageHighlightCount = AtomicInteger()
         val view = onEdt {
             JediTermTerminalView().also {
-                it.setContextActions(TerminalContextActions(copyCount::incrementAndGet, saveCount::incrementAndGet))
+                it.setContextActions(TerminalContextActions(
+                    copyCount::incrementAndGet,
+                    saveCount::incrementAndGet,
+                    addHighlightCount::incrementAndGet,
+                    manageHighlightCount::incrementAndGet,
+                ))
             }
         }
 
@@ -147,19 +188,23 @@ class JediTermTerminalViewTest {
                 ), actions.map { it.name })
                 assertEquals(listOf(2, 6, 9), actions.indices.filter { actions[it].isSeparated })
                 assertFalse(actions.single { it.name == "Copy" }.isEnabled(null))
-                assertFalse(actions.single { it.name == "Add Color Highlight Rule..." }.isEnabled(null))
-                assertFalse(actions.single { it.name == "Manage Color Highlight Rules..." }.isEnabled(null))
+                assertTrue(actions.single { it.name == "Add Color Highlight Rule..." }.isEnabled(null))
+                assertTrue(actions.single { it.name == "Manage Color Highlight Rules..." }.isEnabled(null))
 
                 actions.single { it.name == "Select All Output" }.actionPerformed(null)
                 assertTrue(view.isRetainedMainSelection)
                 actions.single { it.name == "Copy" }.actionPerformed(null)
                 actions.single { it.name == "Save All Output..." }.actionPerformed(null)
                 actions.single { it.name == "Search..." }.actionPerformed(null)
+                actions.single { it.name == "Add Color Highlight Rule..." }.actionPerformed(null)
+                actions.single { it.name == "Manage Color Highlight Rules..." }.actionPerformed(null)
                 assertTrue(view.searchComponent.isVisible)
             }
 
             assertEquals(1, copyCount.get())
             assertEquals(1, saveCount.get())
+            assertEquals(1, addHighlightCount.get())
+            assertEquals(1, manageHighlightCount.get())
             assertFalse(onEdt { view.contextActions.single { it.name == "Paste" }.isEnabled(null) })
         } finally {
             onEdt { view.close() }

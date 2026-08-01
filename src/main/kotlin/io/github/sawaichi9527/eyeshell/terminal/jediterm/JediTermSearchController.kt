@@ -4,7 +4,6 @@ import com.jediterm.terminal.model.MainBufferSnapshot
 import com.jediterm.terminal.model.TerminalModelListener
 import com.jediterm.terminal.ui.JediTermWidget
 import com.jediterm.terminal.ui.TerminalSearchResult
-import com.jediterm.terminal.util.CharUtils
 import java.awt.BorderLayout
 import java.awt.FlowLayout
 import java.awt.event.KeyAdapter
@@ -161,55 +160,19 @@ internal fun searchMainBuffer(
 ): TerminalSearchResult {
     if (pattern.isEmpty()) return TerminalSearchResult(snapshot.revision, emptyList())
     val matches = mutableListOf<TerminalSearchResult.Match>()
-    val text = StringBuilder()
-    val cells = mutableListOf<SearchCell>()
-    val lines = snapshot.historyLines.mapIndexed { index, line -> (-snapshot.historyLines.size + index) to line } +
-        snapshot.screenLines.mapIndexed { index, line -> index to line }
-
-    fun searchLogicalLine() {
+    snapshot.forEachLogicalLine { text, cells ->
         var offset = 0
         while (offset <= text.length - pattern.length) {
             if (Thread.currentThread().isInterrupted) throw InterruptedException()
             if (text.regionMatches(offset, pattern, 0, pattern.length, ignoreCase)) {
-                val matchedCells = cells.subList(offset, offset + pattern.length)
-                val spans = mutableListOf<TerminalSearchResult.Span>()
-                matchedCells.forEach { cell ->
-                    val last = spans.lastOrNull()
-                    if (last != null && last.row == cell.row && last.endCell == cell.startCell) {
-                        spans[spans.lastIndex] = TerminalSearchResult.Span(last.row, last.startCell, cell.endCell)
-                    } else {
-                        spans += TerminalSearchResult.Span(cell.row, cell.startCell, cell.endCell)
-                    }
-                }
-                matches += TerminalSearchResult.Match(spans)
+                matches += TerminalSearchResult.Match(cells.spans(offset, offset + pattern.length).map {
+                    TerminalSearchResult.Span(it.row, it.startCell, it.endCell)
+                })
                 offset += pattern.length
             } else {
                 offset++
             }
         }
-        text.setLength(0)
-        cells.clear()
     }
-
-    lines.forEach { (row, line) ->
-        if (Thread.currentThread().isInterrupted) throw InterruptedException()
-        line.text.forEachIndexed { cell, character ->
-            if (character == CharUtils.DWC) {
-                val previous = cells.lastOrNull()
-                if (previous != null && previous.row == row) previous.endCell = cell + 1
-            } else {
-                text.append(character)
-                cells += SearchCell(row, cell, cell + 1)
-            }
-        }
-        if (!line.isWrapped) searchLogicalLine()
-    }
-    if (text.isNotEmpty()) searchLogicalLine()
     return TerminalSearchResult(snapshot.revision, matches)
 }
-
-private data class SearchCell(
-    val row: Int,
-    val startCell: Int,
-    var endCell: Int,
-)

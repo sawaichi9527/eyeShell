@@ -62,7 +62,7 @@ RDP 與雲端 SSH Relay 暫列低優先，首版不實作。
 - JediTerm minimal fork
 - Apache MINA SSHD 2.19.0
 - SQLite + Xerial JDBC
-- RE2/J-compatible Regex engine
+- Google RE2/J 1.8
 - Windows Credential Manager
 - Freedesktop Secret Service
 - `jlink` + `jpackage`
@@ -92,6 +92,7 @@ Pinned M0 development versions:
 | JUnit Jupiter | 6.1.2 |
 | JediTerm | 3.74 (`377b76e682a5f86bcbb18a318386f530dbebf5c1`) |
 | Apache MINA SSHD | 2.19.0 |
+| Google RE2/J | 1.8 |
 
 ### Local setup and validation
 

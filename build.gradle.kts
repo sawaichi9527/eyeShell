@@ -19,6 +19,7 @@ application {
 
 dependencies {
     implementation("com.formdev:flatlaf:3.7.2")
+    implementation("com.google.re2j:re2j:1.8")
     implementation("org.apache.sshd:sshd-core:2.19.0")
     implementation(project(":jediterm-core"))
     implementation(project(":jediterm-ui"))

@@ -13,6 +13,7 @@ import com.jediterm.terminal.ui.settings.DefaultSettingsProvider
 import com.jediterm.terminal.util.CharUtils
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
+import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
 import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputSnapshot
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
 import java.io.Writer
@@ -25,6 +26,7 @@ class JediTermTerminalView(
 ) : TerminalView {
     private val widget = JediTermWidget(columns, rows, EyeShellTerminalSettings())
     private val searchController = JediTermSearchController(widget)
+    private val highlightController = JediTermHighlightController(widget)
     private val contextActionProvider = ContextActionProvider(widget, searchController::show)
 
     init {
@@ -72,6 +74,10 @@ class JediTermTerminalView(
         searchController.show()
     }
 
+    override fun setHighlightRules(rules: List<TerminalHighlightRule>) {
+        highlightController.setRules(rules)
+    }
+
     override fun clearScrollback() {
         check(SwingUtilities.isEventDispatchThread()) { "Scrollback must be cleared on the Swing EDT" }
         check(!widget.terminalTextBuffer.isUsingAlternateBuffer) {
@@ -104,7 +110,11 @@ class JediTermTerminalView(
     internal val coordinateSearchResult
         get() = widget.terminalPanel.coordinateFindResult
 
+    internal val coordinateHighlightResult
+        get() = widget.terminalPanel.coordinateHighlightResult
+
     override fun close() {
+        highlightController.close()
         searchController.close()
         widget.close()
     }
@@ -140,10 +150,10 @@ private class ContextActionProvider(
         action("Search...", separated = true, enabled = { hasSession }) {
             showSearch()
         },
-        action("Add Color Highlight Rule...", enabled = { actions?.addHighlightRule != null }) {
+        action("Add Color Highlight Rule...", enabled = { hasSession && actions?.addHighlightRule != null }) {
             actions?.addHighlightRule?.invoke()
         },
-        action("Manage Color Highlight Rules...", enabled = { actions?.manageHighlightRules != null }) {
+        action("Manage Color Highlight Rules...", enabled = { hasSession && actions?.manageHighlightRules != null }) {
             actions?.manageHighlightRules?.invoke()
         },
         action("Clear Buffer", separated = true, enabled = {

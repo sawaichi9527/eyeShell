@@ -20,6 +20,8 @@ interface TerminalView : AutoCloseable {
 
     fun showSearch()
 
+    fun setHighlightRules(rules: List<TerminalHighlightRule>)
+
     fun clearScrollback()
 }
 
@@ -33,3 +35,34 @@ data class TerminalContextActions(
     val addHighlightRule: (() -> Unit)? = null,
     val manageHighlightRules: (() -> Unit)? = null,
 )
+
+data class TerminalHighlightRule(
+    val name: String,
+    val pattern: String,
+    val scope: HighlightScope = HighlightScope.CURRENT_SESSION,
+    val matchCase: Boolean,
+    val enabled: Boolean,
+    val priority: Int,
+    val foregroundRgb: Int?,
+    val backgroundRgb: Int?,
+    val bold: Boolean,
+    val italic: Boolean,
+    val underline: Boolean,
+    val mergeMode: HighlightMergeMode,
+) {
+    init {
+        require(name.isNotBlank()) { "Highlight rule name must not be blank" }
+        require(pattern.isNotEmpty()) { "Highlight pattern must not be empty" }
+        require(foregroundRgb == null || foregroundRgb in 0..0xFFFFFF) { "Invalid foreground color" }
+        require(backgroundRgb == null || backgroundRgb in 0..0xFFFFFF) { "Invalid background color" }
+    }
+}
+
+enum class HighlightMergeMode {
+    MERGE,
+    OVERRIDE,
+}
+
+enum class HighlightScope {
+    CURRENT_SESSION,
+}

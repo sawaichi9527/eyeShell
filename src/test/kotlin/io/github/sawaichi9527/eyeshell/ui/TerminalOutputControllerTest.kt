@@ -1,6 +1,7 @@
 package io.github.sawaichi9527.eyeshell.ui
 
 import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
+import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
 import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputSnapshot
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
@@ -110,6 +111,8 @@ class TerminalOutputControllerTest {
 
         override fun showSearch() = Unit
 
+        override fun setHighlightRules(rules: List<TerminalHighlightRule>) = Unit
+
         override fun clearScrollback() = Unit
 
         override fun close() = Unit
@@ -145,6 +148,8 @@ class TerminalOutputControllerTest {
         override fun selectAllOutput() = Unit
 
         override fun showSearch() = Unit
+
+        override fun setHighlightRules(rules: List<TerminalHighlightRule>) = Unit
 
         override fun clearScrollback() = Unit
 
