@@ -1,7 +1,7 @@
 package io.github.sawaichi9527.eyeshell.ui
 
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
-import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputActions
+import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
 import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputSnapshot
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
 import java.awt.Component
@@ -142,7 +142,13 @@ class WorkbenchPanelTest {
 
         override fun captureAllOutput(): TerminalOutputSnapshot = TerminalOutputSnapshot {}
 
-        override fun setOutputActions(actions: TerminalOutputActions) = Unit
+        override fun setContextActions(actions: TerminalContextActions) = Unit
+
+        override fun selectVisible() = Unit
+
+        override fun selectAllOutput() = Unit
+
+        override fun showSearch() = Unit
 
         override fun clearScrollback() = Unit
 

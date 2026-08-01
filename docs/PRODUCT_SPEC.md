@@ -465,8 +465,10 @@ M1E-A fork：
 
 - Repository：`sawaichi9527/jediterm`
 - Upstream base：`377b76e682a5f86bcbb18a318386f530dbebf5c1`
-- Pinned fork commit：`765500d8a4e72cab47411cfa02f37508db04d882`
-- Patch：在 model lock 內擷取 immutable main-buffer line snapshot，alternate screen active 時讀取 retained main buffer
+- Pinned fork commit：`c8222751d6105c10043f34dab6bae3d85ef09646`
+- Buffer patch：在 model lock 內擷取 immutable main-buffer line snapshot，alternate screen active 時讀取 retained main buffer
+- Selection patch：revisioned retained-main bounds、active／all-main／search-main selection scope
+- Search patch：popup override、coordinate result rendering 與 custom Find handler
 
 Fork 原則：
 
@@ -485,7 +487,10 @@ interface TerminalView : AutoCloseable {
     fun attach(session: TerminalSession)
     fun captureAllOutput(): TerminalOutputSnapshot
     fun writeAllOutput(writer: Writer) = captureAllOutput().writeTo(writer)
-    fun setOutputActions(actions: TerminalOutputActions)
+    fun setContextActions(actions: TerminalContextActions)
+    fun selectVisible()
+    fun selectAllOutput()
+    fun showSearch()
     fun clearScrollback()
 }
 ```
@@ -560,6 +565,16 @@ M1E-A 增加：
 - Save All 使用 UTF-8、同目錄 temporary file 與 atomic replace；檔案系統不支援 atomic move 時 fail closed 並保留既有目標檔
 - Window close 取消背景工作；若 snapshot capture 正在進行，只延後 `TerminalView.close` 至 capture 完成，不阻塞 EDT
 - 完整 context-menu 排序、全選可見、全選所有輸出與 Search hardening 留在 M1E-B
+
+M1E-B 增加：
+
+- 依 10.1 順序建立單一 terminal popup provider；尚未實作的 Highlight actions 顯示為 disabled，不開啟假流程
+- Select Visible 只選目前 active viewport；Select All Output 使用 O(screen-height) retained-main bounds，不在 EDT 複製完整文字
+- Select All Output 即使在 alternate screen active 時仍保留 main selection；不將 main selection 畫到 `vim`／`top` 上，Copy 走背景 Copy All
+- Search 使用 150 ms debounce、background immutable main snapshot、cooperative cancellation、query generation 與 main-buffer revision 防止 stale result
+- Search 還原 soft-wrap、阻止 hard-line 跨行 match、移除 DWC marker 並將 Unicode/CJK match 映射回 terminal cell spans
+- Alternate screen active 時保留 main search count/result 但不覆蓋 alternate renderer；回到 main screen 後才顯示與導覽
+- Search keyboard：Escape 關閉、Enter／Down 下一筆、Up 上一筆
 
 ---
 
@@ -977,7 +992,7 @@ Repaint
 | XWayland | 正式 fallback |
 | 32-bit | 完全移除 |
 | 主 UI | Swing + FlatLaf |
-| Terminal | JediTerm 3.74 project fork pinned at `765500d` (upstream base `377b76e`) |
+| Terminal | JediTerm 3.74 project fork pinned at `c822275` (upstream base `377b76e`) |
 | SSH/SFTP | Apache MINA SSHD 2.19.0 |
 | Database | SQLite |
 | Cloud backend | 不建立 |

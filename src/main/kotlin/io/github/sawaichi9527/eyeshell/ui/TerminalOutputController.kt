@@ -1,6 +1,6 @@
 package io.github.sawaichi9527.eyeshell.ui
 
-import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputActions
+import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
 import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputSnapshot
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
 import java.awt.Component
@@ -35,9 +35,9 @@ internal class TerminalOutputController(
 
     fun install(owner: Component) {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal output actions must be installed on the Swing EDT" }
-        terminalView.setOutputActions(TerminalOutputActions(
-            copyAll = { copyAll(owner) },
-            saveAll = { saveAll(owner) },
+        terminalView.setContextActions(TerminalContextActions(
+            copyAllOutput = { copyAll(owner) },
+            saveAllOutput = { saveAll(owner) },
         ))
     }
 

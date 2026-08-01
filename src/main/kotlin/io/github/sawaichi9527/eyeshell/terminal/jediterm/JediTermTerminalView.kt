@@ -12,7 +12,7 @@ import com.jediterm.terminal.ui.JediTermWidget
 import com.jediterm.terminal.ui.settings.DefaultSettingsProvider
 import com.jediterm.terminal.util.CharUtils
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
-import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputActions
+import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
 import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputSnapshot
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
 import java.io.Writer
@@ -24,7 +24,16 @@ class JediTermTerminalView(
     rows: Int = 24,
 ) : TerminalView {
     private val widget = JediTermWidget(columns, rows, EyeShellTerminalSettings())
-    private val outputActionProvider = OutputActionProvider().also(widget::setNextProvider)
+    private val searchController = JediTermSearchController(widget)
+    private val contextActionProvider = ContextActionProvider(widget, searchController::show)
+
+    init {
+        widget.terminalPanel.setPopupMenuActionProvider(contextActionProvider)
+        widget.terminalPanel.setRetainedMainCopyHandler {
+            contextActionProvider.actions?.copyAllOutput?.invoke()
+        }
+        widget.setFindActionHandler(::showSearch)
+    }
 
     override val component: JComponent
         get() = widget
@@ -32,7 +41,7 @@ class JediTermTerminalView(
     override fun attach(session: TerminalSession) {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal sessions must be attached on the Swing EDT" }
         check(widget.canOpenSession()) { "A terminal session is already attached" }
-        outputActionProvider.hasSession = true
+        contextActionProvider.hasSession = true
         widget.setTtyConnector(SessionTtyConnector(session))
         widget.start()
     }
@@ -43,9 +52,24 @@ class JediTermTerminalView(
         return TerminalOutputSnapshot(snapshot::writeLogicalLines)
     }
 
-    override fun setOutputActions(actions: TerminalOutputActions) {
-        check(SwingUtilities.isEventDispatchThread()) { "Terminal output actions must be configured on the Swing EDT" }
-        outputActionProvider.actions = actions
+    override fun setContextActions(actions: TerminalContextActions) {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal context actions must be configured on the Swing EDT" }
+        contextActionProvider.actions = actions
+    }
+
+    override fun selectVisible() {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal selection must run on the Swing EDT" }
+        widget.terminalPanel.selectVisible()
+    }
+
+    override fun selectAllOutput() {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal selection must run on the Swing EDT" }
+        widget.terminalPanel.selectAllMainOutput()
+    }
+
+    override fun showSearch() {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal search must open on the Swing EDT" }
+        searchController.show()
     }
 
     override fun clearScrollback() {
@@ -65,29 +89,79 @@ class JediTermTerminalView(
     internal val historyLineCount: Int
         get() = widget.terminalTextBuffer.historyLinesCount
 
-    internal val contextOutputActions: List<TerminalAction>
-        get() = outputActionProvider.getActions()
+    internal val contextActions: List<TerminalAction>
+        get() = contextActionProvider.getActions()
+
+    internal val searchComponent: JComponent
+        get() = searchController.component
+
+    internal val selection
+        get() = widget.terminalPanel.selection
+
+    internal val isRetainedMainSelection: Boolean
+        get() = widget.terminalPanel.isRetainedMainSelection
+
+    internal val coordinateSearchResult
+        get() = widget.terminalPanel.coordinateFindResult
 
     override fun close() {
+        searchController.close()
         widget.close()
     }
 }
 
-private class OutputActionProvider : TerminalActionProvider {
-    var actions: TerminalOutputActions? = null
+private class ContextActionProvider(
+    private val widget: JediTermWidget,
+    private val showSearch: () -> Unit,
+) : TerminalActionProvider {
+    var actions: TerminalContextActions? = null
     var hasSession: Boolean = false
     private var nextProvider: TerminalActionProvider? = null
 
     override fun getActions(): List<TerminalAction> = listOf(
-        TerminalAction(TerminalActionPresentation("Copy All Output", emptyList())) {
-            actions?.copyAll?.invoke()
-            true
-        }.withEnabledSupplier { hasSession && actions != null },
-        TerminalAction(TerminalActionPresentation("Save All Output...", emptyList())) {
-            actions?.saveAll?.invoke()
-            true
-        }.withEnabledSupplier { hasSession && actions != null },
+        action("Copy", enabled = widget.terminalPanel::canCopyCurrentSelection) {
+            widget.terminalPanel.copyCurrentSelection()
+        },
+        action("Paste", enabled = { hasSession && widget.isSessionRunning }) {
+            if (widget.isSessionRunning) widget.terminalPanel.pasteClipboard()
+        },
+        action("Select Visible", separated = true, enabled = { hasSession }) {
+            widget.terminalPanel.selectVisible()
+        },
+        action("Select All Output", enabled = { hasSession }) {
+            widget.terminalPanel.selectAllMainOutput()
+        },
+        action("Copy All Output", enabled = { hasSession && actions != null }) {
+            actions?.copyAllOutput?.invoke()
+        },
+        action("Save All Output...", enabled = { hasSession && actions != null }) {
+            actions?.saveAllOutput?.invoke()
+        },
+        action("Search...", separated = true, enabled = { hasSession }) {
+            showSearch()
+        },
+        action("Add Color Highlight Rule...", enabled = { actions?.addHighlightRule != null }) {
+            actions?.addHighlightRule?.invoke()
+        },
+        action("Manage Color Highlight Rules...", enabled = { actions?.manageHighlightRules != null }) {
+            actions?.manageHighlightRules?.invoke()
+        },
+        action("Clear Buffer", separated = true, enabled = {
+            hasSession && !widget.terminalTextBuffer.isUsingAlternateBuffer
+        }) {
+            if (!widget.terminalTextBuffer.isUsingAlternateBuffer) widget.terminalTextBuffer.clearHistory()
+        },
     )
+
+    private fun action(
+        name: String,
+        separated: Boolean = false,
+        enabled: () -> Boolean,
+        run: () -> Unit,
+    ): TerminalAction = TerminalAction(TerminalActionPresentation(name, emptyList())) {
+        run()
+        true
+    }.withEnabledSupplier(enabled).separatorBefore(separated)
 
     override fun getNextProvider(): TerminalActionProvider? = nextProvider
 

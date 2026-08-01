@@ -2,7 +2,7 @@
 
 ## Current Status
 
-The M1E-A terminal output baseline is implemented. Copy All and Save All share an immutable retained-main-buffer snapshot, including while alternate screen applications are active; the required JediTerm fork patch is published and pinned.
+The M1E-B terminal inspection baseline is implemented. The ordered context menu, active/retained selection scopes, and revision-safe background search build on the pinned JediTerm fork while preserving alternate-screen isolation.
 
 ## Completed
 
@@ -54,6 +54,12 @@ The M1E-A terminal output baseline is implemented. Copy All and Save All share a
 - Added UTF-8 `Save All Output...` through a same-directory temporary file and fail-closed atomic replacement.
 - Added cancellation-safe capture/publication state and deferred terminal close without waiting on the Swing EDT.
 - Added deterministic coverage for alternate-screen export, context action enablement, clipboard limits, Unicode boundaries, atomic replacement, failure cleanup, cancellation, and close-during-capture lifecycle.
+- Published JediTerm core revision/bounds patch `bdc5ddf` and popup/selection/coordinate-search patch `c822275`.
+- Added the exact Phase 1 terminal context menu with disabled Highlight placeholders instead of fake flows.
+- Added Select Visible and Select All Output with bounded endpoint discovery and retained-main selection during alternate screen applications.
+- Added background retained-main search with 150 ms debounce, cancellation, generation/revision stale-result rejection, and coordinate rendering.
+- Added logical-line search semantics for soft wraps, hard breaks, Unicode/CJK DWC cells, locale-independent case matching, and keyboard navigation.
+- Added deterministic coverage for menu order/enablement, empty/alternate selection, stale query publication, EDT responsiveness, soft/hard line matching, and CJK cell spans.
 
 ## In Progress
 
@@ -63,20 +69,20 @@ The M1E-A terminal output baseline is implemented. Copy All and Save All share a
 
 - Validate the PowerShell bootstrap and launcher scripts on Windows 10/11 x64.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
-- Implement M1E-B context-menu ordering, Select Visible, Select All Output, and hardened terminal search.
+- Define M1F single-line Regex Highlight rules, matcher, cell mapping, and renderer overlay composition.
 - Validate keyboard-interactive dialogs against external multi-prompt and MFA-capable SSH servers.
 - Validate OpenSSH agent authentication on Ubuntu 24.04/26.04 with a desktop-inherited `SSH_AUTH_SOCK`.
 - Validate the asynchronous OpenSSH agent named-pipe transport on Windows 10/11 x64 with the pinned Temurin 21 runtime.
 
 ## Validation Evidence
 
-- Commands: `./scripts/gradlew-local.sh test --rerun-tasks`; `./scripts/gradlew-local.sh check`; 8-second `timeout --signal=TERM 8s ./scripts/gradlew-local.sh run`; parent/fork `git diff --check`; targeted secret-boundary search.
+- Commands: `./scripts/gradlew-local.sh test --rerun-tasks`; `./scripts/gradlew-local.sh check`; project-local JDK/Gradle-home `./gradlew :core:test :ui:test --rerun-tasks --no-daemon` in the fork; 8-second `timeout --signal=TERM 8s ./scripts/gradlew-local.sh run`; parent/fork `git diff --check`; targeted secret-boundary search.
 - Executed at: 2026-08-01
 - Exit codes: 0 for tests, check, secret-boundary search, and diff checks; 124 expected for the bounded GUI smoke timeout.
-- Result: 20 tests passed with 0 failures/skips; `check` passed. New M1E-A tests cover retained-main-buffer export while alternate screen is active, context action enablement/dispatch, UTF-16 clipboard boundaries, atomic replacement and failure cleanup, interrupted publication, and close during non-interruptible snapshot capture. Swing launched and remained alive until the expected timeout. No credential or terminal-output fixture is stored in the repository.
+- Result: 25 root tests passed with 0 failures/skips; `check` and the fork core/UI suites passed. New M1E-B tests cover exact menu order/enablement, empty and alternate retained selection, stale query publication, EDT responsiveness, soft-wrap versus hard-break matching, locale-independent case matching, and CJK DWC cell spans. Swing launched and remained alive until the expected timeout. No credential or terminal-output fixture is stored in the repository.
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
-- Remaining unverified scope: the fork's standalone Gradle test suite, Windows clipboard and atomic-move behavior, 100,000-line snapshot performance, full context-menu visual review, Windows scripts/runtime, ACL behavior and OpenSSH agent named-pipe I/O, Ubuntu 24.04 X11 and external `SSH_AUTH_SOCK` interoperability, multi-prompt/MFA servers, native Wayland/JBR 25, packaging, non-RSA agent keys, adverse network behavior, SFTP, monitoring, SQLite, and OS secret stores.
+- Remaining unverified scope: pixel-level search/selection rendering, exhaustive close/search CAS interleavings, Windows clipboard and atomic-move behavior, 100,000-line snapshot/search performance, manual context-menu visual review, Windows scripts/runtime, ACL behavior and OpenSSH agent named-pipe I/O, Ubuntu 24.04 X11 and external `SSH_AUTH_SOCK` interoperability, multi-prompt/MFA servers, native Wayland/JBR 25, packaging, non-RSA agent keys, adverse network behavior, SFTP, monitoring, SQLite, and OS secret stores.
 
 ## Known Issues
 
@@ -90,4 +96,5 @@ The M1E-A terminal output baseline is implemented. Copy All and Save All share a
 - Windows OpenSSH agent access relies on Temurin/OpenJDK asynchronous file-channel behavior for `\\.\pipe\openssh-ssh-agent`; this is not a portable Java SE named-pipe API and remains unverified on Windows 10/11.
 - Linux agent authentication requires eyeShell to inherit a valid `SSH_AUTH_SOCK`; eyeShell intentionally does not discover arbitrary sockets or start an agent.
 - Save All requires atomic move support in the selected target file system; unsupported providers fail without replacing the existing target.
-- The complete terminal context-menu ordering and visual selection actions remain M1E-B scope.
+- Main search/selection results are intentionally not painted over an active alternate screen; they become visible after returning to the main buffer.
+- Highlight context actions remain disabled until the M1F rule engine is implemented.

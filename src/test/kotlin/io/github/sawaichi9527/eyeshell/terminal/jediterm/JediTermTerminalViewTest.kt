@@ -1,17 +1,35 @@
 package io.github.sawaichi9527.eyeshell.terminal.jediterm
 
 import io.github.sawaichi9527.eyeshell.terminal.SyntheticTerminalSession
-import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputActions
+import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
 import java.io.StringWriter
+import java.awt.Component
+import java.awt.Container
 import java.time.Duration
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import org.junit.jupiter.api.Assertions.assertEquals
 import javax.swing.SwingUtilities
+import javax.swing.JLabel
+import javax.swing.JTextField
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class JediTermTerminalViewTest {
+    @Test
+    fun `select all leaves an empty terminal unselected`() {
+        val view = onEdt { JediTermTerminalView() }
+
+        try {
+            onEdt { view.selectAllOutput() }
+            assertEquals(null, view.selection)
+        } finally {
+            onEdt { view.close() }
+        }
+    }
+
     @Test
     fun `exports main buffer with logical line breaks and scrollback`() {
         val view = onEdt {
@@ -55,6 +73,8 @@ class JediTermTerminalViewTest {
         try {
             await(Duration.ofSeconds(5)) { !view.isSessionRunning }
             assertTrue(view.isUsingAlternateBuffer)
+            onEdt { view.selectAllOutput() }
+            assertTrue(view.isRetainedMainSelection)
 
             val output = StringWriter().also(view::writeAllOutput).toString()
 
@@ -66,28 +86,81 @@ class JediTermTerminalViewTest {
     }
 
     @Test
+    fun `background search publishes only the latest query`() {
+        val view = onEdt {
+            JediTermTerminalView(columns = 40, rows = 3).also {
+                it.attach(SyntheticTerminalSession.fromText("alpha beta alpha\r\n"))
+            }
+        }
+
+        try {
+            await(Duration.ofSeconds(5)) { !view.isSessionRunning }
+            val edtServiced = CountDownLatch(1)
+            onEdt {
+                view.showSearch()
+                val query = view.searchComponent.findByName("terminalSearchQuery") as JTextField
+                query.text = "alpha"
+                query.text = "missing"
+                SwingUtilities.invokeLater(edtServiced::countDown)
+            }
+            assertTrue(edtServiced.await(1, TimeUnit.SECONDS), "Search blocked the Swing EDT")
+            await(Duration.ofSeconds(5)) {
+                onEdt {
+                    (view.searchComponent.findByName("terminalSearchStatus") as JLabel).text == "0 matches"
+                }
+            }
+            assertEquals(0, onEdt { view.coordinateSearchResult?.matches?.size })
+        } finally {
+            onEdt { view.close() }
+        }
+    }
+
+    @Test
     fun `context output actions enable after a session is attached`() {
         val copyCount = AtomicInteger()
         val saveCount = AtomicInteger()
         val view = onEdt {
             JediTermTerminalView().also {
-                it.setOutputActions(TerminalOutputActions(copyCount::incrementAndGet, saveCount::incrementAndGet))
+                it.setContextActions(TerminalContextActions(copyCount::incrementAndGet, saveCount::incrementAndGet))
             }
         }
 
         try {
             onEdt {
-                assertTrue(view.contextOutputActions.none { it.isEnabled(null) })
+                assertTrue(view.contextActions.none { it.isEnabled(null) })
                 view.attach(SyntheticTerminalSession.fromText("ready\r\n"))
-                val actions = view.contextOutputActions
-                assertTrue(actions.all { it.isEnabled(null) })
-                assertFalse(actions.first().isSeparated)
-                actions.single { it.name == "Copy All Output" }.actionPerformed(null)
+            }
+            await(Duration.ofSeconds(5)) { !view.isSessionRunning }
+            onEdt {
+                val actions = view.contextActions
+                assertEquals(listOf(
+                    "Copy",
+                    "Paste",
+                    "Select Visible",
+                    "Select All Output",
+                    "Copy All Output",
+                    "Save All Output...",
+                    "Search...",
+                    "Add Color Highlight Rule...",
+                    "Manage Color Highlight Rules...",
+                    "Clear Buffer",
+                ), actions.map { it.name })
+                assertEquals(listOf(2, 6, 9), actions.indices.filter { actions[it].isSeparated })
+                assertFalse(actions.single { it.name == "Copy" }.isEnabled(null))
+                assertFalse(actions.single { it.name == "Add Color Highlight Rule..." }.isEnabled(null))
+                assertFalse(actions.single { it.name == "Manage Color Highlight Rules..." }.isEnabled(null))
+
+                actions.single { it.name == "Select All Output" }.actionPerformed(null)
+                assertTrue(view.isRetainedMainSelection)
+                actions.single { it.name == "Copy" }.actionPerformed(null)
                 actions.single { it.name == "Save All Output..." }.actionPerformed(null)
+                actions.single { it.name == "Search..." }.actionPerformed(null)
+                assertTrue(view.searchComponent.isVisible)
             }
 
             assertEquals(1, copyCount.get())
             assertEquals(1, saveCount.get())
+            assertFalse(onEdt { view.contextActions.single { it.name == "Paste" }.isEnabled(null) })
         } finally {
             onEdt { view.close() }
         }
@@ -105,6 +178,14 @@ class JediTermTerminalViewTest {
         var result: Result<T>? = null
         SwingUtilities.invokeAndWait { result = runCatching(action) }
         return requireNotNull(result).getOrThrow()
+    }
+
+    private fun Container.findByName(componentName: String): Component? {
+        components.forEach { component ->
+            if (component.name == componentName) return component
+            if (component is Container) component.findByName(componentName)?.let { return it }
+        }
+        return null
     }
 
     companion object {

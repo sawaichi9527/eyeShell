@@ -12,7 +12,13 @@ interface TerminalView : AutoCloseable {
 
     fun writeAllOutput(writer: Writer) = captureAllOutput().writeTo(writer)
 
-    fun setOutputActions(actions: TerminalOutputActions)
+    fun setContextActions(actions: TerminalContextActions)
+
+    fun selectVisible()
+
+    fun selectAllOutput()
+
+    fun showSearch()
 
     fun clearScrollback()
 }
@@ -21,7 +27,9 @@ fun interface TerminalOutputSnapshot {
     fun writeTo(writer: Writer)
 }
 
-data class TerminalOutputActions(
-    val copyAll: () -> Unit,
-    val saveAll: () -> Unit,
+data class TerminalContextActions(
+    val copyAllOutput: () -> Unit,
+    val saveAllOutput: () -> Unit,
+    val addHighlightRule: (() -> Unit)? = null,
+    val manageHighlightRules: (() -> Unit)? = null,
 )

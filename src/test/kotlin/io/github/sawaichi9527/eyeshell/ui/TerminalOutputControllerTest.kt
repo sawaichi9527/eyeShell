@@ -1,6 +1,6 @@
 package io.github.sawaichi9527.eyeshell.ui
 
-import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputActions
+import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
 import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputSnapshot
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
@@ -78,7 +78,7 @@ class TerminalOutputControllerTest {
         val owner = JPanel()
         SwingUtilities.invokeAndWait {
             controller.install(owner)
-            view.actions!!.copyAll()
+            view.actions!!.copyAllOutput()
         }
         assertTrue(view.captureStarted.await(2, TimeUnit.SECONDS))
 
@@ -102,7 +102,13 @@ class TerminalOutputControllerTest {
 
         override fun captureAllOutput(): TerminalOutputSnapshot = TerminalOutputSnapshot(output)
 
-        override fun setOutputActions(actions: TerminalOutputActions) = Unit
+        override fun setContextActions(actions: TerminalContextActions) = Unit
+
+        override fun selectVisible() = Unit
+
+        override fun selectAllOutput() = Unit
+
+        override fun showSearch() = Unit
 
         override fun clearScrollback() = Unit
 
@@ -114,7 +120,7 @@ class TerminalOutputControllerTest {
         val captureStarted = CountDownLatch(1)
         val releaseCapture = CountDownLatch(1)
         val closed = AtomicBoolean()
-        var actions: TerminalOutputActions? = null
+        var actions: TerminalContextActions? = null
 
         override fun attach(session: TerminalSession) = Unit
 
@@ -130,9 +136,15 @@ class TerminalOutputControllerTest {
             return TerminalOutputSnapshot { it.write("captured") }
         }
 
-        override fun setOutputActions(actions: TerminalOutputActions) {
+        override fun setContextActions(actions: TerminalContextActions) {
             this.actions = actions
         }
+
+        override fun selectVisible() = Unit
+
+        override fun selectAllOutput() = Unit
+
+        override fun showSearch() = Unit
 
         override fun clearScrollback() = Unit
 
