@@ -8,12 +8,16 @@ import java.security.KeyPair
 import java.time.Duration
 import java.util.Arrays
 import java.util.EnumSet
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import org.apache.sshd.client.SshClient
+import org.apache.sshd.client.auth.keyboard.UserAuthKeyboardInteractiveFactory
+import org.apache.sshd.client.auth.keyboard.UserInteraction
 import org.apache.sshd.client.auth.password.UserAuthPasswordFactory
 import org.apache.sshd.client.auth.pubkey.UserAuthPublicKeyFactory
 import org.apache.sshd.client.channel.ChannelShell
 import org.apache.sshd.client.channel.ClientChannelEvent
+import org.apache.sshd.client.future.AuthFuture
 import org.apache.sshd.client.config.hosts.HostConfigEntryResolver
 import org.apache.sshd.client.session.ClientSession
 import org.apache.sshd.common.channel.StreamingChannel
@@ -70,6 +74,8 @@ class MinaSshConnection private constructor(
             unknownHostVerifier: HostKeyVerifier,
             changedHostKeyHandler: ChangedHostKeyHandler = ChangedHostKeyHandler {},
         ): MinaSshConnection {
+            val keyboardInteraction = (authentication as? SshAuthentication.KeyboardInteractive)
+                ?.let(::KeyboardUserInteraction)
             val publicKeys = if (authentication is SshAuthentication.PublicKey) {
                 loadPublicKeyIdentities(authentication)
             } else {
@@ -82,6 +88,14 @@ class MinaSshConnection private constructor(
                 userAuthFactories = when (authentication) {
                     is SshAuthentication.Password -> listOf(UserAuthPasswordFactory.INSTANCE)
                     is SshAuthentication.PublicKey -> listOf(UserAuthPublicKeyFactory.INSTANCE)
+                    is SshAuthentication.KeyboardInteractive -> {
+                        userInteraction = keyboardInteraction
+                        listOf(UserAuthKeyboardInteractiveFactory.INSTANCE)
+                    }
+                    is SshAuthentication.Agent -> {
+                        agentFactory = OpenSshAgentFactory(authentication.endpoint)
+                        listOf(UserAuthPublicKeyFactory.INSTANCE)
+                    }
                 }
                 serverKeyVerifier = knownHostsStore.createServerKeyVerifier(
                     unknownHostVerifier,
@@ -109,7 +123,17 @@ class MinaSshConnection private constructor(
                         null
                     }
                     publicKeys.forEach(connectedSession::addPublicKeyIdentity)
-                    connectedSession.auth().verify(AUTH_TIMEOUT)
+                    val authFuture = connectedSession.auth()
+                    if (authentication is SshAuthentication.KeyboardInteractive) {
+                        val interaction = checkNotNull(keyboardInteraction)
+                        try {
+                            verifyKeyboardInteractive(authFuture, interaction)
+                        } finally {
+                            interaction.cancel()
+                        }
+                    } else {
+                        authFuture.verify(AUTH_TIMEOUT)
+                    }
                 } finally {
                     passwordIdentity?.let(connectedSession::removePasswordIdentity)
                     publicKeys.forEach(connectedSession::removePublicKeyIdentity)
@@ -147,7 +171,59 @@ class MinaSshConnection private constructor(
                 Arrays.fill(passphrase, '\u0000')
             }
         }
+
+        private fun verifyKeyboardInteractive(authFuture: AuthFuture, interaction: KeyboardUserInteraction) {
+            var networkDeadline = System.nanoTime() + AUTH_TIMEOUT.toNanos()
+            while (!authFuture.await(100, TimeUnit.MILLISECONDS)) {
+                if (interaction.awaitingResponse.get()) {
+                    networkDeadline = System.nanoTime() + AUTH_TIMEOUT.toNanos()
+                } else if (System.nanoTime() >= networkDeadline) {
+                    throw java.net.SocketTimeoutException("SSH authentication timed out")
+                }
+            }
+            authFuture.verify()
+        }
     }
+}
+
+private class KeyboardUserInteraction(
+    private val authentication: SshAuthentication.KeyboardInteractive,
+) : UserInteraction {
+    val awaitingResponse = AtomicBoolean()
+
+    override fun interactive(
+        session: ClientSession,
+        name: String,
+        instruction: String,
+        lang: String,
+        prompt: Array<String>,
+        echo: BooleanArray,
+    ): Array<String>? {
+        val challenge = KeyboardInteractiveChallenge(
+            name = name,
+            instruction = instruction,
+            language = lang,
+            prompts = prompt.mapIndexed { index, text -> KeyboardInteractivePrompt(text, echo[index]) },
+        )
+        awaitingResponse.set(true)
+        val responses = try {
+            authentication.responder.respond(challenge)
+        } finally {
+            awaitingResponse.set(false)
+        } ?: return null
+        return try {
+            require(responses.size == prompt.size) {
+                "Keyboard-interactive response count must match the prompt count"
+            }
+            Array(responses.size) { index -> String(responses[index]) }
+        } finally {
+            responses.forEach { Arrays.fill(it, '\u0000') }
+        }
+    }
+
+    override fun getUpdatedPassword(session: ClientSession, prompt: String, lang: String): String? = null
+
+    fun cancel() = authentication.cancel()
 }
 
 private class MinaSshTerminalSession(

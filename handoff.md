@@ -2,7 +2,7 @@
 
 ## Current Status
 
-The M1C SSH authentication baseline is implemented. Password and user-selected private-key authentication share the M1B transport; unknown host keys can be confirmed and persisted to an app-specific OpenSSH-compatible Known Hosts file, while changed keys fail closed.
+The M1D SSH authentication baseline is implemented. Password, user-selected private key, keyboard-interactive, and explicit OpenSSH agent authentication share the existing transport and strict Known Hosts policy.
 
 ## Completed
 
@@ -41,6 +41,12 @@ The M1C SSH authentication baseline is implemented. Password and user-selected p
 - Added strict Known Hosts preparation with POSIX `0700`/`0600`, symbolic-link rejection, fail-closed write errors, and no automatic changed-key replacement.
 - Extended the connection dialog with authentication selection, private-key file chooser, and optional passphrase.
 - Added embedded tests for Known Hosts persistence/reuse, changed-key rejection, encrypted private-key authentication, and platform path resolution without committed key fixtures.
+- Added a session-only keyboard-interactive challenge boundary with server name, instruction, language, prompt, and echo metadata.
+- Added a Swing keyboard-interactive challenge dialog that runs on the EDT while authentication remains on a background virtual thread.
+- Kept keyboard-interactive network phases under the 15-second authentication timeout while excluding active human-response time; timeout, disconnect, and controller close dispose the owned challenge dialog.
+- Added explicit SSH agent authentication with no fallback, key mutation, agent forwarding, service startup, or socket discovery.
+- Added bounded OpenSSH agent framing with a 256 KiB response limit, Linux Unix-domain sockets from `SSH_AUTH_SOCK`, and the fixed Windows OpenSSH named pipe.
+- Added an in-process Unix-domain test agent covering identity enumeration, RSA SHA-2 signing, embedded-server authentication, terminal opening, and cleanup.
 
 ## In Progress
 
@@ -51,25 +57,29 @@ The M1C SSH authentication baseline is implemented. Password and user-selected p
 - Validate the PowerShell bootstrap and launcher scripts on Windows 10/11 x64.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
 - Create the project-controlled JediTerm fork only when the first necessary upstream patch is identified; GitHub MCP currently lacks fork/create-repository permission.
-- Define M1D around keyboard-interactive and `ssh-agent` integration without adding a project-local secret vault.
+- Validate keyboard-interactive dialogs against external multi-prompt and MFA-capable SSH servers.
+- Validate OpenSSH agent authentication on Ubuntu 24.04/26.04 with a desktop-inherited `SSH_AUTH_SOCK`.
+- Validate the asynchronous OpenSSH agent named-pipe transport on Windows 10/11 x64 with the pinned Temurin 21 runtime.
 
 ## Validation Evidence
 
-- Commands: `./scripts/gradlew-local.sh test --rerun-tasks`; `./scripts/gradlew-local.sh check`; 8-second `timeout --signal=TERM 8s ./scripts/gradlew-local.sh run`; secret-pattern searches; `git diff --check`.
+- Commands: `./scripts/gradlew-local.sh test --rerun-tasks`; `./scripts/gradlew-local.sh check`; `git diff --check`; targeted secret-boundary search.
 - Executed at: 2026-08-01
-- Exit codes: 0 for tests, check, secret-pattern searches, and diff check; 124 expected for the bounded GUI smoke timeout.
-- Result: 13 tests passed with 0 failures/skips; `check` passed. M1C tests use runtime-generated credentials and cover first-use Known Hosts persistence, known-key reuse without prompting, changed-key rejection with both fingerprints, encrypted OpenSSH RSA private-key authentication, and Linux/Windows app-data path resolution. No private key or fixed credential fixture is stored in the repository. Swing launched in the disconnected state, remained alive until the expected timeout, and left no application process behind.
+- Exit codes: 0 for tests, check, secret-boundary search, and diff check.
+- Result: 15 tests passed with 0 failures/skips; `check` passed. New M1D tests cover keyboard-interactive challenge metadata and response-array clearing plus end-to-end agent identity enumeration, RSA SHA-2 signing, authentication, terminal opening, and cleanup through an in-process Unix-domain agent. No private key, challenge response, agent packet, or fixed credential fixture is stored in the repository.
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
-- Remaining unverified scope: Windows scripts/runtime and ACL behavior, Ubuntu 24.04 X11, native Wayland/JBR 25, visual review of authentication dialogs, packaging, non-RSA key formats/providers, external OpenSSH interoperability, adverse network behavior, large-output performance, SFTP, monitoring, SQLite, and OS secret stores.
+- Remaining unverified scope: Windows scripts/runtime, ACL behavior, and OpenSSH agent named-pipe I/O; Ubuntu 24.04 X11 and external `SSH_AUTH_SOCK` interoperability; multi-prompt/MFA keyboard-interactive servers; native Wayland/JBR 25; visual review of authentication dialogs; packaging; non-RSA agent keys; adverse network behavior; large-output performance; SFTP; monitoring; SQLite; and OS secret stores.
 
 ## Known Issues
 
 - PowerShell scripts are present but have not been executed on Windows.
-- SSH, monitoring, SFTP, and command input remain placeholders; no host metrics or remote file data are fabricated.
+- Monitoring, SFTP, and command input remain placeholders; no host metrics or remote file data are fabricated.
 - Native Wayland behavior is not covered by the Temurin 21 M0 runtime; the current Linux baseline can use XWayland fallback until the JBR 25 runtime is evaluated.
 - GitHub MCP's PAT returned 403 for both fork and repository creation. M1A therefore uses the pinned, unmodified official submodule; a project-controlled fork remains pending until a patch is required.
 - Main-buffer export and scrollback clearing fail fast while an alternate screen is active because upstream JediTerm exposes only the active buffer. Phase 1 needs a narrowly documented fork patch before enabling those actions inside applications such as `vim` or `top`.
 - Passwords and Private Key Passphrases remain session-only; OS Credential Store integration is not implemented.
 - Public Key authentication is covered with a runtime-generated encrypted RSA OpenSSH key; other key formats/providers and external OpenSSH interoperability remain unverified.
 - Changed Host Keys require manual verification and Known Hosts file editing outside eyeShell; automatic replacement is intentionally unavailable.
+- Windows OpenSSH agent access relies on Temurin/OpenJDK asynchronous file-channel behavior for `\\.\pipe\openssh-ssh-agent`; this is not a portable Java SE named-pipe API and remains unverified on Windows 10/11.
+- Linux agent authentication requires eyeShell to inherit a valid `SSH_AUTH_SOCK`; eyeShell intentionally does not discover arbitrary sockets or start an agent.

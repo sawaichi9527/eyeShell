@@ -404,7 +404,17 @@ M1C 增加：
 - Changed Host Key 一律拒絕，顯示 expected／actual SHA-256 fingerprint，不提供自動覆寫
 - POSIX app directory／file 權限分別限制為 `0700`／`0600`；拒絕 app directory 或 Known Hosts file symbolic link
 
-keyboard-interactive 與 `ssh-agent` 在後續 Phase 1 vertical slice 實作，不加入空介面或假流程。
+M1D 增加：
+
+- Keyboard-interactive server challenge；name、instruction、prompt 與 echo flag 顯示給使用者，response 僅存在本次 authentication 記憶體
+- Keyboard-interactive 的 human-response wait 不計入 authentication network timeout；network phase 仍有明確 timeout，dialog 會在 timeout、disconnect 或 controller close 時關閉
+- 明確選取的 `ssh-agent` authentication，不自動 fallback 至其他驗證方式
+- Linux 僅使用繼承的 `SSH_AUTH_SOCK` Unix-domain socket；不掃描其他 socket、不啟動或設定 agent
+- Windows 僅使用既有 OpenSSH `\\.\pipe\openssh-ssh-agent` named pipe；不安裝、啟動或設定服務
+- Agent 僅允許列舉 public identity 與簽章；不支援新增／移除 key 或 agent forwarding
+- Agent frame 上限為 256 KiB，I/O wait 有明確 timeout
+
+Windows named pipe 透過 pinned Temurin 21／OpenJDK 的 asynchronous file-channel 實作，屬於 runtime-specific 行為；必須通過 Windows 10／11 x64 實機驗證才可宣告 Windows agent support 完成。
 
 ### 8.3 Transport 共用
 

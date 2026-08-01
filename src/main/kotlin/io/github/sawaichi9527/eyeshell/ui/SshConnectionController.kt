@@ -5,6 +5,8 @@ import io.github.sawaichi9527.eyeshell.ssh.ChangedHostKeyHandler
 import io.github.sawaichi9527.eyeshell.ssh.EyeShellPaths
 import io.github.sawaichi9527.eyeshell.ssh.HostKeyVerifier
 import io.github.sawaichi9527.eyeshell.ssh.KnownHostsStore
+import io.github.sawaichi9527.eyeshell.ssh.KeyboardInteractiveChallenge
+import io.github.sawaichi9527.eyeshell.ssh.KeyboardInteractiveResponder
 import io.github.sawaichi9527.eyeshell.ssh.MinaSshConnection
 import io.github.sawaichi9527.eyeshell.ssh.PresentedHostKey
 import io.github.sawaichi9527.eyeshell.ssh.SshAuthentication
@@ -20,12 +22,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.JButton
 import javax.swing.JComboBox
+import javax.swing.JDialog
 import javax.swing.JFileChooser
 import javax.swing.JLabel
 import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JPasswordField
 import javax.swing.JSpinner
+import javax.swing.JTextArea
 import javax.swing.JTextField
 import javax.swing.SpinnerNumberModel
 import javax.swing.SwingUtilities
@@ -34,6 +38,7 @@ class SshConnectionController : AutoCloseable {
     private val executor = Executors.newVirtualThreadPerTaskExecutor()
     private val closed = AtomicBoolean()
     private val knownHostsStore = KnownHostsStore(EyeShellPaths.knownHostsFile())
+    private val challengeDialog = AtomicReference<JDialog>()
     private var connectionTask: Future<*>? = null
 
     fun connect(owner: EyeShellWindow) {
@@ -106,6 +111,7 @@ class SshConnectionController : AutoCloseable {
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        dismissKeyboardInteractiveDialog()
         connectionTask?.cancel(true)
         executor.shutdownNow()
     }
@@ -134,10 +140,11 @@ class SshConnectionController : AutoCloseable {
 
         fun updateAuthenticationFields() {
             val usePassword = authenticationField.selectedItem == AuthenticationMethod.PASSWORD
+            val usePublicKey = authenticationField.selectedItem == AuthenticationMethod.PUBLIC_KEY
             passwordField.isEnabled = usePassword
-            keyFileField.isEnabled = !usePassword
-            keyFileButton.isEnabled = !usePassword
-            passphraseField.isEnabled = !usePassword
+            keyFileField.isEnabled = usePublicKey
+            keyFileButton.isEnabled = usePublicKey
+            passphraseField.isEnabled = usePublicKey
         }
         authenticationField.addActionListener { updateAuthenticationFields() }
         keyFileButton.addActionListener {
@@ -178,6 +185,11 @@ class SshConnectionController : AutoCloseable {
                     require(keyFileField.text.isNotBlank()) { "Private key file must not be blank" }
                     SshAuthentication.PublicKey(Path.of(keyFileField.text.trim()), passphrase)
                 }
+                AuthenticationMethod.KEYBOARD_INTERACTIVE -> SshAuthentication.KeyboardInteractive(
+                    responder = KeyboardInteractiveResponder { respondToKeyboardInteractive(owner, it) },
+                    cancel = ::dismissKeyboardInteractiveDialog,
+                )
+                AuthenticationMethod.SSH_AGENT -> SshAuthentication.Agent.system()
             }
             ConnectionRequest(
                 endpoint = endpoint,
@@ -222,6 +234,8 @@ class SshConnectionController : AutoCloseable {
     ) {
         PASSWORD("Password"),
         PUBLIC_KEY("Private key"),
+        KEYBOARD_INTERACTIVE("Keyboard-interactive"),
+        SSH_AGENT("SSH agent"),
         ;
 
         override fun toString(): String = label
@@ -238,4 +252,64 @@ class SshConnectionController : AutoCloseable {
         Verify the server outside eyeShell before editing:
         ${knownHostsStore.file}
     """.trimIndent()
+
+    private fun respondToKeyboardInteractive(
+        owner: EyeShellWindow,
+        challenge: KeyboardInteractiveChallenge,
+    ): List<CharArray>? {
+        var responses: List<CharArray>? = null
+        SwingUtilities.invokeAndWait {
+            if (!owner.isDisplayable || closed.get()) return@invokeAndWait
+            val fields = challenge.prompts.map { prompt ->
+                JPasswordField(24).apply {
+                    if (prompt.echo) echoChar = '\u0000'
+                }
+            }
+            val panel = JPanel(GridBagLayout())
+            val description = listOf(challenge.name, challenge.instruction)
+                .filter(String::isNotBlank)
+                .joinToString("\n")
+            if (description.isNotEmpty()) {
+                panel.add(JTextArea(description).apply {
+                    isEditable = false
+                    isOpaque = false
+                    lineWrap = true
+                    wrapStyleWord = true
+                }, GridBagConstraints().apply {
+                    gridx = 0
+                    gridy = 0
+                    gridwidth = 2
+                    weightx = 1.0
+                    fill = GridBagConstraints.HORIZONTAL
+                    insets = Insets(5, 5, 10, 5)
+                })
+            }
+            challenge.prompts.forEachIndexed { index, prompt ->
+                addField(panel, index + 1, prompt.text, fields[index])
+            }
+            val optionPane = JOptionPane(
+                panel,
+                JOptionPane.PLAIN_MESSAGE,
+                JOptionPane.OK_CANCEL_OPTION,
+            )
+            val dialog = optionPane.createDialog(owner, "SSH authentication challenge")
+            challengeDialog.set(dialog)
+            try {
+                dialog.isVisible = true
+                if (optionPane.value == JOptionPane.OK_OPTION) {
+                    responses = fields.map(JPasswordField::getPassword)
+                }
+            } finally {
+                challengeDialog.compareAndSet(dialog, null)
+                dialog.dispose()
+                fields.forEach { it.text = "" }
+            }
+        }
+        return responses
+    }
+
+    private fun dismissKeyboardInteractiveDialog() {
+        val dismiss = Runnable { challengeDialog.getAndSet(null)?.dispose() }
+        if (SwingUtilities.isEventDispatchThread()) dismiss.run() else SwingUtilities.invokeLater(dismiss)
+    }
 }

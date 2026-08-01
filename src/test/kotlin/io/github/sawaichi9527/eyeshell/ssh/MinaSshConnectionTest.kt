@@ -2,11 +2,17 @@ package io.github.sawaichi9527.eyeshell.ssh
 
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.StandardProtocolFamily
+import java.net.UnixDomainSocketAddress
+import java.nio.ByteBuffer
+import java.nio.channels.ServerSocketChannel
+import java.nio.channels.SocketChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermission
 import java.security.KeyPair
 import java.security.KeyPairGenerator
+import java.security.Signature
 import java.time.Duration
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
@@ -14,6 +20,10 @@ import java.util.concurrent.atomic.AtomicReference
 import org.apache.sshd.common.config.keys.KeyUtils
 import org.apache.sshd.common.config.keys.writer.openssh.OpenSSHKeyEncryptionContext
 import org.apache.sshd.common.config.keys.writer.openssh.OpenSSHKeyPairResourceWriter
+import org.apache.sshd.server.auth.keyboard.InteractiveChallenge
+import org.apache.sshd.server.auth.keyboard.KeyboardInteractiveAuthenticator
+import org.apache.sshd.agent.SshAgentConstants
+import org.apache.sshd.common.util.buffer.ByteArrayBuffer
 import org.apache.sshd.server.Environment
 import org.apache.sshd.server.ExitCallback
 import org.apache.sshd.server.SshServer
@@ -216,6 +226,81 @@ class MinaSshConnectionTest {
         }
     }
 
+    @Test
+    fun `authenticates with keyboard interactive challenge`() {
+        val challengeResponse = UUID.randomUUID().toString().toCharArray()
+        server.keyboardInteractiveAuthenticator = object : KeyboardInteractiveAuthenticator {
+            override fun generateChallenge(
+                session: org.apache.sshd.server.session.ServerSession,
+                username: String,
+                lang: String,
+                subMethods: String,
+            ) = InteractiveChallenge().apply {
+                interactionName = "Verification"
+                interactionInstruction = "Enter the session challenge."
+                languageTag = "en"
+                addPrompt("Challenge: ", false)
+            }
+
+            override fun authenticate(
+                session: org.apache.sshd.server.session.ServerSession,
+                username: String,
+                responses: List<String>,
+            ): Boolean = username == USERNAME &&
+                responses.size == 1 &&
+                challengeResponse.contentEquals(responses.single().toCharArray())
+        }
+        val receivedChallenge = AtomicReference<KeyboardInteractiveChallenge>()
+        val suppliedResponse = AtomicReference<CharArray>()
+
+        val connection = try {
+            val endpoint = SshEndpoint("127.0.0.1", server.port, USERNAME)
+            SshAuthentication.KeyboardInteractive { challenge ->
+                receivedChallenge.set(challenge)
+                listOf(challengeResponse.copyOf().also(suppliedResponse::set))
+            }.use { authentication ->
+                MinaSshConnection.connect(
+                    endpoint,
+                    authentication,
+                    knownHostsStore(),
+                    HostKeyVerifier { true },
+                )
+            }
+        } finally {
+            challengeResponse.fill('\u0000')
+        }
+
+        assertEquals("Verification", receivedChallenge.get().name)
+        assertEquals("Enter the session challenge.", receivedChallenge.get().instruction)
+        assertEquals("en", receivedChallenge.get().language)
+        assertEquals(listOf(KeyboardInteractivePrompt("Challenge: ", false)), receivedChallenge.get().prompts)
+        assertTrue(suppliedResponse.get().all { it == '\u0000' })
+        connection.close()
+    }
+
+    @Test
+    fun `authenticates with an OpenSSH agent over a Unix socket`() {
+        val endpoint = SshEndpoint("127.0.0.1", server.port, USERNAME)
+
+        FakeOpenSshAgent(temporaryDirectory.resolve("agent.sock"), userKeyPair).use { agent ->
+            val connection = SshAuthentication.Agent.unixSocket(agent.socket).use { authentication ->
+                MinaSshConnection.connect(
+                    endpoint,
+                    authentication,
+                    knownHostsStore(),
+                    HostKeyVerifier { true },
+                )
+            }
+            val terminal = connection.openTerminal()
+            try {
+                assertTrue(readUntil(terminal, "ready\r\n").contains("ready\r\n"))
+            } finally {
+                terminal.close()
+            }
+            agent.assertHealthy()
+        }
+    }
+
     private fun connectWithPassword(
         endpoint: SshEndpoint,
         knownHosts: KnownHostsStore,
@@ -290,6 +375,104 @@ class MinaSshConnectionTest {
         override fun destroy(channel: ChannelSession) {
             worker?.interrupt()
         }
+    }
+
+    private class FakeOpenSshAgent(
+        val socket: Path,
+        private val keyPair: KeyPair,
+    ) : AutoCloseable {
+        private val server = ServerSocketChannel.open(StandardProtocolFamily.UNIX).apply {
+            bind(UnixDomainSocketAddress.of(socket))
+        }
+        private val failure = AtomicReference<Throwable>()
+        private val worker = Thread.ofVirtual().name("embedded-ssh-agent").start {
+            try {
+                server.accept().use { client ->
+                    while (client.isOpen) {
+                        val header = ByteBuffer.allocate(Int.SIZE_BYTES)
+                        if (!readFully(client, header)) break
+                        header.flip()
+                        val size = header.int
+                        require(size in 1..256 * 1024) { "Invalid agent request size: $size" }
+                        val request = ByteBuffer.allocate(size)
+                        check(readFully(client, request)) { "Agent request ended before its payload" }
+                        writeFrame(client, respond(request.array()))
+                    }
+                }
+            } catch (caught: Throwable) {
+                if (server.isOpen) failure.set(caught)
+            }
+        }
+
+        fun assertHealthy() {
+            failure.get()?.let { throw AssertionError("Embedded SSH agent failed", it) }
+        }
+
+        override fun close() {
+            server.close()
+            worker.interrupt()
+            worker.join(Duration.ofSeconds(2))
+            assertHealthy()
+        }
+
+        private fun respond(requestBytes: ByteArray): ByteArray {
+            val request = ByteArrayBuffer(requestBytes)
+            return when (val command = request.getUByte()) {
+                SshAgentConstants.SSH2_AGENTC_REQUEST_IDENTITIES.toInt() -> ByteArrayBuffer().apply {
+                    putByte(SshAgentConstants.SSH2_AGENT_IDENTITIES_ANSWER)
+                    putInt(1)
+                    putPublicKey(this@FakeOpenSshAgent.keyPair.public)
+                    putString("eyeShell test identity")
+                }.compactData()
+                SshAgentConstants.SSH2_AGENTC_SIGN_REQUEST.toInt() -> {
+                    val requestedKey = request.getPublicKey()
+                    require(KeyUtils.compareKeys(keyPair.public, requestedKey)) { "Unexpected signing key" }
+                    val data = request.getBytes()
+                    val flags = request.getInt()
+                    val algorithm = when (flags) {
+                        4 -> "rsa-sha2-512"
+                        2 -> "rsa-sha2-256"
+                        else -> "ssh-rsa"
+                    }
+                    val signature = Signature.getInstance(when (flags) {
+                        4 -> "SHA512withRSA"
+                        2 -> "SHA256withRSA"
+                        else -> "SHA1withRSA"
+                    }).run {
+                        initSign(keyPair.private)
+                        update(data)
+                        sign()
+                    }
+                    val signatureBlob = ByteArrayBuffer().apply {
+                        putString(algorithm)
+                        putBytes(signature)
+                    }.compactData()
+                    ByteArrayBuffer().apply {
+                        putByte(SshAgentConstants.SSH2_AGENT_SIGN_RESPONSE)
+                        putBytes(signatureBlob)
+                    }.compactData()
+                }
+                else -> error("Unsupported agent command: $command")
+            }
+        }
+
+        private fun writeFrame(client: SocketChannel, payload: ByteArray) {
+            val frame = ByteBuffer.allocate(Int.SIZE_BYTES + payload.size).apply {
+                putInt(payload.size)
+                put(payload)
+                flip()
+            }
+            while (frame.hasRemaining()) client.write(frame)
+        }
+
+        private fun readFully(client: SocketChannel, buffer: ByteBuffer): Boolean {
+            while (buffer.hasRemaining()) {
+                if (client.read(buffer) < 0) return false
+            }
+            return true
+        }
+
+        private fun ByteArrayBuffer.compactData(): ByteArray = array().copyOf(wpos())
     }
 
     companion object {
