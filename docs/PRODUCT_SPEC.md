@@ -450,7 +450,7 @@ Cloud Relay Transport 不列入首版。
 
 ### 9.1 Terminal Engine
 
-首版採用 JediTerm。M1A 以官方 Repository 的 pinned submodule 提供未修改的 core/ui source；出現第一個必要 patch 前不建立無差異 fork。
+首版採用 JediTerm。M1A 以官方 Repository 的 pinned submodule 提供未修改的 core/ui source。M1E-A 因 alternate screen 期間必須安全讀取 retained main buffer，建立 project-controlled minimal fork。
 
 M1A 鎖定：
 
@@ -460,6 +460,13 @@ M1A 鎖定：
 - License option：Apache-2.0
 - Included source：`core`、`ui`
 - Excluded：JediTerm standalone、Pty4J 與 local terminal support
+
+M1E-A fork：
+
+- Repository：`sawaichi9527/jediterm`
+- Upstream base：`377b76e682a5f86bcbb18a318386f530dbebf5c1`
+- Pinned fork commit：`765500d8a4e72cab47411cfa02f37508db04d882`
+- Patch：在 model lock 內擷取 immutable main-buffer line snapshot，alternate screen active 時讀取 retained main buffer
 
 Fork 原則：
 
@@ -476,7 +483,9 @@ UI 不得直接依賴 JediTerm 具體實作。M1A 先建立目前 vertical slice
 interface TerminalView : AutoCloseable {
     val component: JComponent
     fun attach(session: TerminalSession)
-    fun writeAllOutput(writer: Writer)
+    fun captureAllOutput(): TerminalOutputSnapshot
+    fun writeAllOutput(writer: Writer) = captureAllOutput().writeTo(writer)
+    fun setOutputActions(actions: TerminalOutputActions)
     fun clearScrollback()
 }
 ```
@@ -541,7 +550,16 @@ scrollback 第一個邏輯字元
 - 不在 Swing Event Dispatch Thread 組合大型字串。
 - 大型複製與匯出使用背景工作。
 - 超過剪貼簿合理大小時，提示改用「另存所有輸出」。
-- 寫檔採串流方式，避免一次持有完整副本。
+- 寫檔由 immutable retained-line snapshot 逐行串流，不再組合第二個單一完整 `String`；snapshot memory 納入大量輸出效能驗收。
+
+M1E-A 增加：
+
+- `Copy All Output` 與 `Save All Output...` terminal context actions
+- Main／alternate screen 都從 immutable retained-main-buffer text snapshot 輸出；snapshot 後的 Writer／檔案 I/O 不持有 terminal model lock
+- Copy All 在背景組合文字，不建立視覺 Selection；上限為 8,388,608 UTF-16 code units，超限時提示改用 Save All
+- Save All 使用 UTF-8、同目錄 temporary file 與 atomic replace；檔案系統不支援 atomic move 時 fail closed 並保留既有目標檔
+- Window close 取消背景工作；若 snapshot capture 正在進行，只延後 `TerminalView.close` 至 capture 完成，不阻塞 EDT
+- 完整 context-menu 排序、全選可見、全選所有輸出與 Search hardening 留在 M1E-B
 
 ---
 
@@ -959,7 +977,7 @@ Repaint
 | XWayland | 正式 fallback |
 | 32-bit | 完全移除 |
 | 主 UI | Swing + FlatLaf |
-| Terminal | JediTerm 3.74 pinned at `377b76e`; fork deferred until a patch is required |
+| Terminal | JediTerm 3.74 project fork pinned at `765500d` (upstream base `377b76e`) |
 | SSH/SFTP | Apache MINA SSHD 2.19.0 |
 | Database | SQLite |
 | Cloud backend | 不建立 |

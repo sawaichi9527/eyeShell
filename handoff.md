@@ -2,7 +2,7 @@
 
 ## Current Status
 
-The M1D SSH authentication baseline is implemented. Password, user-selected private key, keyboard-interactive, and explicit OpenSSH agent authentication share the existing transport and strict Known Hosts policy.
+The M1E-A terminal output baseline is implemented. Copy All and Save All share an immutable retained-main-buffer snapshot, including while alternate screen applications are active; the required JediTerm fork patch is published and pinned.
 
 ## Completed
 
@@ -47,6 +47,13 @@ The M1D SSH authentication baseline is implemented. Password, user-selected priv
 - Added explicit SSH agent authentication with no fallback, key mutation, agent forwarding, service startup, or socket discovery.
 - Added bounded OpenSSH agent framing with a 256 KiB response limit, Linux Unix-domain sockets from `SSH_AUTH_SOCK`, and the fixed Windows OpenSSH named pipe.
 - Added an in-process Unix-domain test agent covering identity enumeration, RSA SHA-2 signing, embedded-server authentication, terminal opening, and cleanup.
+- Created the project-controlled `sawaichi9527/jediterm` fork from upstream `377b76e` and published immutable main-buffer snapshot patches through `765500d`.
+- Switched the JediTerm submodule source to the project fork and pinned the first independent buffer patch.
+- Added immutable text/wrap snapshots so large Writer and disk operations do not hold the JediTerm model lock or block Swing repaint; 100,000-line snapshot memory remains a later performance gate.
+- Added `Copy All Output` with an 8,388,608 UTF-16 code-unit limit and Save All fallback prompt.
+- Added UTF-8 `Save All Output...` through a same-directory temporary file and fail-closed atomic replacement.
+- Added cancellation-safe capture/publication state and deferred terminal close without waiting on the Swing EDT.
+- Added deterministic coverage for alternate-screen export, context action enablement, clipboard limits, Unicode boundaries, atomic replacement, failure cleanup, cancellation, and close-during-capture lifecycle.
 
 ## In Progress
 
@@ -56,30 +63,31 @@ The M1D SSH authentication baseline is implemented. Password, user-selected priv
 
 - Validate the PowerShell bootstrap and launcher scripts on Windows 10/11 x64.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
-- Create the project-controlled JediTerm fork only when the first necessary upstream patch is identified; GitHub MCP currently lacks fork/create-repository permission.
+- Implement M1E-B context-menu ordering, Select Visible, Select All Output, and hardened terminal search.
 - Validate keyboard-interactive dialogs against external multi-prompt and MFA-capable SSH servers.
 - Validate OpenSSH agent authentication on Ubuntu 24.04/26.04 with a desktop-inherited `SSH_AUTH_SOCK`.
 - Validate the asynchronous OpenSSH agent named-pipe transport on Windows 10/11 x64 with the pinned Temurin 21 runtime.
 
 ## Validation Evidence
 
-- Commands: `./scripts/gradlew-local.sh test --rerun-tasks`; `./scripts/gradlew-local.sh check`; `git diff --check`; targeted secret-boundary search.
+- Commands: `./scripts/gradlew-local.sh test --rerun-tasks`; `./scripts/gradlew-local.sh check`; 8-second `timeout --signal=TERM 8s ./scripts/gradlew-local.sh run`; parent/fork `git diff --check`; targeted secret-boundary search.
 - Executed at: 2026-08-01
-- Exit codes: 0 for tests, check, secret-boundary search, and diff check.
-- Result: 15 tests passed with 0 failures/skips; `check` passed. New M1D tests cover keyboard-interactive challenge metadata and response-array clearing plus end-to-end agent identity enumeration, RSA SHA-2 signing, authentication, terminal opening, and cleanup through an in-process Unix-domain agent. No private key, challenge response, agent packet, or fixed credential fixture is stored in the repository.
+- Exit codes: 0 for tests, check, secret-boundary search, and diff checks; 124 expected for the bounded GUI smoke timeout.
+- Result: 20 tests passed with 0 failures/skips; `check` passed. New M1E-A tests cover retained-main-buffer export while alternate screen is active, context action enablement/dispatch, UTF-16 clipboard boundaries, atomic replacement and failure cleanup, interrupted publication, and close during non-interruptible snapshot capture. Swing launched and remained alive until the expected timeout. No credential or terminal-output fixture is stored in the repository.
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
-- Remaining unverified scope: Windows scripts/runtime, ACL behavior, and OpenSSH agent named-pipe I/O; Ubuntu 24.04 X11 and external `SSH_AUTH_SOCK` interoperability; multi-prompt/MFA keyboard-interactive servers; native Wayland/JBR 25; visual review of authentication dialogs; packaging; non-RSA agent keys; adverse network behavior; large-output performance; SFTP; monitoring; SQLite; and OS secret stores.
+- Remaining unverified scope: the fork's standalone Gradle test suite, Windows clipboard and atomic-move behavior, 100,000-line snapshot performance, full context-menu visual review, Windows scripts/runtime, ACL behavior and OpenSSH agent named-pipe I/O, Ubuntu 24.04 X11 and external `SSH_AUTH_SOCK` interoperability, multi-prompt/MFA servers, native Wayland/JBR 25, packaging, non-RSA agent keys, adverse network behavior, SFTP, monitoring, SQLite, and OS secret stores.
 
 ## Known Issues
 
 - PowerShell scripts are present but have not been executed on Windows.
 - Monitoring, SFTP, and command input remain placeholders; no host metrics or remote file data are fabricated.
 - Native Wayland behavior is not covered by the Temurin 21 M0 runtime; the current Linux baseline can use XWayland fallback until the JBR 25 runtime is evaluated.
-- GitHub MCP's PAT returned 403 for both fork and repository creation. M1A therefore uses the pinned, unmodified official submodule; a project-controlled fork remains pending until a patch is required.
-- Main-buffer export and scrollback clearing fail fast while an alternate screen is active because upstream JediTerm exposes only the active buffer. Phase 1 needs a narrowly documented fork patch before enabling those actions inside applications such as `vim` or `top`.
+- Scrollback clearing remains unavailable while alternate screen is active; Copy All and Save All now operate on the retained main buffer.
 - Passwords and Private Key Passphrases remain session-only; OS Credential Store integration is not implemented.
 - Public Key authentication is covered with a runtime-generated encrypted RSA OpenSSH key; other key formats/providers and external OpenSSH interoperability remain unverified.
 - Changed Host Keys require manual verification and Known Hosts file editing outside eyeShell; automatic replacement is intentionally unavailable.
 - Windows OpenSSH agent access relies on Temurin/OpenJDK asynchronous file-channel behavior for `\\.\pipe\openssh-ssh-agent`; this is not a portable Java SE named-pipe API and remains unverified on Windows 10/11.
 - Linux agent authentication requires eyeShell to inherit a valid `SSH_AUTH_SOCK`; eyeShell intentionally does not discover arbitrary sockets or start an agent.
+- Save All requires atomic move support in the selected target file system; unsupported providers fail without replacing the existing target.
+- The complete terminal context-menu ordering and visual selection actions remain M1E-B scope.

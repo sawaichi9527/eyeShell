@@ -1,6 +1,8 @@
 package io.github.sawaichi9527.eyeshell.ui
 
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
+import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputActions
+import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputSnapshot
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
 import java.awt.Component
 import java.awt.Container
@@ -138,7 +140,9 @@ class WorkbenchPanelTest {
             attachedSession = session
         }
 
-        override fun writeAllOutput(writer: Writer) = Unit
+        override fun captureAllOutput(): TerminalOutputSnapshot = TerminalOutputSnapshot {}
+
+        override fun setOutputActions(actions: TerminalOutputActions) = Unit
 
         override fun clearScrollback() = Unit
 

@@ -24,6 +24,7 @@ class EyeShellWindow(
     connectAction: ((EyeShellWindow) -> Unit)? = null,
     private val closeAction: () -> Unit = {},
 ) : JFrame("eyeShell") {
+    private val outputController = TerminalOutputController(terminalView)
     private val workbench = WorkbenchPanel(
         terminalView,
         connectAction?.let { action -> { action(this) } },
@@ -35,6 +36,7 @@ class EyeShellWindow(
         size = Dimension(1280, 800)
         contentPane = workbench
         setLocationRelativeTo(null)
+        outputController.install(this)
     }
 
     fun attachTerminal(session: TerminalSession) {
@@ -46,7 +48,7 @@ class EyeShellWindow(
     }
 
     override fun dispose() {
-        terminalView.close()
+        outputController.close(terminalView::close)
         closeAction()
         super.dispose()
     }
