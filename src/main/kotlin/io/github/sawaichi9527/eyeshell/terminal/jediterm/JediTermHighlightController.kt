@@ -74,7 +74,7 @@ internal class JediTermHighlightController(
             executor.schedule({
                 try {
                     val snapshot = widget.terminalTextBuffer.getMainBufferSnapshot()
-                    matchCache.beginScan()
+                    matchCache.beginScan(requestedRules)
                     val visibleResult = renderHighlights(
                         snapshot,
                         requestedRules,
@@ -122,6 +122,8 @@ internal class JediTermHighlightController(
         executor.shutdownNow()
     }
 
+    internal fun awaitTermination(timeout: Long, unit: TimeUnit): Boolean = executor.awaitTermination(timeout, unit)
+
     companion object {
         private const val HIGHLIGHT_DEBOUNCE_MILLIS = 150L
     }
@@ -130,10 +132,21 @@ internal class JediTermHighlightController(
 internal fun highlightMainBuffer(
     snapshot: MainBufferSnapshot,
     rules: List<TerminalHighlightRule>,
+): TerminalHighlightResult = highlightMainBuffer(snapshot, rules, HighlightMatchCache())
+
+internal fun highlightMainBuffer(
+    snapshot: MainBufferSnapshot,
+    rules: List<TerminalHighlightRule>,
+    cache: HighlightMatchCache,
 ): TerminalHighlightResult {
-    val cache = HighlightMatchCache()
-    cache.beginScan()
-    return renderHighlights(snapshot, compileHighlightRules(rules), cache).also { cache.finishScan() }
+    val compiledRules = compileHighlightRules(rules)
+    cache.beginScan(compiledRules)
+    return try {
+        renderHighlights(snapshot, compiledRules, cache).also { cache.finishScan() }
+    } catch (failure: Throwable) {
+        cache.abortScan()
+        throw failure
+    }
 }
 
 private fun compileHighlightRules(rules: List<TerminalHighlightRule>): List<CompiledHighlightRule> =
@@ -163,8 +176,8 @@ private fun renderHighlights(
 
     val scanLine: (String, List<MainBufferCell>) -> Unit = { text, cells ->
         if (stale()) throw StaleHighlightSnapshotException()
-        compiledRules.forEach { compiled ->
-            cache.matches(compiled, text).forEach { match ->
+        compiledRules.forEachIndexed { ruleIndex, compiled ->
+            cache.matches(ruleIndex, compiled, text).forEach { match ->
                 cells.spans(match.start, match.end).forEach { span ->
                     val rowCells = cellsByRow.getOrPut(span.row) { mutableListOf() }
                     while (rowCells.size < span.endCell) rowCells += null
@@ -208,32 +221,46 @@ private fun renderHighlights(
 
 private class StaleHighlightSnapshotException : RuntimeException()
 
-private class HighlightMatchCache {
-    private var retained = emptyMap<HighlightCacheKey, List<HighlightMatch>>()
-    private var current: MutableMap<HighlightCacheKey, List<HighlightMatch>>? = null
+internal class HighlightMatchCache {
+    private var ruleKeys = emptyList<HighlightRuleKey>()
+    private var retained = emptyMap<String, Array<List<HighlightMatch>?>>()
+    private var current: MutableMap<String, Array<List<HighlightMatch>?>>? = null
+    internal var regexEvaluationsInScan: Int = 0
+        private set
+    internal val retainedEntryCount: Int
+        get() = retained.size
 
-    fun beginScan() {
+    fun beginScan(rules: List<CompiledHighlightRule>) {
         check(current == null)
+        val replacementKeys = rules.map { HighlightRuleKey(it.rule.pattern, it.rule.matchCase) }
+        if (ruleKeys != replacementKeys) {
+            ruleKeys = replacementKeys
+            retained = emptyMap()
+        }
         current = mutableMapOf()
+        regexEvaluationsInScan = 0
     }
 
-    fun matches(rule: CompiledHighlightRule, text: String): List<HighlightMatch> {
-        val key = HighlightCacheKey(rule.rule.pattern, rule.rule.matchCase, text)
+    fun matches(ruleIndex: Int, rule: CompiledHighlightRule, text: String): List<HighlightMatch> {
         val scan = checkNotNull(current)
-        scan[key]?.let { return it }
-        val matches = retained[key] ?: buildList {
+        val lineMatches = scan.getOrPut(text) {
+            retained[text]?.copyOf() ?: arrayOfNulls(ruleKeys.size)
+        }
+        lineMatches[ruleIndex]?.let { return it }
+        val matches = buildList {
+            regexEvaluationsInScan++
             val matcher = rule.pattern.matcher(text)
             while (matcher.find()) {
                 if (Thread.currentThread().isInterrupted) throw InterruptedException()
                 if (matcher.start() != matcher.end()) add(HighlightMatch(matcher.start(), matcher.end()))
             }
         }
-        scan[key] = matches
+        lineMatches[ruleIndex] = matches
         return matches
     }
 
     fun finishScan() {
-        retained = checkNotNull(current).toMap()
+        retained = checkNotNull(current)
         current = null
     }
 
@@ -242,23 +269,23 @@ private class HighlightMatchCache {
     }
 
     fun clear() {
+        ruleKeys = emptyList()
         retained = emptyMap()
         current = null
     }
 }
 
-private data class HighlightCacheKey(
+private data class HighlightRuleKey(
     val pattern: String,
     val matchCase: Boolean,
-    val text: String,
 )
 
-private data class HighlightMatch(
+internal data class HighlightMatch(
     val start: Int,
     val end: Int,
 )
 
-private data class CompiledHighlightRule(
+internal data class CompiledHighlightRule(
     val rule: TerminalHighlightRule,
     val pattern: Pattern,
 )

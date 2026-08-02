@@ -6,6 +6,8 @@ import com.jediterm.terminal.util.CharUtils
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.util.AbstractList
+import java.util.concurrent.atomic.AtomicInteger
 
 class JediTermSearchControllerTest {
     @Test
@@ -62,6 +64,24 @@ class JediTermSearchControllerTest {
         snapshot.forEachLogicalLineInRows(1, 1) { text, _ -> scanned += text }
 
         assertEquals(listOf("softwrap"), scanned)
+    }
+
+    @Test
+    fun `visible logical line scan does not traverse unrelated history`() {
+        val accesses = AtomicInteger()
+        val history = object : AbstractList<TerminalLineSnapshot>() {
+            override val size: Int = 100_000
+
+            override fun get(index: Int): TerminalLineSnapshot {
+                accesses.incrementAndGet()
+                return line("history $index")
+            }
+        }
+        val snapshot = MainBufferSnapshot(1, history, List(24) { line("screen $it") })
+
+        snapshot.forEachLogicalLineInRows(0, 23) { _, _ -> }
+
+        assertTrue(accesses.get() <= 1, "Viewport scan read ${accesses.get()} unrelated history lines")
     }
 
     private fun line(text: String, wrapped: Boolean = false): TerminalLineSnapshot =

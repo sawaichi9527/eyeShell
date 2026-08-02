@@ -18,7 +18,7 @@ internal data class MainBufferCellSpan(
 
 internal fun MainBufferSnapshot.forEachLogicalLine(
     consume: (text: String, cells: List<MainBufferCell>) -> Unit,
-): Unit = forEachLogicalLine(physicalLines(), consume)
+): Unit = forEachLogicalLine(0, historyLines.size + screenLines.size - 1, consume)
 
 internal fun MainBufferSnapshot.forEachLogicalLineInRows(
     startRow: Int,
@@ -26,22 +26,20 @@ internal fun MainBufferSnapshot.forEachLogicalLineInRows(
     consume: (text: String, cells: List<MainBufferCell>) -> Unit,
 ) {
     if (startRow > endRow) return
-    val lines = physicalLines()
-    var start = lines.indexOfFirst { it.first >= startRow }
-    if (start < 0) return
-    var end = lines.indexOfLast { it.first <= endRow }
-    if (end < start) return
-    while (start > 0 && lines[start - 1].second.isWrapped) start--
-    while (end < lines.lastIndex && lines[end].second.isWrapped) end++
-    forEachLogicalLine(lines.subList(start, end + 1), consume)
+    val firstAvailableRow = -historyLines.size
+    val lastAvailableRow = screenLines.lastIndex
+    if (endRow < firstAvailableRow || startRow > lastAvailableRow) return
+    var start = historyLines.size + maxOf(startRow, firstAvailableRow)
+    var end = historyLines.size + minOf(endRow, lastAvailableRow)
+    while (start > 0 && lineAt(start - 1).isWrapped) start--
+    val lastIndex = historyLines.size + screenLines.size - 1
+    while (end < lastIndex && lineAt(end).isWrapped) end++
+    forEachLogicalLine(start, end, consume)
 }
 
-private fun MainBufferSnapshot.physicalLines(): List<Pair<Int, TerminalLineSnapshot>> =
-    historyLines.mapIndexed { index, line -> (-historyLines.size + index) to line } +
-        screenLines.mapIndexed { index, line -> index to line }
-
-private fun forEachLogicalLine(
-    lines: List<Pair<Int, TerminalLineSnapshot>>,
+private fun MainBufferSnapshot.forEachLogicalLine(
+    start: Int,
+    end: Int,
     consume: (text: String, cells: List<MainBufferCell>) -> Unit,
 ) {
     val text = StringBuilder()
@@ -53,8 +51,10 @@ private fun forEachLogicalLine(
         cells.clear()
     }
 
-    lines.forEach { (row, line) ->
+    for (index in start..end) {
         if (Thread.currentThread().isInterrupted) throw InterruptedException()
+        val row = index - historyLines.size
+        val line = lineAt(index)
         line.text.forEachIndexed { cell, character ->
             if (character == CharUtils.DWC) {
                 val previous = cells.lastOrNull()
@@ -68,6 +68,9 @@ private fun forEachLogicalLine(
     }
     flush()
 }
+
+private fun MainBufferSnapshot.lineAt(index: Int): TerminalLineSnapshot =
+    if (index < historyLines.size) historyLines[index] else screenLines[index - historyLines.size]
 
 internal fun List<MainBufferCell>.spans(startOffset: Int, endOffset: Int): List<MainBufferCellSpan> {
     if (startOffset >= endOffset) return emptyList()

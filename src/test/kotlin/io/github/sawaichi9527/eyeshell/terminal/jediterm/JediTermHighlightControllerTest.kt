@@ -13,6 +13,8 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertTimeoutPreemptively
+import java.time.Duration
 
 class JediTermHighlightControllerTest {
     @Test
@@ -74,6 +76,49 @@ class JediTermHighlightControllerTest {
         assertTrue(highlightMainBuffer(snapshot, listOf(rule("^"))).getSpans(0).isEmpty())
     }
 
+    @Test
+    fun `one hundred thousand lines reuse regex matches except for changed content`() {
+        assertTimeoutPreemptively(Duration.ofSeconds(60)) {
+            val lines = List(TOTAL_LINES) { index ->
+                line(when {
+                    index == TOTAL_LINES - 1 -> "row $index WARN"
+                    index % 10_000 == 0 -> "row $index ERROR WARN"
+                    index % 1_000 == 0 -> "row $index ERROR"
+                    else -> "row $index ok"
+                })
+            }
+            val snapshot = MainBufferSnapshot(
+                41,
+                lines.subList(0, TOTAL_LINES - SCREEN_LINES),
+                lines.subList(TOTAL_LINES - SCREEN_LINES, TOTAL_LINES),
+            )
+            val rules = listOf(
+                rule("ERROR", foregroundRgb = 0xFF0000),
+                rule("WARN", priority = 1, backgroundRgb = 0xFFFF00, underline = true),
+                rule("row 50000", priority = 2, bold = true),
+            )
+            val cache = HighlightMatchCache()
+
+            val first = highlightMainBuffer(snapshot, rules, cache)
+            assertEquals(TOTAL_LINES * rules.size, cache.regexEvaluationsInScan)
+            assertEquals(TOTAL_LINES, cache.retainedEntryCount)
+            assertEquals(2, first.getSpans(-snapshot.historyLines.size).size)
+            assertEquals(1, first.getSpans(SCREEN_LINES - 1).size)
+
+            val changedLines = lines.toMutableList().apply { this[50_001] = line("row 50001 ERROR changed") }
+            val changed = MainBufferSnapshot(
+                42,
+                changedLines.subList(0, TOTAL_LINES - SCREEN_LINES),
+                changedLines.subList(TOTAL_LINES - SCREEN_LINES, TOTAL_LINES),
+            )
+            val second = highlightMainBuffer(changed, rules, cache)
+
+            assertEquals(rules.size, cache.regexEvaluationsInScan)
+            assertEquals(42, second.revision)
+            assertEquals(1, second.getSpans(50_001 - changed.historyLines.size).size)
+        }
+    }
+
     private fun rule(
         pattern: String,
         priority: Int = 0,
@@ -97,4 +142,9 @@ class JediTermHighlightControllerTest {
 
     private fun line(text: String, wrapped: Boolean = false): TerminalLineSnapshot =
         TerminalLineSnapshot(text, wrapped, text.isEmpty())
+
+    companion object {
+        private const val TOTAL_LINES = 100_000
+        private const val SCREEN_LINES = 24
+    }
 }

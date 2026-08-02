@@ -1,16 +1,21 @@
 package io.github.sawaichi9527.eyeshell.terminal.jediterm
 
 import io.github.sawaichi9527.eyeshell.terminal.SyntheticTerminalSession
+import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
 import io.github.sawaichi9527.eyeshell.terminal.HighlightMergeMode
 import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
 import java.io.StringWriter
+import java.io.IOException
+import java.io.PipedReader
+import java.io.PipedWriter
 import java.awt.Component
 import java.awt.Container
 import java.time.Duration
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicBoolean
 import org.junit.jupiter.api.Assertions.assertEquals
 import javax.swing.SwingUtilities
 import javax.swing.JLabel
@@ -20,6 +25,11 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class JediTermTerminalViewTest {
+    @Test
+    fun `terminal retains the phase one scrollback baseline`() {
+        assertEquals(EyeShellTerminalSettings.MAX_SCROLLBACK_LINES, EyeShellTerminalSettings().bufferMaxLinesCount)
+    }
+
     @Test
     fun `select all leaves an empty terminal unselected`() {
         val view = onEdt { JediTermTerminalView() }
@@ -150,6 +160,131 @@ class JediTermTerminalViewTest {
     }
 
     @Test
+    fun `retains and highlights one hundred thousand scrollback lines`() {
+        val script = buildString {
+            repeat(EyeShellTerminalSettings.MAX_SCROLLBACK_LINES + 10) { index ->
+                append("line ")
+                append(index.toString().padStart(6, '0'))
+                append(if (index % 10_000 == 0) " ERROR\r\n" else " ok\r\n")
+            }
+            append("FINAL ERROR")
+        }
+        val view = onEdt {
+            JediTermTerminalView(columns = 40, rows = 4).also {
+                it.attach(SyntheticTerminalSession.fromText(script))
+                it.setHighlightRules(listOf(errorRule()))
+            }
+        }
+
+        try {
+            await(Duration.ofSeconds(30)) { !view.isSessionRunning }
+            assertEquals(EyeShellTerminalSettings.MAX_SCROLLBACK_LINES, view.historyLineCount)
+            await(Duration.ofSeconds(30)) {
+                onEdt {
+                    val result = view.coordinateHighlightResult ?: return@onEdt false
+                    result.revision == view.mainBufferRevision && result.getSpans(3).any {
+                        it.startCell == 6 && it.endCell == 11
+                    }
+                }
+            }
+        } finally {
+            onEdt { view.close() }
+        }
+    }
+
+    @Test
+    fun `continuous output keeps the EDT responsive and converges after quiescence`() {
+        val session = StreamingTerminalSession()
+        val keepProducing = AtomicBoolean(true)
+        val view = onEdt {
+            JediTermTerminalView(columns = 40, rows = 4).also {
+                it.attach(session)
+                it.setHighlightRules(listOf(errorRule()))
+            }
+        }
+        val producer = Thread.ofVirtual().name("highlight-output-test").start {
+            var line = 0
+            while (keepProducing.get()) {
+                session.emit("line $line ${if (line % 100 == 0) "ERROR" else "ok"}\r\n")
+                line++
+            }
+            session.emit("FINAL ERROR")
+            session.finish()
+        }
+
+        try {
+            await(Duration.ofSeconds(10)) { session.charactersRead.get() >= 10_000 }
+            assertTrue(producer.isAlive, "Output stopped before the EDT responsiveness probe")
+            repeat(5) {
+                val edtServiced = CountDownLatch(1)
+                SwingUtilities.invokeLater(edtServiced::countDown)
+                assertTrue(edtServiced.await(2, TimeUnit.SECONDS), "Continuous highlighting blocked the Swing EDT")
+                assertTrue(producer.isAlive, "Output stopped during the EDT responsiveness probes")
+            }
+            keepProducing.set(false)
+            producer.join(Duration.ofSeconds(10))
+            assertFalse(producer.isAlive, "Synthetic output producer did not finish")
+            await(Duration.ofSeconds(10)) { !view.isSessionRunning }
+            await(Duration.ofSeconds(10)) {
+                onEdt {
+                    val result = view.coordinateHighlightResult ?: return@onEdt false
+                    result.revision == view.mainBufferRevision && result.getSpans(3).any {
+                        it.startCell == 6 && it.endCell == 11
+                    }
+                }
+            }
+        } finally {
+            keepProducing.set(false)
+            session.close()
+            onEdt { view.close() }
+            producer.join(Duration.ofSeconds(5))
+        }
+    }
+
+    @Test
+    fun `closing during active output unblocks the terminal and rejects later highlight work`() {
+        val session = StreamingTerminalSession()
+        val view = onEdt {
+            JediTermTerminalView(columns = 40, rows = 4).also {
+                it.attach(session)
+                it.setHighlightRules(listOf(errorRule()))
+            }
+        }
+        val producerStarted = CountDownLatch(1)
+        val producer = Thread.ofVirtual().name("highlight-close-test").start {
+            try {
+                var line = 0
+                while (true) {
+                    session.emit("active $line ERROR\r\n")
+                    if (line++ == 0) producerStarted.countDown()
+                }
+            } catch (_: IOException) {
+                // Closing the terminal intentionally interrupts the synthetic stream.
+            }
+        }
+        try {
+            await(Duration.ofSeconds(5)) { onEdt { view.coordinateHighlightResult != null } }
+            assertTrue(producerStarted.await(5, TimeUnit.SECONDS))
+            val initialReadCount = session.charactersRead.get()
+            await(Duration.ofSeconds(5)) { session.charactersRead.get() > initialReadCount }
+
+            onEdt { view.close() }
+
+            val resultAfterClose = onEdt { view.coordinateHighlightResult }
+            assertTrue(session.closed.await(5, TimeUnit.SECONDS), "Terminal close did not close its session")
+            producer.join(Duration.ofSeconds(5))
+            assertFalse(producer.isAlive, "Output remained blocked after terminal close")
+            assertTrue(view.awaitHighlightTermination(5, TimeUnit.SECONDS), "Highlight worker did not terminate")
+            onEdt { }
+            assertTrue(resultAfterClose === onEdt { view.coordinateHighlightResult }, "Highlight result changed after terminal close")
+        } finally {
+            session.close()
+            onEdt { view.close() }
+            producer.join(Duration.ofSeconds(5))
+        }
+    }
+
+    @Test
     fun `context output actions enable after a session is attached`() {
         val copyCount = AtomicInteger()
         val saveCount = AtomicInteger()
@@ -231,6 +366,57 @@ class JediTermTerminalViewTest {
             if (component is Container) component.findByName(componentName)?.let { return it }
         }
         return null
+    }
+
+    private fun errorRule() = TerminalHighlightRule(
+        name = "Errors",
+        pattern = "ERROR",
+        matchCase = true,
+        enabled = true,
+        priority = 0,
+        foregroundRgb = 0xFFFFFF,
+        backgroundRgb = 0xAA0000,
+        bold = true,
+        italic = false,
+        underline = false,
+        mergeMode = HighlightMergeMode.MERGE,
+    )
+
+    private class StreamingTerminalSession : TerminalSession {
+        private val reader = PipedReader(64 * 1024)
+        private val writer = PipedWriter(reader)
+        private val open = AtomicBoolean(true)
+        val charactersRead = AtomicInteger()
+        val closed = CountDownLatch(1)
+
+        override val name: String = "streaming-test"
+        override val isOpen: Boolean
+            get() = open.get()
+
+        @Synchronized
+        fun emit(text: String) {
+            if (!open.get()) throw IOException("Synthetic terminal session is closed")
+            writer.write(text)
+            writer.flush()
+        }
+
+        fun finish() {
+            if (open.compareAndSet(true, false)) writer.close()
+        }
+
+        override fun read(buffer: CharArray, offset: Int, length: Int): Int =
+            reader.read(buffer, offset, length).also { if (it > 0) charactersRead.addAndGet(it) }
+        override fun write(bytes: ByteArray) = Unit
+        override fun write(text: String) = Unit
+        override fun resize(columns: Int, rows: Int) = Unit
+        override fun ready(): Boolean = reader.ready()
+        override fun awaitExit(): Int = 0
+
+        override fun close() {
+            finish()
+            reader.close()
+            closed.countDown()
+        }
     }
 
     companion object {

@@ -113,6 +113,12 @@ class JediTermTerminalView(
     internal val coordinateHighlightResult
         get() = widget.terminalPanel.coordinateHighlightResult
 
+    internal val mainBufferRevision: Long
+        get() = widget.terminalTextBuffer.getMainBufferRevision()
+
+    internal fun awaitHighlightTermination(timeout: Long, unit: java.util.concurrent.TimeUnit): Boolean =
+        highlightController.awaitTermination(timeout, unit)
+
     override fun close() {
         highlightController.close()
         searchController.close()
@@ -202,8 +208,14 @@ private class SessionTtyConnector(
     override fun close() = session.close()
 }
 
-private class EyeShellTerminalSettings : DefaultSettingsProvider() {
+internal class EyeShellTerminalSettings : DefaultSettingsProvider() {
     override fun audibleBell(): Boolean = false
+
+    override fun getBufferMaxLinesCount(): Int = MAX_SCROLLBACK_LINES
+
+    companion object {
+        internal const val MAX_SCROLLBACK_LINES = 100_000
+    }
 }
 
 private fun MainBufferSnapshot.writeLogicalLines(writer: Writer) {

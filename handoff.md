@@ -2,7 +2,7 @@
 
 ## Current Status
 
-The M1F Current Session Regex Highlight baseline is implemented. RE2/J matching, visible-first revision-safe background publication, incremental logical-line match reuse, and a styled JediTerm coordinate overlay preserve search/selection precedence and alternate-screen isolation.
+The M1F Current Session Regex Highlight baseline and its first performance hardening gate are implemented. The terminal now retains 100,000 scrollback lines, viewport scanning is independent of total history size, and line-centric regex caching converges after sustained output without blocking the EDT.
 
 ## Completed
 
@@ -54,7 +54,7 @@ The M1F Current Session Regex Highlight baseline is implemented. RE2/J matching,
 - Added UTF-8 `Save All Output...` through a same-directory temporary file and fail-closed atomic replacement.
 - Added cancellation-safe capture/publication state and deferred terminal close without waiting on the Swing EDT.
 - Added deterministic coverage for alternate-screen export, context action enablement, clipboard limits, Unicode boundaries, atomic replacement, failure cleanup, cancellation, and close-during-capture lifecycle.
-- Published JediTerm core revision/bounds patch `bdc5ddf`, popup/selection/coordinate-search patch `c822275`, and styled coordinate highlight overlay patch `05ed207`.
+- Published JediTerm core revision/bounds patch `bdc5ddf`, popup/selection/coordinate-search patch `c822275`, styled coordinate highlight overlay patch `05ed207`, and renderer composition tests `38413f9`.
 - Added the exact Phase 1 terminal context menu with disabled Highlight placeholders instead of fake flows.
 - Added Select Visible and Select All Output with bounded endpoint discovery and retained-main selection during alternate screen applications.
 - Added background retained-main search with 150 ms debounce, cancellation, generation/revision stale-result rejection, and coordinate rendering.
@@ -66,6 +66,12 @@ The M1F Current Session Regex Highlight baseline is implemented. RE2/J matching,
 - Added visible-first retained-main regex scanning, one-generation logical-line match reuse, coalesced model notifications, cancellation, and revision/generation stale-result rejection.
 - Added a separate JediTerm styled coordinate overlay painted before interactive Search and Selection, hidden during alternate screen use, without modifying terminal text or ANSI data.
 - Added deterministic coverage for RE2 syntax rejection, zero-length matches, soft/hard wraps, CJK DWC mapping, rule priority/style composition, override semantics, viewport logical-line boundaries, async publication, and immutable fork result indexing.
+- Raised the Phase 1 terminal scrollback baseline from JediTerm's default 5,000 lines to 100,000 lines.
+- Replaced full-history viewport preparation with direct indexed traversal bounded to the viewport and adjacent soft-wrap boundaries.
+- Reduced incremental highlight cache cardinality from lines multiplied by rules to one entry per distinct logical-line text, with per-rule results inside each line entry.
+- Added a real 100,000-line JediTerm pipeline gate plus a three-rule detached-snapshot gate that proves only the changed line is reevaluated in the next generation.
+- Added sustained-output EDT probes, final-revision convergence, active-stream close/worker termination, and no-publication-after-close coverage.
+- Added offscreen renderer coverage for ANSI Merge/Override composition, Highlight/Search/Selection/Cursor paint order, stale revision suppression, and alternate-screen hide/restore behavior.
 
 ## In Progress
 
@@ -75,20 +81,21 @@ The M1F Current Session Regex Highlight baseline is implemented. RE2/J matching,
 
 - Validate the PowerShell bootstrap and launcher scripts on Windows 10/11 x64.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
-- Validate M1F pixel-level renderer composition, manual Add/Manage dialog behavior, continuous high-rate output, and 100,000-line multi-rule performance.
+- Manually validate Add/Manage highlight dialogs and color selection on supported desktop environments.
+- Characterize heap usage with multiple simultaneous 100,000-line sessions and larger rule sets.
 - Validate keyboard-interactive dialogs against external multi-prompt and MFA-capable SSH servers.
 - Validate OpenSSH agent authentication on Ubuntu 24.04/26.04 with a desktop-inherited `SSH_AUTH_SOCK`.
 - Validate the asynchronous OpenSSH agent named-pipe transport on Windows 10/11 x64 with the pinned Temurin 21 runtime.
 
 ## Validation Evidence
 
-- Commands: `./scripts/gradlew-local.sh test --rerun-tasks`; `./scripts/gradlew-local.sh check`; project-local JDK/Gradle-home `./gradlew :core:test :ui:test --rerun-tasks --no-daemon` in the fork; 8-second `timeout --signal=TERM 8s ./scripts/gradlew-local.sh run`; parent/fork `git diff --check`.
+- Commands: `./scripts/gradlew-local.sh test --rerun-tasks`; `./scripts/gradlew-local.sh check`; project-local JDK/Gradle-home `./gradlew :core:test :ui:test --rerun-tasks --no-daemon` in the fork; targeted 100,000-line real-pipeline and detached-cache tests; parent/fork `git diff --check`.
 - Executed at: 2026-08-02
 - Exit codes: 0 for tests, check, secret-boundary search, and diff checks; 124 expected for the bounded GUI smoke timeout.
-- Result: 30 root tests passed with 0 failures/skips; `check` and the fork core/UI suites passed. New M1F tests cover RE2 safety, zero-length matches, priority and Merge/Override styles, viewport soft-wrap boundaries, CJK DWC spans, async overlay publication, and immutable fork result indexing. Swing launched and remained alive until the expected timeout. No credential or terminal-output fixture is stored in the repository.
+- Result: 36 root tests passed with 0 failures/skips; `check` and the fork core/UI suites passed. The real JediTerm pipeline retained and highlighted 100,000 scrollback lines; the detached three-rule gate retained 100,000 line-cache entries and reevaluated only the changed line's three Regex patterns in its second generation. Sustained output serviced five EDT probes within two seconds each, converged to the final revision after quiescence, and active-stream close terminated the highlight worker without later publication. Fork tests cover renderer composition/order plus stale and alternate-screen suppression. No credential or terminal-output fixture is stored in the repository.
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
-- Remaining unverified scope: pixel-level highlight/search/selection composition, manual highlight dialogs, continuous high-rate highlight refresh, exhaustive close/search/highlight interleavings, Windows clipboard and atomic-move behavior, 100,000-line snapshot/search/multi-rule performance, Windows scripts/runtime, ACL behavior and OpenSSH agent named-pipe I/O, Ubuntu 24.04 X11 and external `SSH_AUTH_SOCK` interoperability, multi-prompt/MFA servers, native Wayland/JBR 25, packaging, non-RSA agent keys, adverse network behavior, SFTP, monitoring, SQLite, and OS secret stores.
+- Remaining unverified scope: manual highlight dialogs/color selection, multi-session 100,000-line heap characterization, exhaustive search/highlight interleavings, Windows clipboard and atomic-move behavior, Windows scripts/runtime, ACL behavior and OpenSSH agent named-pipe I/O, Ubuntu 24.04 X11 and external `SSH_AUTH_SOCK` interoperability, multi-prompt/MFA servers, native Wayland/JBR 25, packaging, non-RSA agent keys, adverse network behavior, SFTP, monitoring, SQLite, and OS secret stores.
 
 ## Known Issues
 

@@ -465,7 +465,7 @@ M1E-A fork：
 
 - Repository：`sawaichi9527/jediterm`
 - Upstream base：`377b76e682a5f86bcbb18a318386f530dbebf5c1`
-- Pinned fork commit：`05ed2077746ed99494709f7e7d98ee85cc2543fd`
+- Pinned fork commit：`38413f9707accfd389d00ceba8cd1f6678b14192`
 - Buffer patch：在 model lock 內擷取 immutable main-buffer line snapshot，alternate screen active 時讀取 retained main buffer
 - Selection patch：revisioned retained-main bounds、active／all-main／search-main selection scope
 - Search patch：popup override、coordinate result rendering 與 custom Find handler
@@ -638,12 +638,13 @@ M1F Current Session baseline：
 - 規則 model 明確限定 `Current Session` scope；Global、Host Group、Specific Host 與 Workspace 留待 persistence/host model 完成後加入
 - 使用 Google RE2/J 1.8，拒絕 backreference 等非 RE2-compatible、高風險 backtracking 語法
 - RE2 match 在背景 virtual thread 執行，規則替換與 renderer publication 在 Swing EDT；invalid pattern 不替換既有 active rules
-- 先發布目前 viewport 的 logical-line spans，再掃描完整 retained main buffer；未變更 logical-line text 透過 bounded one-generation match cache 重用結果
+- 先以 O(viewport + soft-wrap boundary) 掃描並發布目前 viewport spans，再掃描完整 retained main buffer；未變更 logical-line text 透過 bounded one-generation、每行單一 entry 的 match cache 重用各規則結果
 - 沿用 main-buffer revision、generation、cooperative cancellation 與 coalesced model notification，拒絕 stale renderer overlay
 - soft-wrap 視為同一 logical line、hard break 阻止跨行 match，DWC marker 不參與 regex 並映射回 Unicode/CJK terminal cells
 - Highlight 是獨立 coordinate renderer overlay，繪製順序為 Highlight、Search、Selection、Cursor；alternate screen active 時不顯示 retained-main highlight
 - `Merge` 保留原 ANSI style 並疊加規則；`Override` 清除原 ANSI style 與較低優先 highlight，再由規則指定 color/bold/italic/underline
 - 規則只存在目前 application session，不寫入 SQLite、log 或其他持久儲存
+- Phase 1 預設保留最多 100,000 行 scrollback；持續輸出期間保持 EDT 可回應，highlight 保證在輸出停止後收斂至最終 main-buffer revision
 
 ---
 
@@ -1004,7 +1005,7 @@ Repaint
 | XWayland | 正式 fallback |
 | 32-bit | 完全移除 |
 | 主 UI | Swing + FlatLaf |
-| Terminal | JediTerm 3.74 project fork pinned at `05ed207` (upstream base `377b76e`) |
+| Terminal | JediTerm 3.74 project fork pinned at `38413f9` (upstream base `377b76e`) |
 | SSH/SFTP | Apache MINA SSHD 2.19.0 |
 | 即時 Regex | Google RE2/J 1.8 |
 | Database | SQLite |
