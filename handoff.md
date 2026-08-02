@@ -2,7 +2,9 @@
 
 ## Current Status
 
-The M1I Multi-session Tabs baseline is implemented in the worktree. Each successful SSH connection creates an independently owned terminal page with its own JediTerm view, output/search/highlight workers, and close lifecycle while preserving the Monitor outside the tabs.
+The M1I Multi-session Tabs baseline is committed and pushed to `origin/main` (`333b6cc` `feat: add multi-session terminal tabs`); the worktree is clean.
+
+M1J Session Lifecycle Status is planned but not yet implemented. Approved M1J scope: detect remote shell natural exit; display per-tab status `Connected`/`Exited`/`Failed`/`Closing`; preserve an ended session's scrollback; keep unrelated connection failures from affecting live tabs; and cover window-close and tab-close lifecycle with deterministic tests.
 
 ## Completed
 
@@ -102,7 +104,20 @@ The M1I Multi-session Tabs baseline is implemented in the worktree. Each success
 
 ## In Progress
 
-- Complete M1I validation and review before publishing.
+- Implement M1J Session Lifecycle Status.
+
+## M1J Plan (handoff to Windows/opencode environment)
+
+Scope confirmed by user: per-tab lifecycle status + repo write only; feature code was NOT implemented on the Linux side. Design direction researched:
+
+- **Detection seam (already confirmed in code):** natural remote exit already flows through the terminal engine — `MinaSshTerminalSession.read()` returns `-1` on EOF (MinaSshConnection.kt:241), the JediTerm emulator loop stops (`TerminalStarter.doStartEmulator`), and `JediTermTerminalView.isSessionRunning` / `widget.isSessionRunning` becomes `false`. M1J only needs to surface this into the tab UI; no engine change is required to *detect* the event. User-initiated close goes through `TerminalSessionPage.close()` (EyeShellWindow.kt:120) → `outputController.close(terminalView::close)`.
+- **Suggested mechanism:** background virtual-thread watcher per session page that observes the session/view natural-stop signal and posts an EDT status update; polling `isSessionRunning` is simplest and deterministic-testable (open design question — see below).
+- **Status enum:** `CONNECTED`, `EXITED`, `FAILED`, `CLOSING`.
+  - `EXITED`: observed clean EOF while the tab remains listed → repaint tab header only, do **not** close the view or remove the tab, so scrollback is preserved.
+  - `FAILED`: unexpected stop / transport exception while listed (open design question — may keep minimal and map any stop to `EXITED` for M1J).
+  - `CLOSING`: transient during user-initiated teardown.
+- **UI wiring:** `WorkbenchPanel.createSessionTabHeader` (EyeShellWindow.kt:259) currently renders a static header; make it status-updatable (small colored status chip beside the title) and update the selected-session bottom bar (`connectionStatus`). Add `WorkbenchPanel.updateSessionStatus(component, status)`.
+- **Config to verify on next session:** `/home/sawaichi/.config/opencode/opencode.json*` and `~/.config/opencode/` project/global settings, and `third-party/jediterm` fork pin — confirm the Windows environment uses the same project-local `.local/` JDK/Gradle and vendored submodule.
 
 ## Next Actions
 
