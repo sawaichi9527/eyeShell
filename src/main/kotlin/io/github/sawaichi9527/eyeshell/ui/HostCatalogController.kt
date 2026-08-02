@@ -1,6 +1,8 @@
 package io.github.sawaichi9527.eyeshell.ui
 
 import io.github.sawaichi9527.eyeshell.ssh.SshEndpoint
+import io.github.sawaichi9527.eyeshell.secrets.PasswordCredentialStore
+import io.github.sawaichi9527.eyeshell.secrets.ProfileCredentialGuard
 import io.github.sawaichi9527.eyeshell.storage.HostCatalog
 import io.github.sawaichi9527.eyeshell.storage.HostDraft
 import io.github.sawaichi9527.eyeshell.storage.SavedAuthenticationMethod
@@ -36,6 +38,8 @@ import javax.swing.SwingUtilities
 
 internal class HostCatalogController(
     private val catalog: HostCatalog,
+    private val passwordStore: PasswordCredentialStore,
+    private val credentialGuard: ProfileCredentialGuard = ProfileCredentialGuard(),
     private val connect: (EyeShellWindow, HostConnectionPreset) -> Unit,
 ) : AutoCloseable {
     private val executor = Executors.newSingleThreadExecutor(Thread.ofVirtual().name("host-catalog-", 0).factory())
@@ -64,6 +68,63 @@ internal class HostCatalogController(
             failure = {},
         )
     }
+
+    internal fun updateHost(existing: SavedHost, draft: HostDraft): SavedHost {
+        if (existing.draft.authenticationMethod == SavedAuthenticationMethod.PASSWORD &&
+            draft.authenticationMethod != SavedAuthenticationMethod.PASSWORD
+        ) {
+            return credentialGuard.invalidate(existing.profileId) {
+                withoutCredential(existing.profileId) { catalog.updateHost(existing.id, draft) }
+            }
+        }
+        if (existing.draft.authenticationMethod != SavedAuthenticationMethod.PASSWORD &&
+            draft.authenticationMethod == SavedAuthenticationMethod.PASSWORD
+        ) {
+            return credentialGuard.activate(existing.profileId) { catalog.updateHost(existing.id, draft) }
+        }
+        return catalog.updateHost(existing.id, draft)
+    }
+
+    internal fun deleteHost(host: SavedHost) {
+        if (host.draft.authenticationMethod == SavedAuthenticationMethod.PASSWORD) {
+            credentialGuard.invalidate(host.profileId) {
+                withoutCredential(host.profileId) { catalog.deleteHost(host.id) }
+            }
+            return
+        }
+        credentialGuard.invalidate(host.profileId) { catalog.deleteHost(host.id) }
+    }
+
+    private fun <T> withoutCredential(profileId: java.util.UUID, mutation: () -> T): T {
+        val storedPassword = passwordStore.retrieve(profileId)
+        return try {
+            try {
+                passwordStore.forget(profileId)
+                mutation()
+            } catch (failure: Exception) {
+                try {
+                    storedPassword?.copyValue()?.let { password ->
+                        try {
+                            passwordStore.save(profileId, password)
+                        } finally {
+                            password.fill('\u0000')
+                        }
+                    }
+                } catch (restoreFailure: Exception) {
+                    failure.addSuppressed(restoreFailure)
+                    throw CredentialRollbackException(failure)
+                }
+                throw failure
+            }
+        } finally {
+            storedPassword?.close()
+        }
+    }
+
+    private class CredentialRollbackException(cause: Exception) : Exception(
+        "The profile was unchanged, but its saved password could not be restored.",
+        cause,
+    )
 
     private fun createDialog(owner: EyeShellWindow): DialogState {
         val model = DefaultListModel<SavedHost>()
@@ -127,7 +188,9 @@ internal class HostCatalogController(
         edit.addActionListener {
             val selected = list.selectedValue ?: return@addActionListener
             showHostEditor(dialog, selected)?.let { draft ->
-                mutate(state) { catalog.updateHost(selected.id, draft) }
+                mutate(state) {
+                    updateHost(selected, draft)
+                }
             }
         }
         delete.addActionListener {
@@ -140,7 +203,9 @@ internal class HostCatalogController(
                     JOptionPane.WARNING_MESSAGE,
                 ) == JOptionPane.YES_OPTION
             ) {
-                mutate(state) { catalog.deleteHost(selected.id) }
+                mutate(state) {
+                    deleteHost(selected)
+                }
             }
         }
         connectButton.addActionListener {
@@ -177,7 +242,7 @@ internal class HostCatalogController(
                 hosts.forEach(state.model::addElement)
                 setBusy(state, false, if (hosts.isEmpty()) "No saved hosts." else "${hosts.size} saved hosts")
             },
-            failure = { showCatalogFailure(state) },
+            failure = { showCatalogFailure(state, it) },
         )
     }
 
@@ -194,7 +259,7 @@ internal class HostCatalogController(
                 hosts.forEach(state.model::addElement)
                 setBusy(state, false, if (hosts.isEmpty()) "No saved hosts." else "${hosts.size} saved hosts")
             },
-            failure = { showCatalogFailure(state) },
+            failure = { showCatalogFailure(state, it) },
         )
     }
 
@@ -232,12 +297,13 @@ internal class HostCatalogController(
         }
     }
 
-    private fun showCatalogFailure(state: DialogState) {
+    private fun showCatalogFailure(state: DialogState, failure: Throwable) {
         if (!state.dialog.isDisplayable) return
         setBusy(state, false, "Host catalog unavailable")
         JOptionPane.showMessageDialog(
             state.dialog,
-            "Could not access the local host catalog.",
+            failure.message.takeIf { failure is CredentialRollbackException }
+                ?: "Could not access the local host catalog.",
             "Host catalog error",
             JOptionPane.ERROR_MESSAGE,
         )
@@ -332,6 +398,7 @@ internal class HostCatalogController(
 }
 
 internal fun SavedHost.toPreset(): HostConnectionPreset = HostConnectionPreset(
+    profileId = profileId,
     endpoint = draft.endpoint,
     authenticationMethod = draft.authenticationMethod.toConnectionMethod(),
 )

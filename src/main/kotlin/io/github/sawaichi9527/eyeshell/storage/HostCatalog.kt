@@ -1,6 +1,7 @@
 package io.github.sawaichi9527.eyeshell.storage
 
 import io.github.sawaichi9527.eyeshell.ssh.SshEndpoint
+import java.util.UUID
 
 enum class SavedAuthenticationMethod {
     PASSWORD,
@@ -32,6 +33,7 @@ data class HostDraft(
 
 data class SavedHost(
     val id: Long,
+    val profileId: UUID,
     val draft: HostDraft,
 )
 

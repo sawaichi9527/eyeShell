@@ -11,6 +11,7 @@ import java.sql.DriverManager
 import java.sql.ResultSet
 import java.sql.SQLException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.UUID
 import org.sqlite.SQLiteConfig
 
 class SqliteHostCatalog(
@@ -44,21 +45,23 @@ class SqliteHostCatalog(
     @Synchronized
     override fun createHost(host: HostDraft): SavedHost = writeTransaction { connection ->
         val normalized = host.normalized()
+        val profileId = UUID.randomUUID()
         val groupId = normalized.group?.let { resolveNameId(connection, "host_groups", it) }
         val id = connection.prepareStatement(CREATE_HOST).use { statement ->
-            statement.setObject(1, groupId)
-            statement.setString(2, normalized.name)
-            statement.setString(3, normalized.endpoint.host)
-            statement.setInt(4, normalized.endpoint.port)
-            statement.setString(5, normalized.endpoint.username)
-            statement.setString(6, normalized.authenticationMethod.name)
+            statement.setString(1, profileId.toString())
+            statement.setObject(2, groupId)
+            statement.setString(3, normalized.name)
+            statement.setString(4, normalized.endpoint.host)
+            statement.setInt(5, normalized.endpoint.port)
+            statement.setString(6, normalized.endpoint.username)
+            statement.setString(7, normalized.authenticationMethod.name)
             statement.executeQuery().use { results ->
                 check(results.next()) { "Host insert did not return an identifier" }
                 results.getLong(1)
             }
         }
         replaceTags(connection, id, normalized.tags)
-        SavedHost(id, normalized)
+        SavedHost(id, profileId, normalized)
     }
 
     @Synchronized
@@ -78,7 +81,14 @@ class SqliteHostCatalog(
         }
         require(updated == 1) { "Unknown host profile: $id" }
         replaceTags(connection, id, normalized.tags)
-        SavedHost(id, normalized)
+        val profileId = connection.prepareStatement("SELECT profile_uuid FROM hosts WHERE id = ?").use { statement ->
+            statement.setLong(1, id)
+            statement.executeQuery().use { results ->
+                check(results.next()) { "Updated host profile disappeared: $id" }
+                UUID.fromString(results.getString(1))
+            }
+        }
+        SavedHost(id, profileId, normalized)
     }
 
     @Synchronized
@@ -141,7 +151,7 @@ class SqliteHostCatalog(
         connection.autoCommit = false
         try {
             connection.createStatement().use { it.execute(CREATE_SCHEMA_VERSIONS) }
-            val version = connection.createStatement().use { statement ->
+            var version = connection.createStatement().use { statement ->
                 statement.executeQuery("SELECT COALESCE(MAX(version), 0) FROM schema_versions").use { results ->
                     results.next()
                     results.getInt(1)
@@ -152,13 +162,12 @@ class SqliteHostCatalog(
             }
             if (version == 0) {
                 INITIAL_SCHEMA.forEach { sql -> connection.createStatement().use { it.execute(sql) } }
-                connection.prepareStatement(
-                    "INSERT INTO schema_versions(version, description) VALUES (?, ?)",
-                ).use { statement ->
-                    statement.setInt(1, CURRENT_SCHEMA_VERSION)
-                    statement.setString(2, "initial host catalog")
-                    statement.executeUpdate()
-                }
+                recordSchemaVersion(connection, 1, "initial host catalog")
+                version = 1
+            }
+            if (version == 1) {
+                migrateToStableProfileIds(connection)
+                recordSchemaVersion(connection, 2, "stable host profile identifiers")
             }
             connection.commit()
         } catch (failure: Throwable) {
@@ -171,6 +180,43 @@ class SqliteHostCatalog(
             statement.executeQuery("PRAGMA foreign_key_check").use { results ->
                 check(!results.next()) { "Host catalog contains invalid foreign keys" }
             }
+        }
+    }
+
+    private fun migrateToStableProfileIds(connection: Connection) {
+        PROFILE_ID_MIGRATION_PREFIX.forEach { sql -> connection.createStatement().use { it.execute(sql) } }
+        connection.prepareStatement(MIGRATE_HOST).use { insert ->
+            connection.createStatement().use { statement ->
+                statement.executeQuery(
+                    "SELECT id, group_id, name, host, port, username, authentication_method, created_at, updated_at FROM hosts",
+                ).use { hosts ->
+                    while (hosts.next()) {
+                        insert.setLong(1, hosts.getLong("id"))
+                        insert.setString(2, UUID.randomUUID().toString())
+                        insert.setObject(3, hosts.getObject("group_id"))
+                        insert.setString(4, hosts.getString("name"))
+                        insert.setString(5, hosts.getString("host"))
+                        insert.setInt(6, hosts.getInt("port"))
+                        insert.setString(7, hosts.getString("username"))
+                        insert.setString(8, hosts.getString("authentication_method"))
+                        insert.setString(9, hosts.getString("created_at"))
+                        insert.setString(10, hosts.getString("updated_at"))
+                        insert.addBatch()
+                    }
+                    insert.executeBatch()
+                }
+            }
+        }
+        PROFILE_ID_MIGRATION_SUFFIX.forEach { sql -> connection.createStatement().use { it.execute(sql) } }
+    }
+
+    private fun recordSchemaVersion(connection: Connection, version: Int, description: String) {
+        connection.prepareStatement(
+            "INSERT INTO schema_versions(version, description) VALUES (?, ?)",
+        ).use { statement ->
+            statement.setInt(1, version)
+            statement.setString(2, description)
+            statement.executeUpdate()
         }
     }
 
@@ -288,6 +334,7 @@ class SqliteHostCatalog(
     private fun ResultSet.toHostRow(): HostRow = try {
         HostRow(
             id = getLong("id"),
+            profileId = UUID.fromString(getString("profile_uuid")),
             name = getString("name"),
             endpoint = SshEndpoint(getString("host"), getInt("port"), getString("username")),
             authenticationMethod = SavedAuthenticationMethod.valueOf(getString("authentication_method")),
@@ -311,6 +358,7 @@ class SqliteHostCatalog(
 
     private data class HostRow(
         val id: Long,
+        val profileId: UUID,
         val name: String,
         val endpoint: SshEndpoint,
         val authenticationMethod: SavedAuthenticationMethod,
@@ -319,6 +367,7 @@ class SqliteHostCatalog(
     ) {
         fun savedHost(): SavedHost = SavedHost(
             id,
+            profileId,
             HostDraft(name, endpoint, authenticationMethod, group, tags.toList()).normalized(),
         )
     }
@@ -329,7 +378,7 @@ class SqliteHostCatalog(
     )
 
     companion object {
-        private const val CURRENT_SCHEMA_VERSION = 1
+        private const val CURRENT_SCHEMA_VERSION = 2
         private const val BUSY_TIMEOUT_MILLIS = 5_000
         private val DIRECTORY_PERMISSIONS = setOf(
             PosixFilePermission.OWNER_READ,
@@ -393,7 +442,7 @@ class SqliteHostCatalog(
             "CREATE INDEX host_tags_tag_id_idx ON host_tags(tag_id)",
         )
         private const val LIST_HOSTS = """
-            SELECT h.id, h.name, h.host, h.port, h.username, h.authentication_method,
+            SELECT h.id, h.profile_uuid, h.name, h.host, h.port, h.username, h.authentication_method,
                    g.name AS group_name, t.name AS tag_name
             FROM hosts h
             LEFT JOIN host_groups g ON g.id = h.group_id
@@ -402,8 +451,8 @@ class SqliteHostCatalog(
             ORDER BY h.name, h.id, t.name
         """
         private const val CREATE_HOST = """
-            INSERT INTO hosts(group_id, name, host, port, username, authentication_method)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO hosts(profile_uuid, group_id, name, host, port, username, authentication_method)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             RETURNING id
         """
         private const val UPDATE_HOST = """
@@ -412,5 +461,48 @@ class SqliteHostCatalog(
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """
+        private val PROFILE_ID_MIGRATION_PREFIX = listOf(
+            "CREATE TEMP TABLE host_tags_v1 AS SELECT host_id, tag_id FROM host_tags",
+            "DROP TABLE host_tags",
+            """
+                CREATE TABLE hosts_v2 (
+                    id INTEGER PRIMARY KEY,
+                    profile_uuid TEXT NOT NULL UNIQUE CHECK (length(profile_uuid) = 36),
+                    group_id INTEGER,
+                    name TEXT NOT NULL CHECK (length(trim(name)) > 0),
+                    host TEXT NOT NULL CHECK (length(trim(host)) > 0),
+                    port INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
+                    username TEXT NOT NULL CHECK (length(trim(username)) > 0),
+                    authentication_method TEXT NOT NULL CHECK (
+                        authentication_method IN ('PASSWORD', 'PUBLIC_KEY', 'KEYBOARD_INTERACTIVE', 'SSH_AGENT')
+                    ),
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (group_id) REFERENCES host_groups(id) ON UPDATE CASCADE ON DELETE SET NULL
+                ) STRICT
+            """,
+        )
+        private const val MIGRATE_HOST = """
+            INSERT INTO hosts_v2(
+                id, profile_uuid, group_id, name, host, port, username, authentication_method, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        private val PROFILE_ID_MIGRATION_SUFFIX = listOf(
+            "DROP TABLE hosts",
+            "ALTER TABLE hosts_v2 RENAME TO hosts",
+            "CREATE INDEX hosts_group_id_idx ON hosts(group_id)",
+            """
+                CREATE TABLE host_tags (
+                    host_id INTEGER NOT NULL,
+                    tag_id INTEGER NOT NULL,
+                    PRIMARY KEY (host_id, tag_id),
+                    FOREIGN KEY (host_id) REFERENCES hosts(id) ON UPDATE CASCADE ON DELETE CASCADE,
+                    FOREIGN KEY (tag_id) REFERENCES tags(id) ON UPDATE CASCADE ON DELETE CASCADE
+                ) WITHOUT ROWID, STRICT
+            """,
+            "INSERT INTO host_tags(host_id, tag_id) SELECT host_id, tag_id FROM host_tags_v1",
+            "CREATE INDEX host_tags_tag_id_idx ON host_tags(tag_id)",
+            "DROP TABLE host_tags_v1",
+        )
     }
 }

@@ -39,11 +39,32 @@ class SqliteHostCatalogTest {
             assertEquals("Lab '主機'; DROP TABLE hosts;", created.draft.name)
             assertEquals("測試員", created.draft.endpoint.username)
             assertEquals(listOf("nightly", "中文"), created.draft.tags)
-            assertEquals(1, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
+            assertEquals(2, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
+            assertEquals(2, queryInt(database, "SELECT COUNT(*) FROM schema_versions"))
             assertEquals(5, queryInt(database, "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table'"))
         } finally {
             reopened.close()
         }
+    }
+
+    @Test
+    fun `migrates v1 hosts to stable profile identifiers without losing relationships`() {
+        val database = temporaryDirectory.resolve("v1.db")
+        createV1Database(database)
+
+        val first = SqliteHostCatalog(database).use { catalog -> catalog.listHosts().single() }
+        val reopened = SqliteHostCatalog(database).use { catalog ->
+            val loaded = catalog.listHosts().single()
+            val updated = catalog.updateHost(loaded.id, loaded.draft.copy(name = "Migrated host"))
+            assertEquals(loaded.profileId, updated.profileId)
+            updated
+        }
+
+        assertEquals(7, first.id)
+        assertEquals(first.profileId, reopened.profileId)
+        assertEquals("Legacy group", first.draft.group)
+        assertEquals(listOf("legacy-tag"), first.draft.tags)
+        assertEquals(2, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
     }
 
     @Test
@@ -93,7 +114,7 @@ class SqliteHostCatalogTest {
                 statement.executeQuery("SELECT name FROM pragma_table_info('hosts')").use { results ->
                     while (results.next()) columns += results.getString(1)
                 }
-                statement.execute("INSERT INTO schema_versions(version, description) VALUES (2, 'future')")
+                statement.execute("INSERT INTO schema_versions(version, description) VALUES (3, 'future')")
             }
         }
 
@@ -207,4 +228,25 @@ class SqliteHostCatalogTest {
                 }
             }
         }
+
+    private fun createV1Database(database: Path) {
+        DriverManager.getConnection("jdbc:sqlite:$database").use { connection ->
+            connection.createStatement().use { statement ->
+                listOf(
+                    "CREATE TABLE schema_versions(version INTEGER PRIMARY KEY, description TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP) STRICT",
+                    "INSERT INTO schema_versions(version, description) VALUES (1, 'initial host catalog')",
+                    "CREATE TABLE host_groups(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP) STRICT",
+                    "CREATE TABLE hosts(id INTEGER PRIMARY KEY, group_id INTEGER, name TEXT NOT NULL, host TEXT NOT NULL, port INTEGER NOT NULL, username TEXT NOT NULL, authentication_method TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY(group_id) REFERENCES host_groups(id) ON DELETE SET NULL) STRICT",
+                    "CREATE INDEX hosts_group_id_idx ON hosts(group_id)",
+                    "CREATE TABLE tags(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP) STRICT",
+                    "CREATE TABLE host_tags(host_id INTEGER NOT NULL, tag_id INTEGER NOT NULL, PRIMARY KEY(host_id, tag_id), FOREIGN KEY(host_id) REFERENCES hosts(id) ON DELETE CASCADE, FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE) WITHOUT ROWID, STRICT",
+                    "CREATE INDEX host_tags_tag_id_idx ON host_tags(tag_id)",
+                    "INSERT INTO host_groups(id, name) VALUES (3, 'Legacy group')",
+                    "INSERT INTO hosts(id, group_id, name, host, port, username, authentication_method) VALUES (7, 3, 'Legacy host', 'legacy.example', 22, 'operator', 'PASSWORD')",
+                    "INSERT INTO tags(id, name) VALUES (5, 'legacy-tag')",
+                    "INSERT INTO host_tags(host_id, tag_id) VALUES (7, 5)",
+                ).forEach(statement::execute)
+            }
+        }
+    }
 }

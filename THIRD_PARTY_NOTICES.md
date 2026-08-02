@@ -42,3 +42,25 @@ eyeShell compiles only JediTerm's `core` and `ui` source directories. The fork a
 - License text: https://github.com/xerial/sqlite-jdbc/blob/3.53.2.1/LICENSE
 
 eyeShell resolves the `without-natives` classes artifact plus the current build platform's Linux or Windows native artifact. Published packages must additionally filter unsupported architectures to preserve the x86_64-only product baseline.
+
+## Java Native Access
+
+- Project: JNA
+- Source: https://github.com/java-native-access/jna
+- Version: 5.19.1
+- Copyright: JNA contributors
+- Selected license: Apache License 2.0
+- License text: https://github.com/java-native-access/jna/blob/5.19.1/AL2.0
+
+eyeShell uses JNA only for the Windows Credential Manager API boundary.
+
+## Secret Service
+
+- Project: secret-service
+- Source: https://github.com/swiesend/secret-service
+- Version: 1.8.1-jdk17
+- Copyright: Sebastian Wiesendahl and contributors
+- License: MIT License
+- License text: https://github.com/swiesend/secret-service/blob/v1.8.1-jdk17/LICENSE
+
+eyeShell uses this library only on Linux to access a Freedesktop Secret Service provider over the session D-Bus. It does not provide a plaintext fallback.

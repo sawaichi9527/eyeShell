@@ -772,6 +772,18 @@ Linux：
 
 Linux 若沒有 Secret Service，不得退回明文設定檔；只能提供「本次 Session 記住」或每次輸入。
 
+### 14.5 M1H Saved Password baseline
+
+- Schema v2 為每個 Saved Host 新增不可重用的 UUID profile identity；OS credential key 不使用 SQLite integer ID、host 或 username
+- 第一版 OS Credential Store 只保存 Password，不保存 Private Key path/content、passphrase、keyboard-interactive response、agent data 或 credential token
+- Windows 使用 Credential Manager generic credential；Linux 使用 default Freedesktop Secret Service collection
+- Linux Secret Service unavailable 或 locked 時不得嘗試任何明文 fallback；Connect dialog 只接受本次連線的手動輸入
+- Saved password 不預填至 Swing text document；空白 Password 欄位代表使用已取回的 clearable password，輸入內容代表本次 replacement
+- 只有 SSH authentication 與 terminal opening 都成功後，才依使用者選項新增或更新 saved password
+- 使用者明確 Forget、刪除 Password profile，或將 authentication method 改離 Password 時，刪除 UUID 對應 credential
+- Profile credential revision 必須阻止 mutation 前已開始的連線在稍後重建 stale credential；catalog mutation 失敗時須嘗試以 clearable backup 恢復原 password 並明確回報恢復失敗
+- Credential Store 與 SQLite 操作不得在 Swing EDT 執行；取回、傳遞與 native encoding 使用可清除陣列或 buffer
+
 ---
 
 ## 15. 顯示與相容模式

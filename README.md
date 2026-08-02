@@ -94,6 +94,8 @@ Pinned M0 development versions:
 | Apache MINA SSHD | 2.19.0 |
 | Google RE2/J | 1.8 |
 | Xerial SQLite JDBC | 3.53.2.1 |
+| JNA | 5.19.1 |
+| Secret Service | 1.8.1-jdk17 |
 
 ### Local setup and validation
 
@@ -129,4 +131,4 @@ eyeShell 的桌面工作台參考 [FinalShell 官方介紹頁](https://www.hostb
 
 ## Status
 
-M1C SSH authentication baseline 已建立：支援 session-only Password，以及由使用者選取 Private Key File 的 Public Key authentication 與 optional Passphrase。Unknown Host Key 經確認後寫入 eyeShell 專用的 OpenSSH-compatible `known_hosts`；Changed Host Key 顯示 expected/actual fingerprint 並拒絕連線。`known_hosts` 位於 Linux `$XDG_CONFIG_HOME/eyeShell/known_hosts`（fallback `~/.config`）或 Windows `%APPDATA%\eyeShell\known_hosts`。keyboard-interactive、`ssh-agent`、OS Credential Store、SFTP、Monitoring、SQLite 與 Packaging 尚未實作。
+M1H Saved Password baseline 已在 worktree 建立：Saved Host 使用 schema v2 stable UUID 對應 Windows Credential Manager 或 Linux Freedesktop Secret Service；password 只在 SSH authentication 與 terminal opening 成功後保存，且不進入 SQLite。Password、Public Key、keyboard-interactive、`ssh-agent`、Known Hosts、完整 scrollback copy/export/search、Current Session regex highlighting 與 Local Host Catalog 已有實作；SFTP、Monitoring 與 Packaging 尚未實作。目前 Ubuntu 26.04 GNOME Secret Service lifecycle 已實測通過；Windows Credential Manager 與其他支援桌面環境仍待驗證。

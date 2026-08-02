@@ -2,7 +2,7 @@
 
 ## Current Status
 
-The M1G Local Host Catalog baseline is implemented in the worktree. A secure, migration-backed SQLite catalog persists non-secret Host/Group/Tag profiles and feeds endpoint/authentication-method presets into the existing session-only SSH connection flow without blocking the Swing EDT.
+The M1H Saved Password baseline is implemented in the worktree. Schema v2 assigns stable UUID identities to Saved Hosts, and password-only OS Credential Store adapters integrate Windows Credential Manager and Linux Freedesktop Secret Service without putting secrets in SQLite or blocking the Swing EDT.
 
 ## Completed
 
@@ -79,10 +79,25 @@ The M1G Local Host Catalog baseline is implemented in the worktree. A secure, mi
 - Added non-secret Saved Host CRUD with Unicode/IPv6, groups, tags, explicit authentication method, rollback, reopen, and future-schema rejection coverage.
 - Added a background serialized Host Catalog controller, `Hosts...` workbench entry, Add/Edit/Delete UI, and profile-prefilled SSH connection flow.
 - Kept Passwords, Private Key paths/content, passphrases, interactive responses, agent data, and credential tokens outside the catalog model and schema.
+- Added transactional schema v1-to-v2 migration that assigns each existing Host a stable, unique UUID while preserving IDs, groups, tags, timestamps, and non-secret profile data.
+- Added a password-only credential capability boundary with explicit available, unavailable, and locked states plus defensive-copy, clear-on-close secret values.
+- Added Windows Credential Manager generic credential storage through JNA 5.19.1, keyed only by the Saved Host profile UUID.
+- Added Linux default-collection storage through Freedesktop Secret Service 1.8.1-jdk17 with no plaintext fallback when D-Bus, Secret Service, or the collection is unavailable or locked.
+- Added saved-password retrieval and explicit Forget flow off the EDT; the Swing password document is not prefilled with the retrieved secret.
+- Added post-success persistence so a replacement password is saved only after SSH authentication and terminal opening both succeed.
+- Added credential cleanup when a Password profile is deleted or changes to a different authentication method.
+- Added deterministic adapter and lifecycle coverage for platform selection, unavailable/locked capability, UUID keys, create/update/read/delete behavior, caller-array preservation, and profile cleanup.
+- Added deterministic SSH orchestration coverage proving passwords are saved only after terminal opening, failed terminal opening never saves, save failure preserves the opened terminal, and non-Password profiles never retrieve saved credentials.
+- Validated a disposable random-profile credential against the live Ubuntu 26.04 GNOME Secret Service: create, read, update, delete, and post-delete absence all passed; the test clears its arrays and deletes its item in `finally`.
+- Hardened review findings with per-profile credential revisions, so delete/authentication changes invalidate in-flight connection saves and stale dialogs cannot recreate credentials.
+- Added clearable rollback compensation around Password profile mutations; catalog failures restore the prior credential when possible and surface a dedicated warning if restoration also fails.
+- Tracked and disposed the connection dialog during controller shutdown so retrieved passwords and worker tasks are not retained behind a modal dialog.
+- Verified Linux create/update/delete results by reading/searching the Secret Service after each operation, strengthened the Windows probe to call `CredReadW`, and cleared all probe/verification arrays.
+- Scoped runtime credential dependencies by build platform: Linux runtime excludes JNA and Windows runtime excludes Secret Service/DBus, while compile and test coverage retain both adapters.
 
 ## In Progress
 
-- Review and publish the M1G Local Host Catalog changes.
+- Complete M1H review and supported-platform integration validation before publishing.
 
 ## Next Actions
 
@@ -92,6 +107,8 @@ The M1G Local Host Catalog baseline is implemented in the worktree. A secure, mi
 - Characterize heap usage with multiple simultaneous 100,000-line sessions and larger rule sets.
 - Validate SQLite native loading, data paths, ACLs/reparse points, and classifier packaging on Windows 10/11 x64.
 - Validate SQLite native loading under Ubuntu 24.04 X11 and enterprise `noexec` temporary filesystems.
+- Validate Windows Credential Manager read/write/update/delete on Windows 10/11 x64.
+- Validate locked GNOME Keyring behavior and repeat the lifecycle against a Secret Service-compatible KWallet setup.
 - Decide whether a future catalog revision may store a Private Key File path reference; M1G intentionally does not persist it.
 - Validate keyboard-interactive dialogs against external multi-prompt and MFA-capable SSH servers.
 - Validate OpenSSH agent authentication on Ubuntu 24.04/26.04 with a desktop-inherited `SSH_AUTH_SOCK`.
@@ -99,13 +116,13 @@ The M1G Local Host Catalog baseline is implemented in the worktree. A secure, mi
 
 ## Validation Evidence
 
-- Commands: `./scripts/gradlew-local.sh test --rerun-tasks`; `./scripts/gradlew-local.sh check`; targeted `SqliteHostCatalogTest`, `HostCatalogControllerTest`, path and workbench tests; 8-second `timeout --signal=TERM 8s ./scripts/gradlew-local.sh run`; parent/fork `git diff --check`; targeted secret/schema search.
+- Commands: `EYESHELL_TEST_LIVE_SECRET_SERVICE=1 ./scripts/gradlew-local.sh test --tests "*SystemPasswordCredentialStoreTest.live Linux Secret Service supports the credential lifecycle" --rerun-tasks`; targeted controller/store tests; `./scripts/gradlew-local.sh check --rerun-tasks`; `timeout --signal=TERM 15s ./scripts/gradlew-local.sh run`; `git diff --check`; runtime dependency report; targeted credential-literal search. Gradle dependency verification metadata was generated with `./scripts/gradlew-local.sh --write-verification-metadata sha256 test --rerun-tasks` and its 58-line artifact-only diff was reviewed.
 - Executed at: 2026-08-02
-- Exit codes: 0 for tests, check, secret-boundary search, and diff checks; 124 expected for the bounded GUI smoke timeout.
-- Result: 53 root tests passed with 0 failures/skips and `check` passed. New M1G tests cover real migration/reopen, prepared Unicode/SQL-like values, CRUD and rollback, future-schema rejection, POSIX permissions, full-path/database/journal symlink rejection, file replacement detection, classes-only JDBC loading, Linux native loading, data paths, non-secret presets, background EDT publication, close suppression, and workbench placement. Swing launched and remained alive until the expected timeout. No credential fixture or secret-bearing database column is stored in the repository.
+- Exit codes: 0 for tests, check, dependency resolution, targeted credential-literal search, and diff checks; 124 expected for the bounded GUI smoke timeout.
+- Result: Regular validation ran 72 root tests: 71 passed, 0 failed, and the explicitly opt-in live-platform test was skipped as expected; `check` passed. The same stricter live test passed separately against GNOME Secret Service and removed its disposable item. New M1H coverage includes schema v1-to-v2 preservation, stable UUID CRUD/reopen behavior, clearable credential values, cross-profile isolation, platform selection, unavailable/locked status, Windows UUID-keyed lifecycle, verified Linux lifecycle, profile cleanup/rollback failures, stale-save rejection, and SSH save ordering/failure behavior. Linux runtime dependency resolution excludes JNA. Swing remained alive until the expected timeout. GitHub Advanced Security secret scanning was unavailable for this repository, so a targeted local credential-literal search was used and found no matches.
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
-- Remaining unverified scope: manual Host Catalog and highlight dialogs, SQLite Windows native loading/ACL/reparse points and packaged architecture filtering, Ubuntu 24.04 X11 and `noexec` native extraction, migration fault injection and lock contention, multi-session heap characterization, exhaustive search/highlight interleavings, Windows clipboard and atomic-move behavior, Windows scripts/runtime, OpenSSH agent platform I/O, external multi-prompt/MFA servers, native Wayland/JBR 25, packaging, non-RSA agent keys, adverse network behavior, SFTP, monitoring, and OS secret stores.
+- Remaining unverified scope: Windows Credential Manager native behavior, locked GNOME Keyring behavior, KWallet integration, manual Saved Password/Host Catalog/highlight dialogs, SQLite Windows native loading/ACL/reparse points and packaged architecture filtering, Ubuntu 24.04 X11 and `noexec` native extraction, migration fault injection and lock contention, multi-session heap characterization, exhaustive search/highlight interleavings, Windows clipboard and atomic-move behavior, Windows scripts/runtime, OpenSSH agent platform I/O, external multi-prompt/MFA servers, native Wayland/JBR 25, packaging, non-RSA agent keys, adverse network behavior, SFTP, and monitoring.
 
 ## Known Issues
 
@@ -113,7 +130,7 @@ The M1G Local Host Catalog baseline is implemented in the worktree. A secure, mi
 - Monitoring, SFTP, and command input remain placeholders; no host metrics or remote file data are fabricated.
 - Native Wayland behavior is not covered by the Temurin 21 M0 runtime; the current Linux baseline can use XWayland fallback until the JBR 25 runtime is evaluated.
 - Scrollback clearing remains unavailable while alternate screen is active; Copy All and Save All now operate on the retained main buffer.
-- Passwords and Private Key Passphrases remain session-only; OS Credential Store integration is not implemented.
+- Saved Password OS Credential Store integration passed live GNOME Secret Service lifecycle validation but remains unverified on Windows, locked GNOME Keyring, and KWallet; Private Key Passphrases and all other interactive secrets remain session-only.
 - Public Key authentication is covered with a runtime-generated encrypted RSA OpenSSH key; other key formats/providers and external OpenSSH interoperability remain unverified.
 - Changed Host Keys require manual verification and Known Hosts file editing outside eyeShell; automatic replacement is intentionally unavailable.
 - Windows OpenSSH agent access relies on Temurin/OpenJDK asynchronous file-channel behavior for `\\.\pipe\openssh-ssh-agent`; this is not a portable Java SE named-pipe API and remains unverified on Windows 10/11.
