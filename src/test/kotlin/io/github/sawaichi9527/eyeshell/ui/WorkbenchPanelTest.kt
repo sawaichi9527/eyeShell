@@ -25,16 +25,19 @@ import org.junit.jupiter.api.Test
 
 class WorkbenchPanelTest {
     @Test
-    fun `connect action and terminal attachment update the empty workspace`() {
+    fun `connect action stays available after multiple terminal tabs attach`() {
         SwingUtilities.invokeAndWait {
             val connectCount = AtomicInteger()
             val hostsCount = AtomicInteger()
-            val terminalView = TestTerminalView(JPanel().apply { name = "testTerminal" })
-            val panel = WorkbenchPanel(terminalView, connectCount::incrementAndGet, hostsCount::incrementAndGet)
+            val panel = WorkbenchPanel(connectCount::incrementAndGet, hostsCount::incrementAndGet)
             val connectButton = panel.findByName("connectButton") as? JButton
             val hostsButton = panel.findByName("hostsButton") as? JButton
             val connectionStatus = panel.findByName("connectionStatus") as? javax.swing.JLabel
-            val session = TestTerminalSession()
+            val sessionTabs = panel.findByName("sessionTabs") as? JTabbedPane
+            val firstView = TestTerminalView(JPanel().apply { name = "firstTerminal" })
+            val secondView = TestTerminalView(JPanel().apply { name = "secondTerminal" })
+            val firstSession = TestTerminalSession("first")
+            val secondSession = TestTerminalSession("second")
 
             assertNotNull(connectButton)
             assertNotNull(connectionStatus)
@@ -47,11 +50,23 @@ class WorkbenchPanelTest {
             hostsButton.doClick()
             assertEquals(1, hostsCount.get())
 
-            panel.attachTerminal(session)
-            assertSame(session, terminalView.attachedSession)
-            assertFalse(connectButton.isEnabled)
+            val firstPage = TerminalSessionPage(panel, firstView, firstSession).also { it.attach() }
+            panel.addSession(firstSession.name, firstPage.component, firstPage::close)
+            val secondPage = TerminalSessionPage(panel, secondView, secondSession).also { it.attach() }
+            panel.addSession(secondSession.name, secondPage.component, secondPage::close)
+
+            assertSame(firstSession, firstView.attachedSession)
+            assertSame(secondSession, secondView.attachedSession)
+            assertTrue(connectButton.isEnabled)
             assertTrue(hostsButton.isEnabled)
-            assertEquals("Connected to test-session", connectionStatus.text)
+            assertEquals("Connected to second", connectionStatus.text)
+            assertEquals(2, panel.sessionCount)
+            assertEquals(2, sessionTabs!!.tabCount)
+            assertSame(secondPage.component, sessionTabs.selectedComponent)
+
+            sessionTabs.selectedComponent = firstPage.component
+            assertEquals("Connected to first", connectionStatus.text)
+            panel.closeSessions()
         }
     }
 
@@ -59,10 +74,79 @@ class WorkbenchPanelTest {
     fun `terminal view is embedded without exposing its implementation to the workbench`() {
         SwingUtilities.invokeAndWait {
             val terminal = JPanel().apply { name = "testTerminal" }
-            val panel = WorkbenchPanel(TestTerminalView(terminal))
+            val panel = WorkbenchPanel()
+            val view = TestTerminalView(terminal)
+            val session = TestTerminalSession()
+            val page = TerminalSessionPage(panel, view, session).also { it.attach() }
+            panel.addSession(session.name, page.component, page::close)
 
             assertSame(terminal, panel.findByName("testTerminal"))
-            assertSame(panel.findByName("terminalWorkspace"), terminal.parent)
+            assertSame(page.component, terminal.parent)
+            panel.closeSessions()
+        }
+    }
+
+    @Test
+    fun `closing one terminal tab leaves the other session active`() {
+        SwingUtilities.invokeAndWait {
+            val panel = WorkbenchPanel(connectAction = {})
+            val firstView = TestTerminalView(JPanel())
+            val secondView = TestTerminalView(JPanel())
+            val firstPage = TerminalSessionPage(panel, firstView, TestTerminalSession("first")).also { it.attach() }
+            val secondPage = TerminalSessionPage(panel, secondView, TestTerminalSession("second")).also { it.attach() }
+            panel.addSession("first", firstPage.component, firstPage::close)
+            panel.addSession("second", secondPage.component, secondPage::close)
+            val tabs = panel.findByName("sessionTabs") as JTabbedPane
+            val status = panel.findByName("connectionStatus") as javax.swing.JLabel
+            val connect = panel.findByName("connectButton") as JButton
+            val firstClose = (tabs.getTabComponentAt(0) as Container).findByName("closeSessionButton") as JButton
+
+            panel.setConnectionState("Connecting...", true)
+            firstClose.doClick()
+
+            assertEquals(1, firstView.closeCount)
+            assertEquals(0, secondView.closeCount)
+            assertEquals(1, panel.sessionCount)
+            assertSame(secondPage.component, tabs.selectedComponent)
+            assertEquals("Connecting...", status.text)
+            assertFalse(connect.isEnabled)
+
+            panel.setConnectionState("Connection failed", false)
+            assertEquals("Connected to second", status.text)
+            assertTrue(connect.isEnabled)
+
+            panel.closeSessions()
+            assertEquals(1, firstView.closeCount)
+            assertEquals(1, secondView.closeCount)
+            assertEquals(0, panel.sessionCount)
+            assertEquals(1, tabs.tabCount)
+            assertEquals("Start", tabs.getTitleAt(0))
+        }
+    }
+
+    @Test
+    fun `closing all tabs continues after one close failure`() {
+        SwingUtilities.invokeAndWait {
+            val panel = WorkbenchPanel()
+            var secondClosed = false
+            val sharedFailure = IllegalStateException("close failed")
+            panel.addSession("first", JPanel(), { throw sharedFailure })
+            panel.addSession("second", JPanel(), {
+                secondClosed = true
+                throw sharedFailure
+            })
+
+            val failure = org.junit.jupiter.api.Assertions.assertThrows(
+                IllegalStateException::class.java,
+                panel::closeSessions,
+            )
+
+            val tabs = panel.findByName("sessionTabs") as JTabbedPane
+            assertSame(sharedFailure, failure)
+            assertTrue(secondClosed)
+            assertEquals(0, panel.sessionCount)
+            assertEquals(1, tabs.tabCount)
+            assertEquals("Start", tabs.getTitleAt(0))
         }
     }
 
@@ -78,6 +162,7 @@ class WorkbenchPanelTest {
             val commandBar = panel.findByName("commandBar") as? JPanel
             val workbenchSplit = panel.findByName("workbenchSplit") as? JSplitPane
             val sessionTabs = panel.findByName("sessionTabs") as? JTabbedPane
+            val sessionWorkspace = panel.findByName("sessionWorkspace") as? JPanel
 
             assertNotNull(monitor)
             assertNotNull(terminal)
@@ -87,9 +172,11 @@ class WorkbenchPanelTest {
             assertNotNull(commandBar)
             assertNotNull(workbenchSplit)
             assertNotNull(sessionTabs)
+            assertNotNull(sessionWorkspace)
             assertSame(monitor, workbenchSplit!!.leftComponent)
-            assertSame(sessionTabs, workbenchSplit.rightComponent)
-            assertFalse(sessionTabs!!.containsComponent(monitor!!))
+            assertSame(sessionWorkspace, workbenchSplit.rightComponent)
+            assertTrue(sessionWorkspace!!.containsComponent(sessionTabs!!))
+            assertFalse(sessionTabs.containsComponent(monitor!!))
             assertSame(commandBar, toolDockToggle!!.parent)
             assertSame(commandBar, hostsButton!!.parent)
             assertEquals("Show tools", toolDockToggle.text)
@@ -146,6 +233,7 @@ class WorkbenchPanelTest {
         override val component: JComponent,
     ) : TerminalView {
         var attachedSession: TerminalSession? = null
+        var closeCount = 0
 
         override fun attach(session: TerminalSession) {
             attachedSession = session
@@ -165,11 +253,12 @@ class WorkbenchPanelTest {
 
         override fun clearScrollback() = Unit
 
-        override fun close() = Unit
+        override fun close() { closeCount++ }
     }
 
-    private class TestTerminalSession : TerminalSession {
-        override val name: String = "test-session"
+    private class TestTerminalSession(
+        override val name: String = "test-session",
+    ) : TerminalSession {
         override val isOpen: Boolean = true
 
         override fun read(buffer: CharArray, offset: Int, length: Int): Int = -1

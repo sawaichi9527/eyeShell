@@ -14,7 +14,6 @@ import javax.swing.SwingUtilities
 fun main() {
     FlatDarkLaf.setup()
     SwingUtilities.invokeLater {
-        val terminalView = JediTermTerminalView()
         val passwordStore = SystemPasswordCredentialStore.create()
         val credentialGuard = ProfileCredentialGuard()
         val connectionController = SshConnectionController(passwordStore, credentialGuard = credentialGuard)
@@ -22,11 +21,11 @@ fun main() {
             SqliteHostCatalog(EyeShellPaths.catalogDatabaseFile()),
             passwordStore,
             credentialGuard,
-            connectionController::connect,
+            { owner, preset -> connectionController.connect(owner, preset) },
         )
         EyeShellWindow(
-            terminalView = terminalView,
-            connectAction = connectionController::connect,
+            terminalViewFactory = ::JediTermTerminalView,
+            connectAction = { owner -> connectionController.connect(owner) },
             hostsAction = hostCatalogController::open,
             closeAction = {
                 hostCatalogController.close()

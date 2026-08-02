@@ -1,7 +1,7 @@
 # eyeShell 產品規格書
 
 - 文件版本：v0.8
-- 狀態：M1G Local Host Catalog Baseline
+- 狀態：M1I Multi-session Tabs Baseline
 - 更新日期：2026-08-02
 - 專案：`sawaichi9527/eyeShell`
 
@@ -415,6 +415,15 @@ M1D 增加：
 - Agent frame 上限為 256 KiB，I/O wait 有明確 timeout
 
 Windows named pipe 透過 pinned Temurin 21／OpenJDK 的 asynchronous file-channel 實作，屬於 runtime-specific 行為；必須通過 Windows 10／11 x64 實機驗證才可宣告 Windows agent support 完成。
+
+M1I 增加：
+
+- 每個已建立的 Session tab 擁有獨立 `TerminalView`、JediTerm widget、Search、Current Session Highlight 與 Output controller，不在 tabs 間重用 terminal buffer 或 worker
+- 成功連線建立並選取新 tab；既有 tabs 不阻止後續 Connect，第一版同一時間仍只允許一個 connection dialog／連線嘗試
+- 每個 tab 提供 close action，只關閉該 tab 的 output work、terminal view、SSH shell channel 與 transport；window close 必須嘗試關閉全部 tabs，即使其中一個 close 失敗
+- Monitor 保持在 Session tabs 外層；Command Input／Quick Tools row 與尚未實作的 SFTP／Commands dock 仍為 workbench 共用 shell，功能接入時必須依 selected session 綁定
+- 額外連線取消或失敗不得把仍存在的 selected session 顯示為 disconnected；無 session 時才顯示全域 disconnected／failure state
+- 第一版尚未由 terminal engine 回報 natural remote exit 至 tab header；remote-exit status callback 為後續 lifecycle hardening，不得虛構 Connected state transition
 
 ### 8.3 Transport 共用
 

@@ -40,7 +40,7 @@ internal class HostCatalogController(
     private val catalog: HostCatalog,
     private val passwordStore: PasswordCredentialStore,
     private val credentialGuard: ProfileCredentialGuard = ProfileCredentialGuard(),
-    private val connect: (EyeShellWindow, HostConnectionPreset) -> Unit,
+    private val connect: (EyeShellWindow, HostConnectionPreset) -> Boolean,
 ) : AutoCloseable {
     private val executor = Executors.newSingleThreadExecutor(Thread.ofVirtual().name("host-catalog-", 0).factory())
     private val closed = AtomicBoolean()
@@ -210,17 +210,16 @@ internal class HostCatalogController(
         }
         connectButton.addActionListener {
             val selected = list.selectedValue ?: return@addActionListener
-            if (!owner.canAttachTerminal) {
+            if (connect(owner, selected.toPreset())) {
+                dialog.dispose()
+            } else {
                 JOptionPane.showMessageDialog(
                     dialog,
-                    "Close the active terminal before opening another connection.",
-                    "Terminal already connected",
+                    "Another SSH connection attempt is already in progress.",
+                    "Connection in progress",
                     JOptionPane.INFORMATION_MESSAGE,
                 )
-                return@addActionListener
             }
-            dialog.dispose()
-            connect(owner, selected.toPreset())
         }
         close.addActionListener { dialog.dispose() }
         dialog.addWindowListener(object : WindowAdapter() {

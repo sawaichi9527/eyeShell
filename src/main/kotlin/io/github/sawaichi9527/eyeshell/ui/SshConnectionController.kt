@@ -54,15 +54,16 @@ internal class SshConnectionController(
     private val challengeDialog = AtomicReference<JDialog>()
     private var connectionTask: Future<*>? = null
 
-    fun connect(owner: EyeShellWindow) = connect(owner, null)
+    fun connect(owner: EyeShellWindow): Boolean = connect(owner, null)
 
-    internal fun connect(owner: EyeShellWindow, preset: HostConnectionPreset?) {
+    internal fun connect(owner: EyeShellWindow, preset: HostConnectionPreset?): Boolean {
         check(SwingUtilities.isEventDispatchThread()) { "The SSH connection dialog must open on the Swing EDT" }
-        if (closed.get() || connectionTask?.isDone == false) return
+        if (closed.get() || connectionTask?.isDone == false) return false
         owner.setConnectionState("Preparing SSH connection...", true)
         connectionTask = executor.submit {
             connectInBackground(owner, preset)
         }
+        return true
     }
 
     private fun connectInBackground(owner: EyeShellWindow, preset: HostConnectionPreset?) {
@@ -138,9 +139,20 @@ internal class SshConnectionController(
                 )
                 SwingUtilities.invokeLater {
                     if (owner.isDisplayable && !closed.get()) {
-                        owner.attachTerminal(opened.terminal)
-                        if (opened.passwordSaveFailed) {
-                            showCredentialWarning(owner, "Connected, but the password could not be saved.")
+                        try {
+                            owner.attachTerminal(opened.terminal)
+                            if (opened.passwordSaveFailed) {
+                                showCredentialWarning(owner, "Connected, but the password could not be saved.")
+                            }
+                        } catch (failure: Exception) {
+                            opened.terminal.close()
+                            owner.setConnectionState("Connection failed", false)
+                            JOptionPane.showMessageDialog(
+                                owner,
+                                failure.message ?: failure.javaClass.simpleName,
+                                "Could not open terminal tab",
+                                JOptionPane.ERROR_MESSAGE,
+                            )
                         }
                     } else {
                         opened.terminal.close()

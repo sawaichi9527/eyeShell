@@ -75,6 +75,36 @@ class JediTermTerminalViewTest {
     }
 
     @Test
+    fun `two terminal views keep session output isolated`() {
+        val first = onEdt {
+            JediTermTerminalView(columns = 20, rows = 3).also {
+                it.attach(SyntheticTerminalSession.fromText("first session\r\n"))
+            }
+        }
+        val second = onEdt {
+            JediTermTerminalView(columns = 20, rows = 3).also {
+                it.attach(SyntheticTerminalSession.fromText("second session\r\n"))
+            }
+        }
+
+        try {
+            await(Duration.ofSeconds(5)) { !first.isSessionRunning && !second.isSessionRunning }
+            val firstOutput = StringWriter().also(first::writeAllOutput).toString()
+            val secondOutput = StringWriter().also(second::writeAllOutput).toString()
+
+            assertTrue(firstOutput.contains("first session"), firstOutput)
+            assertFalse(firstOutput.contains("second session"), firstOutput)
+            assertTrue(secondOutput.contains("second session"), secondOutput)
+            assertFalse(secondOutput.contains("first session"), secondOutput)
+        } finally {
+            onEdt {
+                first.close()
+                second.close()
+            }
+        }
+    }
+
+    @Test
     fun `exports retained main buffer while alternate screen is active`() {
         val view = onEdt {
             JediTermTerminalView(columns = 20, rows = 3).also {

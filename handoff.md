@@ -2,7 +2,7 @@
 
 ## Current Status
 
-The M1H Saved Password baseline is implemented in the worktree. Schema v2 assigns stable UUID identities to Saved Hosts, and password-only OS Credential Store adapters integrate Windows Credential Manager and Linux Freedesktop Secret Service without putting secrets in SQLite or blocking the Swing EDT.
+The M1I Multi-session Tabs baseline is implemented in the worktree. Each successful SSH connection creates an independently owned terminal page with its own JediTerm view, output/search/highlight workers, and close lifecycle while preserving the Monitor outside the tabs.
 
 ## Completed
 
@@ -94,10 +94,15 @@ The M1H Saved Password baseline is implemented in the worktree. Schema v2 assign
 - Tracked and disposed the connection dialog during controller shutdown so retrieved passwords and worker tasks are not retained behind a modal dialog.
 - Verified Linux create/update/delete results by reading/searching the Secret Service after each operation, strengthened the Windows probe to call `CredReadW`, and cleared all probe/verification arrays.
 - Scoped runtime credential dependencies by build platform: Linux runtime excludes JNA and Windows runtime excludes Secret Service/DBus, while compile and test coverage retain both adapters.
+- Replaced the singleton terminal view with a `TerminalView` factory and one view/output/highlight aggregate per successful SSH session tab.
+- Kept established sessions independent while retaining one in-flight connection attempt at a time; Connect remains available after attachment and a busy Saved Host request remains visible with an explanation.
+- Added close controls that tear down only the selected session, restore the Start tab after the final close, and continue window-wide cleanup after individual close failures.
+- Preserved connection-attempt status without overwriting a selected live session after an additional attempt is cancelled or fails.
+- Added deterministic two-tab UI ownership, selection/status, isolated close, shared-failure cleanup, and two-JediTerm-buffer isolation coverage.
 
 ## In Progress
 
-- Complete M1H review and supported-platform integration validation before publishing.
+- Complete M1I validation and review before publishing.
 
 ## Next Actions
 
@@ -116,13 +121,13 @@ The M1H Saved Password baseline is implemented in the worktree. Schema v2 assign
 
 ## Validation Evidence
 
-- Commands: `EYESHELL_TEST_LIVE_SECRET_SERVICE=1 ./scripts/gradlew-local.sh test --tests "*SystemPasswordCredentialStoreTest.live Linux Secret Service supports the credential lifecycle" --rerun-tasks`; targeted controller/store tests; `./scripts/gradlew-local.sh check --rerun-tasks`; `timeout --signal=TERM 15s ./scripts/gradlew-local.sh run`; `git diff --check`; runtime dependency report; targeted credential-literal search. Gradle dependency verification metadata was generated with `./scripts/gradlew-local.sh --write-verification-metadata sha256 test --rerun-tasks` and its 58-line artifact-only diff was reviewed.
+- Commands: `./scripts/gradlew-local.sh test --rerun-tasks`; `./scripts/gradlew-local.sh check`; targeted `WorkbenchPanelTest`, `HostCatalogControllerTest`, `SshConnectionControllerTest`, and two-view JediTerm isolation tests; `timeout --signal=TERM 15s ./scripts/gradlew-local.sh run`; `git diff --check`.
 - Executed at: 2026-08-02
-- Exit codes: 0 for tests, check, dependency resolution, targeted credential-literal search, and diff checks; 124 expected for the bounded GUI smoke timeout.
-- Result: Regular validation ran 72 root tests: 71 passed, 0 failed, and the explicitly opt-in live-platform test was skipped as expected; `check` passed. The same stricter live test passed separately against GNOME Secret Service and removed its disposable item. New M1H coverage includes schema v1-to-v2 preservation, stable UUID CRUD/reopen behavior, clearable credential values, cross-profile isolation, platform selection, unavailable/locked status, Windows UUID-keyed lifecycle, verified Linux lifecycle, profile cleanup/rollback failures, stale-save rejection, and SSH save ordering/failure behavior. Linux runtime dependency resolution excludes JNA. Swing remained alive until the expected timeout. GitHub Advanced Security secret scanning was unavailable for this repository, so a targeted local credential-literal search was used and found no matches.
+- Exit codes: 0 for tests, check, targeted tests, and diff checks; 124 expected for the bounded GUI smoke timeout.
+- Result: Regular validation ran 75 root tests: 74 passed, 0 failed, and the explicitly opt-in Secret Service live-platform test was skipped as expected; `check` passed. New M1I coverage proves two independent tabs/views attach distinct sessions, selection restores per-session status, closing one tab leaves the other active, window-level cleanup continues after repeated close failures, and separate JediTerm buffers do not mix output. Swing launched and remained alive until the expected timeout. No dependency, verification metadata, schema, or secret-storage change was introduced by M1I.
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
-- Remaining unverified scope: Windows Credential Manager native behavior, locked GNOME Keyring behavior, KWallet integration, manual Saved Password/Host Catalog/highlight dialogs, SQLite Windows native loading/ACL/reparse points and packaged architecture filtering, Ubuntu 24.04 X11 and `noexec` native extraction, migration fault injection and lock contention, multi-session heap characterization, exhaustive search/highlight interleavings, Windows clipboard and atomic-move behavior, Windows scripts/runtime, OpenSSH agent platform I/O, external multi-prompt/MFA servers, native Wayland/JBR 25, packaging, non-RSA agent keys, adverse network behavior, SFTP, and monitoring.
+- Remaining unverified scope: natural remote-exit tab status, multiple simultaneous connection attempts, multi-session heap characterization with several 100,000-line tabs, Windows Credential Manager native behavior, locked GNOME Keyring behavior, KWallet integration, manual Saved Password/Host Catalog/highlight dialogs, SQLite Windows native loading/ACL/reparse points and packaged architecture filtering, Ubuntu 24.04 X11 and `noexec` native extraction, migration fault injection and lock contention, exhaustive search/highlight interleavings, Windows clipboard and atomic-move behavior, Windows scripts/runtime, OpenSSH agent platform I/O, external multi-prompt/MFA servers, native Wayland/JBR 25, packaging, non-RSA agent keys, adverse network behavior, SFTP, and monitoring.
 
 ## Known Issues
 
@@ -139,3 +144,4 @@ The M1H Saved Password baseline is implemented in the worktree. Schema v2 assign
 - Main search/selection results are intentionally not painted over an active alternate screen; they become visible after returning to the main buffer.
 - Highlight rules are Current Session only and are intentionally discarded when the application closes; persistent Global/Host/Workspace scopes require a later catalog migration and scope resolver.
 - M1G stores authentication method but intentionally does not store Private Key File paths or any authentication secret.
+- M1I supports multiple established terminal tabs but intentionally serializes connection dialogs/attempts; natural remote exit does not yet update or remove its tab automatically.

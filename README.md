@@ -131,4 +131,4 @@ eyeShell 的桌面工作台參考 [FinalShell 官方介紹頁](https://www.hostb
 
 ## Status
 
-M1H Saved Password baseline 已在 worktree 建立：Saved Host 使用 schema v2 stable UUID 對應 Windows Credential Manager 或 Linux Freedesktop Secret Service；password 只在 SSH authentication 與 terminal opening 成功後保存，且不進入 SQLite。Password、Public Key、keyboard-interactive、`ssh-agent`、Known Hosts、完整 scrollback copy/export/search、Current Session regex highlighting 與 Local Host Catalog 已有實作；SFTP、Monitoring 與 Packaging 尚未實作。目前 Ubuntu 26.04 GNOME Secret Service lifecycle 已實測通過；Windows Credential Manager 與其他支援桌面環境仍待驗證。
+M1I Multi-session Tabs baseline 已在 worktree 建立：每次成功連線建立獨立 terminal tab，各自擁有 JediTerm view、完整 scrollback、search、Current Session highlighting、copy/export 與 close lifecycle；關閉單一 tab 不影響其他 sessions。Saved Host schema v2 UUID、Windows Credential Manager／Linux Secret Service password flow、Password／Public Key／keyboard-interactive／`ssh-agent` 與 Known Hosts 已有實作。SFTP、Monitoring、Packaging 與 natural remote-exit tab status 尚未實作；Windows Credential Manager 與其他支援桌面環境仍待驗證。

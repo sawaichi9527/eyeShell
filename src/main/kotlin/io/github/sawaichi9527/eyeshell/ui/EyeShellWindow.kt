@@ -3,14 +3,17 @@ package io.github.sawaichi9527.eyeshell.ui
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
 import java.awt.BorderLayout
-import java.awt.CardLayout
 import java.awt.Component
 import java.awt.Dimension
 import java.awt.Font
+import java.awt.FlowLayout
+import java.awt.Insets
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
 import javax.swing.JButton
+import javax.swing.JComponent
 import javax.swing.JFrame
 import javax.swing.JLabel
 import javax.swing.JPanel
@@ -20,17 +23,15 @@ import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 
 class EyeShellWindow(
-    private val terminalView: TerminalView,
+    private val terminalViewFactory: () -> TerminalView,
     connectAction: ((EyeShellWindow) -> Unit)? = null,
     hostsAction: ((EyeShellWindow) -> Unit)? = null,
     private val closeAction: () -> Unit = {},
 ) : JFrame("eyeShell") {
-    private val outputController = TerminalOutputController(terminalView)
-    private val highlightController = TerminalHighlightController(terminalView)
+    private val closed = AtomicBoolean()
     private val workbench = WorkbenchPanel(
-        terminalView,
-        connectAction?.let { action -> { action(this) } },
-        hostsAction?.let { action -> { action(this) } },
+        connectAction = connectAction?.let { action -> { action(this) } },
+        hostsAction = hostsAction?.let { action -> { action(this) } },
     )
 
     init {
@@ -39,38 +40,101 @@ class EyeShellWindow(
         size = Dimension(1280, 800)
         contentPane = workbench
         setLocationRelativeTo(null)
-        outputController.install(
-            this,
-            addHighlightRule = { highlightController.addRule(this) },
-            manageHighlightRules = { highlightController.manageRules(this) },
-        )
     }
 
     fun attachTerminal(session: TerminalSession) {
-        workbench.attachTerminal(session)
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal sessions must be attached on the Swing EDT" }
+        val terminalView = terminalViewFactory()
+        val page = try {
+            TerminalSessionPage(this, terminalView, session)
+        } catch (failure: Throwable) {
+            try {
+                terminalView.close()
+            } catch (closeFailure: Throwable) {
+                accumulateFailure(failure, closeFailure)
+            }
+            throw failure
+        }
+        try {
+            page.attach()
+            workbench.addSession(session.name, page.component, page::close)
+        } catch (failure: Throwable) {
+            try {
+                page.close()
+            } catch (closeFailure: Throwable) {
+                accumulateFailure(failure, closeFailure)
+            }
+            throw failure
+        }
     }
 
     fun setConnectionState(message: String, connecting: Boolean) {
         workbench.setConnectionState(message, connecting)
     }
 
-    internal val canAttachTerminal: Boolean
-        get() = workbench.canAttachTerminal
-
     override fun dispose() {
+        if (!closed.compareAndSet(false, true)) return
+        var failure: Throwable? = null
+        try {
+            workbench.closeSessions()
+        } catch (error: Throwable) {
+            failure = error
+        }
+        try {
+            closeAction()
+        } catch (error: Throwable) {
+            failure = accumulateFailure(failure, error)
+        }
+        try {
+            super.dispose()
+        } catch (error: Throwable) {
+            failure = accumulateFailure(failure, error)
+        }
+        failure?.let { throw it }
+    }
+}
+
+internal class TerminalSessionPage(
+    private val owner: Component,
+    private val terminalView: TerminalView,
+    private val session: TerminalSession,
+) : AutoCloseable {
+    private val closed = AtomicBoolean()
+    private val outputController = TerminalOutputController(terminalView)
+    private val highlightController = TerminalHighlightController(terminalView)
+    val component: JComponent = JPanel(BorderLayout()).apply {
+        name = "terminalWorkspace"
+        getAccessibleContext().accessibleName = "Terminal workspace"
+        add(terminalView.component, BorderLayout.CENTER)
+    }
+
+    fun attach() {
+        terminalView.attach(session)
+        outputController.install(
+            owner,
+            addHighlightRule = { highlightController.addRule(owner) },
+            manageHighlightRules = { highlightController.manageRules(owner) },
+        )
+    }
+
+    override fun close() {
+        if (!closed.compareAndSet(false, true)) return
         outputController.close(terminalView::close)
-        closeAction()
-        super.dispose()
     }
 }
 
 class WorkbenchPanel(
-    private val terminalView: TerminalView? = null,
     connectAction: (() -> Unit)? = null,
     hostsAction: (() -> Unit)? = null,
 ) : JPanel(BorderLayout()) {
-    private val canConnect = terminalView != null && connectAction != null
-    private val terminalCards = JPanel(CardLayout())
+    private val canConnect = connectAction != null
+    private val sessionTabs = JTabbedPane(JTabbedPane.TOP).apply {
+        name = "sessionTabs"
+        getAccessibleContext().accessibleName = "Sessions"
+    }
+    private val sessions = linkedMapOf<Component, () -> Unit>()
+    private val emptySession = createEmptySession()
+    private var connecting = false
     private val connectionStatus = JLabel("Not connected").apply {
         name = "connectionStatus"
     }
@@ -81,7 +145,7 @@ class WorkbenchPanel(
     }
     private val hostsButton = JButton("Hosts...").apply {
         name = "hostsButton"
-        isEnabled = terminalView != null && hostsAction != null
+        isEnabled = hostsAction != null
         addActionListener { hostsAction?.invoke() }
     }
     private val toolDock = CollapsibleToolDock()
@@ -96,34 +160,59 @@ class WorkbenchPanel(
 
     init {
         name = "workbench"
+        sessionTabs.addChangeListener { updateSelectedSessionStatus() }
+        showEmptySession()
         add(createWorkbenchSplit(), BorderLayout.CENTER)
     }
 
     val isToolDockExpanded: Boolean
         get() = toolDock.isExpanded
 
-    fun attachTerminal(session: TerminalSession) {
-        check(SwingUtilities.isEventDispatchThread()) { "Terminal sessions must be attached on the Swing EDT" }
-        val view = checkNotNull(terminalView) { "No terminal view is configured" }
-        view.attach(session)
-        (terminalCards.layout as CardLayout).show(terminalCards, TERMINAL_CARD)
-        setConnectionState("Connected to ${session.name}", false)
-        connectButton.isEnabled = false
+    fun addSession(title: String, component: JComponent, closeAction: () -> Unit) {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal tabs must be added on the Swing EDT" }
+        if (sessions.isEmpty()) sessionTabs.remove(emptySession)
+        sessions[component] = closeAction
+        sessionTabs.addTab(title, component)
+        val index = sessionTabs.indexOfComponent(component)
+        sessionTabs.setTabComponentAt(index, createSessionTabHeader(title, component))
+        sessionTabs.selectedComponent = component
+        setConnectionState("Connected to $title", false)
     }
 
     fun setConnectionState(message: String, connecting: Boolean) {
         check(SwingUtilities.isEventDispatchThread()) { "Connection state must be updated on the Swing EDT" }
-        connectionStatus.text = message
+        this.connecting = connecting
         connectButton.isEnabled = !connecting && canConnect
+        if (connecting || sessions.isEmpty()) {
+            connectionStatus.text = message
+        } else {
+            updateSelectedSessionStatus()
+        }
     }
 
-    internal val canAttachTerminal: Boolean
-        get() = connectButton.isEnabled
+    internal val sessionCount: Int
+        get() = sessions.size
+
+    internal fun closeSessions() {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal tabs must close on the Swing EDT" }
+        var failure: Throwable? = null
+        sessions.values.toList().forEach { close ->
+            try {
+                close()
+            } catch (error: Throwable) {
+                failure = accumulateFailure(failure, error)
+            }
+        }
+        sessions.clear()
+        sessionTabs.removeAll()
+        showEmptySession()
+        failure?.let { throw it }
+    }
 
     private fun createWorkbenchSplit(): JSplitPane = JSplitPane(
         JSplitPane.HORIZONTAL_SPLIT,
         createMonitorPanel(),
-        createSessionTabs(),
+        createSessionWorkspace(),
     ).apply {
         name = "workbenchSplit"
         dividerLocation = 230
@@ -132,10 +221,14 @@ class WorkbenchPanel(
         border = BorderFactory.createEmptyBorder()
     }
 
-    private fun createSessionTabs(): JTabbedPane = JTabbedPane(JTabbedPane.TOP).apply {
-        name = "sessionTabs"
-        getAccessibleContext().accessibleName = "Sessions"
-        addTab("Start", createTerminalArea())
+    private fun createSessionWorkspace(): JPanel = JPanel(BorderLayout()).apply {
+        name = "sessionWorkspace"
+        add(sessionTabs, BorderLayout.CENTER)
+        add(JPanel(BorderLayout()).apply {
+            name = "terminalBottom"
+            add(createCommandBar(), BorderLayout.NORTH)
+            add(toolDock, BorderLayout.CENTER)
+        }, BorderLayout.SOUTH)
     }
 
     private fun createMonitorPanel(): JPanel = JPanel().apply {
@@ -152,23 +245,49 @@ class WorkbenchPanel(
         add(Box.createVerticalGlue())
     }
 
-    private fun createTerminalArea(): JPanel = JPanel(BorderLayout()).apply {
-        name = "terminalArea"
-        terminalCards.apply {
-            name = "terminalWorkspace"
-            getAccessibleContext().accessibleName = "Terminal workspace"
-            add(JPanel(BorderLayout()).apply {
-                border = BorderFactory.createEmptyBorder(24, 24, 24, 24)
-                add(emptyState("No active terminal session. Use Connect... to open an SSH shell."), BorderLayout.CENTER)
-            }, EMPTY_CARD)
-            if (terminalView != null) add(terminalView.component, TERMINAL_CARD)
+    private fun createEmptySession(): JPanel = JPanel(BorderLayout()).apply {
+        name = "terminalWorkspace"
+        border = BorderFactory.createEmptyBorder(24, 24, 24, 24)
+        add(emptyState("No active terminal session. Use Connect... to open an SSH shell."), BorderLayout.CENTER)
+    }
+
+    private fun showEmptySession() {
+        if (sessionTabs.indexOfComponent(emptySession) < 0) sessionTabs.addTab("Start", emptySession)
+        if (!connecting) connectionStatus.text = "Not connected"
+    }
+
+    private fun createSessionTabHeader(title: String, component: Component): JPanel = JPanel(
+        FlowLayout(FlowLayout.LEADING, 4, 0),
+    ).apply {
+        isOpaque = false
+        add(JLabel(title))
+        add(JButton("x").apply {
+            name = "closeSessionButton"
+            toolTipText = "Close $title"
+            margin = Insets(0, 4, 0, 4)
+            isFocusable = false
+            addActionListener { closeSession(component) }
+        })
+    }
+
+    private fun closeSession(component: Component) {
+        val close = sessions.remove(component) ?: return
+        sessionTabs.remove(component)
+        try {
+            close()
+        } finally {
+            if (sessions.isEmpty()) {
+                showEmptySession()
+            } else {
+                updateSelectedSessionStatus()
+            }
         }
-        add(terminalCards, BorderLayout.CENTER)
-        add(JPanel(BorderLayout()).apply {
-            name = "terminalBottom"
-            add(createCommandBar(), BorderLayout.NORTH)
-            add(toolDock, BorderLayout.CENTER)
-        }, BorderLayout.SOUTH)
+    }
+
+    private fun updateSelectedSessionStatus() {
+        if (connecting || sessions.isEmpty()) return
+        val index = sessionTabs.selectedIndex
+        if (index >= 0) connectionStatus.text = "Connected to ${sessionTabs.getTitleAt(index)}"
     }
 
     private fun createCommandBar(): JPanel = JPanel().apply {
@@ -197,10 +316,12 @@ class WorkbenchPanel(
         alignmentX = Component.LEFT_ALIGNMENT
     }
 
-    companion object {
-        private const val EMPTY_CARD = "empty"
-        private const val TERMINAL_CARD = "terminal"
-    }
+}
+
+private fun accumulateFailure(current: Throwable?, next: Throwable): Throwable {
+    if (current == null) return next
+    if (current !== next) current.addSuppressed(next)
+    return current
 }
 
 private class CollapsibleToolDock : JPanel(BorderLayout()) {

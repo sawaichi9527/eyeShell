@@ -27,7 +27,7 @@ class HostCatalogControllerTest {
     fun `loads hosts off the EDT and publishes on the EDT`() {
         val host = savedHost()
         val catalog = TestCatalog(listOf(host))
-        val controller = HostCatalogController(catalog, UnavailablePasswordCredentialStore()) { _, _ -> }
+        val controller = HostCatalogController(catalog, UnavailablePasswordCredentialStore()) { _, _ -> true }
         val loaded = CountDownLatch(1)
         val result = AtomicReference<List<SavedHost>>()
         val callbackOnEdt = AtomicBoolean()
@@ -54,7 +54,7 @@ class HostCatalogControllerTest {
     fun `slow catalog load does not block the EDT and close suppresses publication`() {
         val release = CountDownLatch(1)
         val catalog = TestCatalog(listOf(savedHost()), release)
-        val controller = HostCatalogController(catalog, UnavailablePasswordCredentialStore()) { _, _ -> }
+        val controller = HostCatalogController(catalog, UnavailablePasswordCredentialStore()) { _, _ -> true }
         val callbackCalled = AtomicBoolean()
         val edtServiced = CountDownLatch(1)
 
@@ -94,7 +94,7 @@ class HostCatalogControllerTest {
         val host = savedHost()
         val catalog = TestCatalog(listOf(host))
         val passwordStore = RecordingPasswordStore()
-        val controller = HostCatalogController(catalog, passwordStore) { _, _ -> }
+        val controller = HostCatalogController(catalog, passwordStore) { _, _ -> true }
 
         try {
             val updated = controller.updateHost(
@@ -114,7 +114,7 @@ class HostCatalogControllerTest {
         val host = savedHost()
         val catalog = TestCatalog(listOf(host))
         val passwordStore = RecordingPasswordStore()
-        val controller = HostCatalogController(catalog, passwordStore) { _, _ -> }
+        val controller = HostCatalogController(catalog, passwordStore) { _, _ -> true }
 
         try {
             controller.deleteHost(host)
@@ -131,7 +131,7 @@ class HostCatalogControllerTest {
         val host = savedHost()
         val catalog = TestCatalog(listOf(host), failUpdate = true)
         val passwordStore = RecordingPasswordStore(charArrayOf('k', 'e', 'e', 'p'))
-        val controller = HostCatalogController(catalog, passwordStore) { _, _ -> }
+        val controller = HostCatalogController(catalog, passwordStore) { _, _ -> true }
 
         try {
             org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException::class.java) {
@@ -152,7 +152,7 @@ class HostCatalogControllerTest {
     fun `clears retrieved password when credential deletion fails`() {
         val host = savedHost()
         val passwordStore = RecordingPasswordStore(charArrayOf('c', 'l', 'e', 'a', 'r'), failForget = true)
-        val controller = HostCatalogController(TestCatalog(listOf(host)), passwordStore) { _, _ -> }
+        val controller = HostCatalogController(TestCatalog(listOf(host)), passwordStore) { _, _ -> true }
 
         try {
             org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException::class.java) {
@@ -171,7 +171,7 @@ class HostCatalogControllerTest {
         val host = savedHost()
         val catalog = TestCatalog(listOf(host), failUpdate = true)
         val passwordStore = RecordingPasswordStore(charArrayOf('k', 'e', 'e', 'p'), failSave = true)
-        val controller = HostCatalogController(catalog, passwordStore) { _, _ -> }
+        val controller = HostCatalogController(catalog, passwordStore) { _, _ -> true }
 
         try {
             val failure = org.junit.jupiter.api.Assertions.assertThrows(Exception::class.java) {
