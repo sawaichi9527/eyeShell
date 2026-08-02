@@ -2,7 +2,7 @@
 
 ## Current Status
 
-The M1F Current Session Regex Highlight baseline and its first performance hardening gate are implemented. The terminal now retains 100,000 scrollback lines, viewport scanning is independent of total history size, and line-centric regex caching converges after sustained output without blocking the EDT.
+The M1G Local Host Catalog baseline is implemented in the worktree. A secure, migration-backed SQLite catalog persists non-secret Host/Group/Tag profiles and feeds endpoint/authentication-method presets into the existing session-only SSH connection flow without blocking the Swing EDT.
 
 ## Completed
 
@@ -72,10 +72,17 @@ The M1F Current Session Regex Highlight baseline and its first performance harde
 - Added a real 100,000-line JediTerm pipeline gate plus a three-rule detached-snapshot gate that proves only the changed line is reevaluated in the next generation.
 - Added sustained-output EDT probes, final-revision convergence, active-stream close/worker termination, and no-publication-after-close coverage.
 - Added offscreen renderer coverage for ANSI Merge/Override composition, Highlight/Search/Selection/Cursor paint order, stale revision suppression, and alternate-screen hide/restore behavior.
+- Pinned Xerial SQLite JDBC 3.53.2.1 using its classes-only artifact plus build-platform Linux/Windows native artifact with strict SHA-256 verification.
+- Added XDG Data Home and Windows Local AppData catalog paths while preserving the existing Known Hosts config paths.
+- Added transactional schema v1 migrations for `schema_versions`, `host_groups`, `hosts`, `tags`, and `host_tags` without secret-bearing columns.
+- Added owner-only POSIX directory/file permissions, full path symlink rejection, database identity pinning, and journal-sidecar validation.
+- Added non-secret Saved Host CRUD with Unicode/IPv6, groups, tags, explicit authentication method, rollback, reopen, and future-schema rejection coverage.
+- Added a background serialized Host Catalog controller, `Hosts...` workbench entry, Add/Edit/Delete UI, and profile-prefilled SSH connection flow.
+- Kept Passwords, Private Key paths/content, passphrases, interactive responses, agent data, and credential tokens outside the catalog model and schema.
 
 ## In Progress
 
-- None.
+- Review and publish the M1G Local Host Catalog changes.
 
 ## Next Actions
 
@@ -83,19 +90,22 @@ The M1F Current Session Regex Highlight baseline and its first performance harde
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
 - Manually validate Add/Manage highlight dialogs and color selection on supported desktop environments.
 - Characterize heap usage with multiple simultaneous 100,000-line sessions and larger rule sets.
+- Validate SQLite native loading, data paths, ACLs/reparse points, and classifier packaging on Windows 10/11 x64.
+- Validate SQLite native loading under Ubuntu 24.04 X11 and enterprise `noexec` temporary filesystems.
+- Decide whether a future catalog revision may store a Private Key File path reference; M1G intentionally does not persist it.
 - Validate keyboard-interactive dialogs against external multi-prompt and MFA-capable SSH servers.
 - Validate OpenSSH agent authentication on Ubuntu 24.04/26.04 with a desktop-inherited `SSH_AUTH_SOCK`.
 - Validate the asynchronous OpenSSH agent named-pipe transport on Windows 10/11 x64 with the pinned Temurin 21 runtime.
 
 ## Validation Evidence
 
-- Commands: `./scripts/gradlew-local.sh test --rerun-tasks`; `./scripts/gradlew-local.sh check`; project-local JDK/Gradle-home `./gradlew :core:test :ui:test --rerun-tasks --no-daemon` in the fork; targeted 100,000-line real-pipeline and detached-cache tests; parent/fork `git diff --check`.
+- Commands: `./scripts/gradlew-local.sh test --rerun-tasks`; `./scripts/gradlew-local.sh check`; targeted `SqliteHostCatalogTest`, `HostCatalogControllerTest`, path and workbench tests; 8-second `timeout --signal=TERM 8s ./scripts/gradlew-local.sh run`; parent/fork `git diff --check`; targeted secret/schema search.
 - Executed at: 2026-08-02
 - Exit codes: 0 for tests, check, secret-boundary search, and diff checks; 124 expected for the bounded GUI smoke timeout.
-- Result: 36 root tests passed with 0 failures/skips; `check` and the fork core/UI suites passed. The real JediTerm pipeline retained and highlighted 100,000 scrollback lines; the detached three-rule gate retained 100,000 line-cache entries and reevaluated only the changed line's three Regex patterns in its second generation. Sustained output serviced five EDT probes within two seconds each, converged to the final revision after quiescence, and active-stream close terminated the highlight worker without later publication. Fork tests cover renderer composition/order plus stale and alternate-screen suppression. No credential or terminal-output fixture is stored in the repository.
+- Result: 53 root tests passed with 0 failures/skips and `check` passed. New M1G tests cover real migration/reopen, prepared Unicode/SQL-like values, CRUD and rollback, future-schema rejection, POSIX permissions, full-path/database/journal symlink rejection, file replacement detection, classes-only JDBC loading, Linux native loading, data paths, non-secret presets, background EDT publication, close suppression, and workbench placement. Swing launched and remained alive until the expected timeout. No credential fixture or secret-bearing database column is stored in the repository.
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
-- Remaining unverified scope: manual highlight dialogs/color selection, multi-session 100,000-line heap characterization, exhaustive search/highlight interleavings, Windows clipboard and atomic-move behavior, Windows scripts/runtime, ACL behavior and OpenSSH agent named-pipe I/O, Ubuntu 24.04 X11 and external `SSH_AUTH_SOCK` interoperability, multi-prompt/MFA servers, native Wayland/JBR 25, packaging, non-RSA agent keys, adverse network behavior, SFTP, monitoring, SQLite, and OS secret stores.
+- Remaining unverified scope: manual Host Catalog and highlight dialogs, SQLite Windows native loading/ACL/reparse points and packaged architecture filtering, Ubuntu 24.04 X11 and `noexec` native extraction, migration fault injection and lock contention, multi-session heap characterization, exhaustive search/highlight interleavings, Windows clipboard and atomic-move behavior, Windows scripts/runtime, OpenSSH agent platform I/O, external multi-prompt/MFA servers, native Wayland/JBR 25, packaging, non-RSA agent keys, adverse network behavior, SFTP, monitoring, and OS secret stores.
 
 ## Known Issues
 
@@ -110,4 +120,5 @@ The M1F Current Session Regex Highlight baseline and its first performance harde
 - Linux agent authentication requires eyeShell to inherit a valid `SSH_AUTH_SOCK`; eyeShell intentionally does not discover arbitrary sockets or start an agent.
 - Save All requires atomic move support in the selected target file system; unsupported providers fail without replacing the existing target.
 - Main search/selection results are intentionally not painted over an active alternate screen; they become visible after returning to the main buffer.
-- Highlight rules are Current Session only and are intentionally discarded when the application closes; persistent Global/Host/Workspace scopes require the later SQLite and host model.
+- Highlight rules are Current Session only and are intentionally discarded when the application closes; persistent Global/Host/Workspace scopes require a later catalog migration and scope resolver.
+- M1G stores authentication method but intentionally does not store Private Key File paths or any authentication secret.

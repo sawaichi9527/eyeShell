@@ -3,6 +3,12 @@ plugins {
     application
 }
 
+val sqliteNativeClassifier = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+    "natives-windows"
+} else {
+    "natives-linux"
+}
+
 group = "io.github.sawaichi9527.eyeshell"
 version = "0.1.0-SNAPSHOT"
 
@@ -21,6 +27,12 @@ dependencies {
     implementation("com.formdev:flatlaf:3.7.2")
     implementation("com.google.re2j:re2j:1.8")
     implementation("org.apache.sshd:sshd-core:2.19.0")
+    implementation("org.xerial:sqlite-jdbc:3.53.2.1") {
+        artifact { classifier = "without-natives" }
+    }
+    runtimeOnly("org.xerial:sqlite-jdbc:3.53.2.1") {
+        artifact { classifier = sqliteNativeClassifier }
+    }
     implementation(project(":jediterm-core"))
     implementation(project(":jediterm-ui"))
     runtimeOnly("org.slf4j:slf4j-jdk14:2.0.9")

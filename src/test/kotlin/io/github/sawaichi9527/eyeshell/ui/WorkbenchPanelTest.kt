@@ -28,22 +28,29 @@ class WorkbenchPanelTest {
     fun `connect action and terminal attachment update the empty workspace`() {
         SwingUtilities.invokeAndWait {
             val connectCount = AtomicInteger()
+            val hostsCount = AtomicInteger()
             val terminalView = TestTerminalView(JPanel().apply { name = "testTerminal" })
-            val panel = WorkbenchPanel(terminalView, connectCount::incrementAndGet)
+            val panel = WorkbenchPanel(terminalView, connectCount::incrementAndGet, hostsCount::incrementAndGet)
             val connectButton = panel.findByName("connectButton") as? JButton
+            val hostsButton = panel.findByName("hostsButton") as? JButton
             val connectionStatus = panel.findByName("connectionStatus") as? javax.swing.JLabel
             val session = TestTerminalSession()
 
             assertNotNull(connectButton)
             assertNotNull(connectionStatus)
+            assertNotNull(hostsButton)
             assertTrue(connectButton!!.isEnabled)
+            assertTrue(hostsButton!!.isEnabled)
             assertEquals("Not connected", connectionStatus!!.text)
             connectButton.doClick()
             assertEquals(1, connectCount.get())
+            hostsButton.doClick()
+            assertEquals(1, hostsCount.get())
 
             panel.attachTerminal(session)
             assertSame(session, terminalView.attachedSession)
             assertFalse(connectButton.isEnabled)
+            assertTrue(hostsButton.isEnabled)
             assertEquals("Connected to test-session", connectionStatus.text)
         }
     }
@@ -67,6 +74,7 @@ class WorkbenchPanelTest {
             val terminal = panel.findByName("terminalWorkspace")
             val toolDockContent = panel.findByName("toolDockContent")
             val toolDockToggle = panel.findByName("toolDockToggle") as? JButton
+            val hostsButton = panel.findByName("hostsButton") as? JButton
             val commandBar = panel.findByName("commandBar") as? JPanel
             val workbenchSplit = panel.findByName("workbenchSplit") as? JSplitPane
             val sessionTabs = panel.findByName("sessionTabs") as? JTabbedPane
@@ -75,6 +83,7 @@ class WorkbenchPanelTest {
             assertNotNull(terminal)
             assertNotNull(toolDockContent)
             assertNotNull(toolDockToggle)
+            assertNotNull(hostsButton)
             assertNotNull(commandBar)
             assertNotNull(workbenchSplit)
             assertNotNull(sessionTabs)
@@ -82,6 +91,7 @@ class WorkbenchPanelTest {
             assertSame(sessionTabs, workbenchSplit.rightComponent)
             assertFalse(sessionTabs!!.containsComponent(monitor!!))
             assertSame(commandBar, toolDockToggle!!.parent)
+            assertSame(commandBar, hostsButton!!.parent)
             assertEquals("Show tools", toolDockToggle.text)
 
             panel.size = Dimension(1280, 800)

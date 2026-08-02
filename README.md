@@ -93,6 +93,7 @@ Pinned M0 development versions:
 | JediTerm | 3.74 (`377b76e682a5f86bcbb18a318386f530dbebf5c1`) |
 | Apache MINA SSHD | 2.19.0 |
 | Google RE2/J | 1.8 |
+| Xerial SQLite JDBC | 3.53.2.1 |
 
 ### Local setup and validation
 

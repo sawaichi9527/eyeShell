@@ -31,3 +31,14 @@ eyeShell compiles only JediTerm's `core` and `ui` source directories. The fork a
 - Copyright: The RE2/J Authors
 - License: BSD 3-Clause License
 - License text: https://github.com/google/re2j/blob/1.8/LICENSE
+
+## Xerial SQLite JDBC
+
+- Project: Xerial SQLite JDBC
+- Source: https://github.com/xerial/sqlite-jdbc
+- Version: 3.53.2.1
+- Copyright: Xerial Project
+- License: Apache License 2.0
+- License text: https://github.com/xerial/sqlite-jdbc/blob/3.53.2.1/LICENSE
+
+eyeShell resolves the `without-natives` classes artifact plus the current build platform's Linux or Windows native artifact. Published packages must additionally filter unsupported architectures to preserve the x86_64-only product baseline.

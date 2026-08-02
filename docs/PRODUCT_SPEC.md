@@ -1,8 +1,8 @@
 # eyeShell 產品規格書
 
-- 文件版本：v0.7
-- 狀態：M1C SSH Authentication Baseline
-- 更新日期：2026-08-01
+- 文件版本：v0.8
+- 狀態：M1G Local Host Catalog Baseline
+- 更新日期：2026-08-02
 - 專案：`sawaichi9527/eyeShell`
 
 ## 1. 產品定位
@@ -175,7 +175,7 @@
 | Terminal | JediTerm 3.74 pinned core/ui source |
 | SSH/SFTP | Apache MINA SSHD 2.19.0 |
 | 即時 Regex | Google RE2/J 1.8 |
-| Database | SQLite + Xerial SQLite JDBC |
+| Database | SQLite + Xerial SQLite JDBC 3.53.2.1 |
 | Windows Secret | Windows Credential Manager |
 | Linux Secret | Freedesktop Secret Service |
 | Packaging | `jlink` + `jpackage` |
@@ -738,7 +738,20 @@ LANG=C
 - Private Key Passphrase
 - Credential Master Key
 
-### 14.3 Secret 儲存
+### 14.3 M1G Local Host Catalog baseline
+
+- Linux database：`$XDG_DATA_HOME/eyeShell/eyeshell.db`；未設定或非 absolute 時使用 `~/.local/share/eyeShell/eyeshell.db`
+- Windows database：`%LOCALAPPDATA%\eyeShell\eyeshell.db`；未設定時使用 `%USERPROFILE%\AppData\Local\eyeShell\eyeshell.db`
+- 使用 Xerial SQLite JDBC 3.53.2.1 的 `without-natives` classes artifact 與 build-platform Linux／Windows native artifact；正式 package 必須再排除非 x86_64 native entries
+- Schema v1 只建立 `schema_versions`、`host_groups`、`hosts`、`tags`、`host_tags`，不預建其他未使用 tables
+- Migration 與 CRUD 使用 prepared statements、foreign keys、5-second busy timeout、DELETE journal、FULL synchronous 與 IMMEDIATE write transactions
+- Database directory／file 在 POSIX 分別限制為 `0700`／`0600`；拒絕 path component、database 與 journal symbolic links，並固定 application lifetime file identity
+- Saved Host 保存 display name、host、port、username、authentication method、optional group 與 tags
+- 第一版不保存 Private Key File path；Password、key content、passphrase、interactive response、agent data 與 credential token 永不進入 catalog model/schema
+- Host Catalog blocking contract 由單一 background virtual-thread executor 序列化；Swing EDT 只接收 immutable results，不直接執行 JDBC
+- `Hosts...` 由 workbench command bar 開啟，不占用 Monitor；active terminal 期間仍可管理 profiles，但 Connect 在執行瞬間拒絕第二個 terminal
+
+### 14.4 Secret 儲存
 
 Windows：
 
@@ -1008,7 +1021,7 @@ Repaint
 | Terminal | JediTerm 3.74 project fork pinned at `38413f9` (upstream base `377b76e`) |
 | SSH/SFTP | Apache MINA SSHD 2.19.0 |
 | 即時 Regex | Google RE2/J 1.8 |
-| Database | SQLite |
+| Database | SQLite via Xerial SQLite JDBC 3.53.2.1 |
 | Cloud backend | 不建立 |
 | 開發工具鏈 | Project-local JDK／Gradle／Kotlin，不修改系統全域環境 |
 | Repository License | MIT |

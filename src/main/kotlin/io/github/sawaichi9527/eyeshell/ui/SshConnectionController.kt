@@ -2,7 +2,7 @@ package io.github.sawaichi9527.eyeshell.ui
 
 import io.github.sawaichi9527.eyeshell.ssh.ChangedHostKey
 import io.github.sawaichi9527.eyeshell.ssh.ChangedHostKeyHandler
-import io.github.sawaichi9527.eyeshell.ssh.EyeShellPaths
+import io.github.sawaichi9527.eyeshell.platform.EyeShellPaths
 import io.github.sawaichi9527.eyeshell.ssh.HostKeyVerifier
 import io.github.sawaichi9527.eyeshell.ssh.KnownHostsStore
 import io.github.sawaichi9527.eyeshell.ssh.KeyboardInteractiveChallenge
@@ -41,10 +41,12 @@ class SshConnectionController : AutoCloseable {
     private val challengeDialog = AtomicReference<JDialog>()
     private var connectionTask: Future<*>? = null
 
-    fun connect(owner: EyeShellWindow) {
+    fun connect(owner: EyeShellWindow) = connect(owner, null)
+
+    internal fun connect(owner: EyeShellWindow, preset: HostConnectionPreset?) {
         check(SwingUtilities.isEventDispatchThread()) { "The SSH connection dialog must open on the Swing EDT" }
         if (closed.get() || connectionTask?.isDone == false) return
-        val request = showConnectionDialog(owner) ?: return
+        val request = showConnectionDialog(owner, preset) ?: return
 
         owner.setConnectionState("Connecting to ${request.endpoint.displayName}...", true)
         connectionTask = executor.submit {
@@ -116,11 +118,13 @@ class SshConnectionController : AutoCloseable {
         executor.shutdownNow()
     }
 
-    private fun showConnectionDialog(owner: EyeShellWindow): ConnectionRequest? {
-        val hostField = JTextField(24)
-        val portSpinner = JSpinner(SpinnerNumberModel(22, 1, 65535, 1))
-        val usernameField = JTextField(24)
-        val authenticationField = JComboBox(AuthenticationMethod.entries.toTypedArray())
+    private fun showConnectionDialog(owner: EyeShellWindow, preset: HostConnectionPreset?): ConnectionRequest? {
+        val hostField = JTextField(preset?.endpoint?.host.orEmpty(), 24)
+        val portSpinner = JSpinner(SpinnerNumberModel(preset?.endpoint?.port ?: 22, 1, 65535, 1))
+        val usernameField = JTextField(preset?.endpoint?.username.orEmpty(), 24)
+        val authenticationField = JComboBox(ConnectionAuthenticationMethod.entries.toTypedArray()).apply {
+            selectedItem = preset?.authenticationMethod ?: ConnectionAuthenticationMethod.PASSWORD
+        }
         val passwordField = JPasswordField(24)
         val keyFileField = JTextField(24)
         val keyFileButton = JButton("Browse...")
@@ -139,8 +143,8 @@ class SshConnectionController : AutoCloseable {
         addField(panel, 6, "Passphrase", passphraseField)
 
         fun updateAuthenticationFields() {
-            val usePassword = authenticationField.selectedItem == AuthenticationMethod.PASSWORD
-            val usePublicKey = authenticationField.selectedItem == AuthenticationMethod.PUBLIC_KEY
+            val usePassword = authenticationField.selectedItem == ConnectionAuthenticationMethod.PASSWORD
+            val usePublicKey = authenticationField.selectedItem == ConnectionAuthenticationMethod.PUBLIC_KEY
             passwordField.isEnabled = usePassword
             keyFileField.isEnabled = usePublicKey
             keyFileButton.isEnabled = usePublicKey
@@ -179,17 +183,17 @@ class SshConnectionController : AutoCloseable {
                 port = portSpinner.value as Int,
                 username = usernameField.text.trim(),
             )
-            val authentication = when (authenticationField.selectedItem as AuthenticationMethod) {
-                AuthenticationMethod.PASSWORD -> SshAuthentication.Password(password)
-                AuthenticationMethod.PUBLIC_KEY -> {
+            val authentication = when (authenticationField.selectedItem as ConnectionAuthenticationMethod) {
+                ConnectionAuthenticationMethod.PASSWORD -> SshAuthentication.Password(password)
+                ConnectionAuthenticationMethod.PUBLIC_KEY -> {
                     require(keyFileField.text.isNotBlank()) { "Private key file must not be blank" }
                     SshAuthentication.PublicKey(Path.of(keyFileField.text.trim()), passphrase)
                 }
-                AuthenticationMethod.KEYBOARD_INTERACTIVE -> SshAuthentication.KeyboardInteractive(
+                ConnectionAuthenticationMethod.KEYBOARD_INTERACTIVE -> SshAuthentication.KeyboardInteractive(
                     responder = KeyboardInteractiveResponder { respondToKeyboardInteractive(owner, it) },
                     cancel = ::dismissKeyboardInteractiveDialog,
                 )
-                AuthenticationMethod.SSH_AGENT -> SshAuthentication.Agent.system()
+                ConnectionAuthenticationMethod.SSH_AGENT -> SshAuthentication.Agent.system()
             }
             ConnectionRequest(
                 endpoint = endpoint,
@@ -227,18 +231,6 @@ class SshConnectionController : AutoCloseable {
         override fun close() {
             authentication.close()
         }
-    }
-
-    private enum class AuthenticationMethod(
-        private val label: String,
-    ) {
-        PASSWORD("Password"),
-        PUBLIC_KEY("Private key"),
-        KEYBOARD_INTERACTIVE("Keyboard-interactive"),
-        SSH_AGENT("SSH agent"),
-        ;
-
-        override fun toString(): String = label
     }
 
     private fun changedHostKeyMessage(hostKey: ChangedHostKey): String = """
@@ -312,4 +304,21 @@ class SshConnectionController : AutoCloseable {
         val dismiss = Runnable { challengeDialog.getAndSet(null)?.dispose() }
         if (SwingUtilities.isEventDispatchThread()) dismiss.run() else SwingUtilities.invokeLater(dismiss)
     }
+}
+
+internal data class HostConnectionPreset(
+    val endpoint: SshEndpoint,
+    val authenticationMethod: ConnectionAuthenticationMethod,
+)
+
+internal enum class ConnectionAuthenticationMethod(
+    private val label: String,
+) {
+    PASSWORD("Password"),
+    PUBLIC_KEY("Private key"),
+    KEYBOARD_INTERACTIVE("Keyboard-interactive"),
+    SSH_AGENT("SSH agent"),
+    ;
+
+    override fun toString(): String = label
 }

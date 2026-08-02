@@ -5,6 +5,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermission
 import java.security.PublicKey
+import io.github.sawaichi9527.eyeshell.platform.EyeShellPaths
 import org.apache.sshd.client.config.hosts.KnownHostEntry
 import org.apache.sshd.client.keyverifier.DefaultKnownHostsServerKeyVerifier
 import org.apache.sshd.client.keyverifier.KnownHostsServerKeyVerifier
@@ -100,31 +101,6 @@ class KnownHostsStore(
             PosixFilePermission.OWNER_READ,
             PosixFilePermission.OWNER_WRITE,
         )
-    }
-}
-
-object EyeShellPaths {
-    fun knownHostsFile(): Path = resolveKnownHostsFile(
-        osName = System.getProperty("os.name"),
-        userHome = System.getProperty("user.home"),
-        appData = System.getenv("APPDATA"),
-        xdgConfigHome = System.getenv("XDG_CONFIG_HOME"),
-    )
-
-    internal fun resolveKnownHostsFile(
-        osName: String,
-        userHome: String,
-        appData: String?,
-        xdgConfigHome: String?,
-    ): Path {
-        val baseDirectory = if (osName.startsWith("Windows", ignoreCase = true)) {
-            appData?.takeIf(String::isNotBlank)?.let(Path::of)
-                ?: Path.of(userHome, "AppData", "Roaming")
-        } else {
-            xdgConfigHome?.takeIf(String::isNotBlank)?.let(Path::of)?.takeIf(Path::isAbsolute)
-                ?: Path.of(userHome, ".config")
-        }
-        return baseDirectory.resolve("eyeShell").resolve("known_hosts")
     }
 }
 

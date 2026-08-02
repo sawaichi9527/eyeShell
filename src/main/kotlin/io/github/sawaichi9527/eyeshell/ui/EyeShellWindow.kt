@@ -22,6 +22,7 @@ import javax.swing.SwingUtilities
 class EyeShellWindow(
     private val terminalView: TerminalView,
     connectAction: ((EyeShellWindow) -> Unit)? = null,
+    hostsAction: ((EyeShellWindow) -> Unit)? = null,
     private val closeAction: () -> Unit = {},
 ) : JFrame("eyeShell") {
     private val outputController = TerminalOutputController(terminalView)
@@ -29,6 +30,7 @@ class EyeShellWindow(
     private val workbench = WorkbenchPanel(
         terminalView,
         connectAction?.let { action -> { action(this) } },
+        hostsAction?.let { action -> { action(this) } },
     )
 
     init {
@@ -52,6 +54,9 @@ class EyeShellWindow(
         workbench.setConnectionState(message, connecting)
     }
 
+    internal val canAttachTerminal: Boolean
+        get() = workbench.canAttachTerminal
+
     override fun dispose() {
         outputController.close(terminalView::close)
         closeAction()
@@ -62,6 +67,7 @@ class EyeShellWindow(
 class WorkbenchPanel(
     private val terminalView: TerminalView? = null,
     connectAction: (() -> Unit)? = null,
+    hostsAction: (() -> Unit)? = null,
 ) : JPanel(BorderLayout()) {
     private val canConnect = terminalView != null && connectAction != null
     private val terminalCards = JPanel(CardLayout())
@@ -72,6 +78,11 @@ class WorkbenchPanel(
         name = "connectButton"
         isEnabled = canConnect
         addActionListener { connectAction?.invoke() }
+    }
+    private val hostsButton = JButton("Hosts...").apply {
+        name = "hostsButton"
+        isEnabled = terminalView != null && hostsAction != null
+        addActionListener { hostsAction?.invoke() }
     }
     private val toolDock = CollapsibleToolDock()
     private val toolDockToggle = JButton("Show tools").apply {
@@ -105,6 +116,9 @@ class WorkbenchPanel(
         connectionStatus.text = message
         connectButton.isEnabled = !connecting && canConnect
     }
+
+    internal val canAttachTerminal: Boolean
+        get() = connectButton.isEnabled
 
     private fun createWorkbenchSplit(): JSplitPane = JSplitPane(
         JSplitPane.HORIZONTAL_SPLIT,
@@ -167,6 +181,8 @@ class WorkbenchPanel(
         add(connectionStatus)
         add(Box.createHorizontalGlue())
         add(connectButton)
+        add(Box.createHorizontalStrut(8))
+        add(hostsButton)
         add(Box.createHorizontalStrut(8))
         add(toolDockToggle)
     }
