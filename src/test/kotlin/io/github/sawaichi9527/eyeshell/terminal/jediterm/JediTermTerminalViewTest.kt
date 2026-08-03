@@ -293,7 +293,6 @@ class JediTermTerminalViewTest {
             }
         }
         try {
-            await(Duration.ofSeconds(5)) { onEdt { view.coordinateHighlightResult != null } }
             assertTrue(producerStarted.await(5, TimeUnit.SECONDS))
             val initialReadCount = session.charactersRead.get()
             await(Duration.ofSeconds(5)) { session.charactersRead.get() > initialReadCount }

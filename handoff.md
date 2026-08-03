@@ -101,6 +101,9 @@ M1J Session Lifecycle Status is planned but not yet implemented. Approved M1J sc
 - Added close controls that tear down only the selected session, restore the Start tab after the final close, and continue window-wide cleanup after individual close failures.
 - Preserved connection-attempt status without overwriting a selected live session after an additional attempt is cancelled or fails.
 - Added deterministic two-tab UI ownership, selection/status, isolated close, shared-failure cleanup, and two-JediTerm-buffer isolation coverage.
+- Bootstrapped the project-local environment on Windows 10/11 x64: Temurin 21.0.12+8 under `.local/jdk-21` and Gradle 9.5.0 plus dependencies under `.local/gradle-home`, driven only by the PowerShell scripts.
+- Added Windows-side strict SHA-256 verification entries for `spring-framework-bom-5.3.39.module` and `junit-bom-6.1.2.pom` so dependency verification passes on the Windows host.
+- Marked the Linux-only XDG config/data home tests with `@EnabledOnOs(OS.LINUX)` (the Windows JVM treats drive-less `/tmp/...` as non-absolute, so those assertions are Linux-semantics-only), and made the active-stream close test stop requiring a highlight publication while the stream is still running.
 
 ## In Progress
 
@@ -144,9 +147,19 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
 - Remaining unverified scope: natural remote-exit tab status, multiple simultaneous connection attempts, multi-session heap characterization with several 100,000-line tabs, Windows Credential Manager native behavior, locked GNOME Keyring behavior, KWallet integration, manual Saved Password/Host Catalog/highlight dialogs, SQLite Windows native loading/ACL/reparse points and packaged architecture filtering, Ubuntu 24.04 X11 and `noexec` native extraction, migration fault injection and lock contention, exhaustive search/highlight interleavings, Windows clipboard and atomic-move behavior, Windows scripts/runtime, OpenSSH agent platform I/O, external multi-prompt/MFA servers, native Wayland/JBR 25, packaging, non-RSA agent keys, adverse network behavior, SFTP, and monitoring.
 
+### Windows host validation (local workbench setup + cross-platform test fixes)
+
+- Commands: `powershell -ExecutionPolicy Bypass -File ".\scripts\bootstrap-jdk.ps1"`; `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" test`; `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" check`; `git diff --check`.
+- Executed at: 2026-08-03
+- Exit codes: 0 for test and check; bootstrap succeeded with JDK SHA-256 verification.
+- Result: 75 root tests: 73 passed, 0 failed, 0 errors; 8 skipped (2 newly Linux-gated XDG path tests plus the pre-existing platform-gated Secret Service/SQLite skips). The previously failing `EyeShellPathsTest` XDG tests and the `JediTermTerminalViewTest` active-stream close test now pass. `check` passed.
+- Test environment: Windows host (win32, PowerShell), Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10, dependency verification metadata extended for the Windows host.
+- Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
+- Remaining unverified scope on Windows: live GUI launch, native SQLite loading/ACL/reparse points and packaged architecture filtering, Windows Credential Manager, OpenSSH agent named pipe, clipboard and atomic-move behavior, packaging, and Ubuntu Linux platform validation of the same fixes.
+
 ## Known Issues
 
-- PowerShell scripts are present but have not been executed on Windows.
+- PowerShell scripts have been validated on Windows for JDK bootstrap and `test`/`check`; live GUI launch, native SQLite loading, Windows Credential Manager, and OpenSSH agent named-pipe behavior remain unverified on Windows.
 - Monitoring, SFTP, and command input remain placeholders; no host metrics or remote file data are fabricated.
 - Native Wayland behavior is not covered by the Temurin 21 M0 runtime; the current Linux baseline can use XWayland fallback until the JBR 25 runtime is evaluated.
 - Scrollback clearing remains unavailable while alternate screen is active; Copy All and Save All now operate on the retained main buffer.

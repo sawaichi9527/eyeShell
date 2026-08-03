@@ -4,9 +4,12 @@ import io.github.sawaichi9527.eyeshell.platform.EyeShellPaths
 import java.nio.file.Path
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.condition.EnabledOnOs
+import org.junit.jupiter.api.condition.OS
 
 class EyeShellPathsTest {
     @Test
+    @EnabledOnOs(OS.LINUX)
     fun `uses XDG config home on Linux`() {
         assertEquals(
             Path.of("/tmp/config/eyeShell/known_hosts"),
@@ -36,6 +39,7 @@ class EyeShellPathsTest {
     }
 
     @Test
+    @EnabledOnOs(OS.LINUX)
     fun `uses XDG data home for the catalog on Linux`() {
         assertEquals(
             Path.of("/tmp/data/eyeShell/eyeshell.db"),
