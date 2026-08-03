@@ -3,6 +3,7 @@ package io.github.sawaichi9527.eyeshell.ui
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
 import java.awt.BorderLayout
+import java.awt.Color
 import java.awt.Component
 import java.awt.Dimension
 import java.awt.Font
@@ -21,6 +22,16 @@ import javax.swing.JSplitPane
 import javax.swing.JTabbedPane
 import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
+
+enum class SessionStatus(
+    val label: String,
+    val color: Color,
+) {
+    CONNECTED("Connected", Color(0x4CAF50)),
+    EXITED("Exited", Color(0x9E9E9E)),
+    FAILED("Failed", Color(0xF44336)),
+    CLOSING("Closing", Color(0xFF9800)),
+}
 
 class EyeShellWindow(
     private val terminalViewFactory: () -> TerminalView,
@@ -66,6 +77,9 @@ class EyeShellWindow(
             }
             throw failure
         }
+        page.startExitMonitor {
+            workbench.updateSessionStatus(page.component, SessionStatus.EXITED)
+        }
     }
 
     fun setConnectionState(message: String, connecting: Boolean) {
@@ -100,6 +114,7 @@ internal class TerminalSessionPage(
     private val session: TerminalSession,
 ) : AutoCloseable {
     private val closed = AtomicBoolean()
+    private val exitMonitorStarted = AtomicBoolean()
     private val outputController = TerminalOutputController(terminalView)
     private val highlightController = TerminalHighlightController(terminalView)
     val component: JComponent = JPanel(BorderLayout()).apply {
@@ -117,6 +132,18 @@ internal class TerminalSessionPage(
         )
     }
 
+    fun startExitMonitor(onExit: () -> Unit) {
+        if (!exitMonitorStarted.compareAndSet(false, true)) return
+        Thread.ofVirtual().name("terminal-exit-${session.name}").start {
+            session.awaitExit()
+            if (!closed.get()) {
+                SwingUtilities.invokeLater {
+                    if (!closed.get()) onExit()
+                }
+            }
+        }
+    }
+
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         outputController.close(terminalView::close)
@@ -132,7 +159,7 @@ class WorkbenchPanel(
         name = "sessionTabs"
         getAccessibleContext().accessibleName = "Sessions"
     }
-    private val sessions = linkedMapOf<Component, () -> Unit>()
+    private val sessions = linkedMapOf<Component, SessionTab>()
     private val emptySession = createEmptySession()
     private var connecting = false
     private val connectionStatus = JLabel("Not connected").apply {
@@ -171,12 +198,22 @@ class WorkbenchPanel(
     fun addSession(title: String, component: JComponent, closeAction: () -> Unit) {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal tabs must be added on the Swing EDT" }
         if (sessions.isEmpty()) sessionTabs.remove(emptySession)
-        sessions[component] = closeAction
+        val tab = SessionTab(title, closeAction)
+        sessions[component] = tab
         sessionTabs.addTab(title, component)
         val index = sessionTabs.indexOfComponent(component)
-        sessionTabs.setTabComponentAt(index, createSessionTabHeader(title, component))
+        sessionTabs.setTabComponentAt(index, createSessionTabHeader(title, component, tab))
         sessionTabs.selectedComponent = component
         setConnectionState("Connected to $title", false)
+    }
+
+    fun updateSessionStatus(component: Component, status: SessionStatus) {
+        check(SwingUtilities.isEventDispatchThread()) { "Session status must be updated on the Swing EDT" }
+        val tab = sessions[component] ?: return
+        tab.status = status
+        tab.statusLabel.text = status.label
+        tab.statusLabel.foreground = status.color
+        if (sessionTabs.selectedComponent === component) updateSelectedSessionStatus()
     }
 
     fun setConnectionState(message: String, connecting: Boolean) {
@@ -196,9 +233,9 @@ class WorkbenchPanel(
     internal fun closeSessions() {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal tabs must close on the Swing EDT" }
         var failure: Throwable? = null
-        sessions.values.toList().forEach { close ->
+        sessions.values.toList().forEach { tab ->
             try {
-                close()
+                tab.closeAction()
             } catch (error: Throwable) {
                 failure = accumulateFailure(failure, error)
             }
@@ -256,11 +293,12 @@ class WorkbenchPanel(
         if (!connecting) connectionStatus.text = "Not connected"
     }
 
-    private fun createSessionTabHeader(title: String, component: Component): JPanel = JPanel(
+    private fun createSessionTabHeader(title: String, component: Component, tab: SessionTab): JPanel = JPanel(
         FlowLayout(FlowLayout.LEADING, 4, 0),
     ).apply {
         isOpaque = false
         add(JLabel(title))
+        add(tab.statusLabel.also { it.text = tab.status.label; it.foreground = tab.status.color })
         add(JButton("x").apply {
             name = "closeSessionButton"
             toolTipText = "Close $title"
@@ -271,10 +309,10 @@ class WorkbenchPanel(
     }
 
     private fun closeSession(component: Component) {
-        val close = sessions.remove(component) ?: return
+        val tab = sessions.remove(component) ?: return
         sessionTabs.remove(component)
         try {
-            close()
+            tab.closeAction()
         } finally {
             if (sessions.isEmpty()) {
                 showEmptySession()
@@ -287,7 +325,15 @@ class WorkbenchPanel(
     private fun updateSelectedSessionStatus() {
         if (connecting || sessions.isEmpty()) return
         val index = sessionTabs.selectedIndex
-        if (index >= 0) connectionStatus.text = "Connected to ${sessionTabs.getTitleAt(index)}"
+        if (index < 0) return
+        val component = sessionTabs.getComponentAt(index)
+        val tab = sessions[component] ?: return
+        connectionStatus.text = when (tab.status) {
+            SessionStatus.CONNECTED -> "Connected to ${sessionTabs.getTitleAt(index)}"
+            SessionStatus.EXITED -> "Exited: ${sessionTabs.getTitleAt(index)}"
+            SessionStatus.FAILED -> "Failed: ${sessionTabs.getTitleAt(index)}"
+            SessionStatus.CLOSING -> "Closing: ${sessionTabs.getTitleAt(index)}"
+        }
     }
 
     private fun createCommandBar(): JPanel = JPanel().apply {
@@ -316,6 +362,14 @@ class WorkbenchPanel(
         alignmentX = Component.LEFT_ALIGNMENT
     }
 
+}
+
+private class SessionTab(
+    val title: String,
+    val closeAction: () -> Unit,
+) {
+    var status: SessionStatus = SessionStatus.CONNECTED
+    val statusLabel = JLabel().apply { name = "sessionStatusLabel" }
 }
 
 private fun accumulateFailure(current: Throwable?, next: Throwable): Throwable {

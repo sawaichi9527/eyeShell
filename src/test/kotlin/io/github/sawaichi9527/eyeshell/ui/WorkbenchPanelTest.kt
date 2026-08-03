@@ -9,9 +9,13 @@ import java.awt.Component
 import java.awt.Container
 import java.awt.Dimension
 import java.io.Writer
+import java.time.Duration
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.JButton
 import javax.swing.JComponent
+import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JSplitPane
 import javax.swing.JTabbedPane
@@ -21,6 +25,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.fail
 import org.junit.jupiter.api.Test
 
 class WorkbenchPanelTest {
@@ -209,6 +214,139 @@ class WorkbenchPanelTest {
         }
     }
 
+    @Test
+    fun `natural exit marks the tab exited and preserves the view`() {
+        val panel = onEdt { WorkbenchPanel() }
+        val view = TestTerminalView(JPanel())
+        val session = BlockingExitTerminalSession("exited-session")
+        val page = TerminalSessionPage(panel, view, session)
+        onEdt {
+            page.attach()
+            panel.addSession(session.name, page.component, page::close)
+            page.startExitMonitor { panel.updateSessionStatus(page.component, SessionStatus.EXITED) }
+        }
+        val tabs = onEdt { panel.findByName("sessionTabs") as JTabbedPane }
+        val status = onEdt { panel.findByName("connectionStatus") as JLabel }
+        val chip = onEdt { (tabs.getTabComponentAt(0) as Container).findByName("sessionStatusLabel") as JLabel }
+
+        onEdt {
+            assertEquals("Connected", chip.text)
+            assertEquals("Connected to exited-session", status.text)
+            assertEquals(0, view.closeCount)
+            assertEquals(1, panel.sessionCount)
+        }
+
+        session.signalNaturalExit()
+        assertTrue(session.awaitExitCompleted(5, TimeUnit.SECONDS))
+        await(Duration.ofSeconds(5)) { onEdt { chip.text == "Exited" } }
+
+        onEdt {
+            assertEquals("Exited", chip.text)
+            assertEquals("Exited: exited-session", status.text)
+            assertEquals(0, view.closeCount)
+            assertEquals(1, panel.sessionCount)
+            assertEquals(1, tabs.tabCount)
+        }
+
+        onEdt {
+            (tabs.getTabComponentAt(0) as Container).findByName("closeSessionButton") as JButton
+        }.doClick()
+        onEdt {
+            assertEquals(1, view.closeCount)
+            assertEquals(0, panel.sessionCount)
+            assertEquals(1, tabs.tabCount)
+            assertEquals("Start", tabs.getTitleAt(0))
+        }
+    }
+
+    @Test
+    fun `closing a tab suppresses the pending natural exit update`() {
+        val panel = onEdt { WorkbenchPanel() }
+        val view = TestTerminalView(JPanel())
+        val session = BlockingExitTerminalSession("closed-session")
+        val page = TerminalSessionPage(panel, view, session)
+        val updates = AtomicInteger()
+        onEdt {
+            page.attach()
+            panel.addSession(session.name, page.component, page::close)
+            page.startExitMonitor { updates.incrementAndGet() }
+        }
+
+        onEdt { panel.closeSessions() }
+        session.signalNaturalExit()
+        assertTrue(session.awaitExitCompleted(5, TimeUnit.SECONDS))
+        await(Duration.ofSeconds(5)) { onEdt { session.exitObserved } }
+        onEdt { assertEquals(0, updates.get()) }
+    }
+
+    @Test
+    fun `one exited tab does not affect another live tab`() {
+        val panel = onEdt { WorkbenchPanel() }
+        val firstView = TestTerminalView(JPanel())
+        val secondView = TestTerminalView(JPanel())
+        val firstSession = BlockingExitTerminalSession("first")
+        val secondSession = TestTerminalSession("second")
+        val firstPage = TerminalSessionPage(panel, firstView, firstSession)
+        val secondPage = TerminalSessionPage(panel, secondView, secondSession)
+        onEdt {
+            firstPage.attach()
+            secondPage.attach()
+            panel.addSession("first", firstPage.component, firstPage::close)
+            panel.addSession("second", secondPage.component, secondPage::close)
+            firstPage.startExitMonitor { panel.updateSessionStatus(firstPage.component, SessionStatus.EXITED) }
+        }
+        val tabs = onEdt { panel.findByName("sessionTabs") as JTabbedPane }
+        val status = onEdt { panel.findByName("connectionStatus") as JLabel }
+        val firstChip = onEdt { (tabs.getTabComponentAt(0) as Container).findByName("sessionStatusLabel") as JLabel }
+        val secondChip = onEdt { (tabs.getTabComponentAt(1) as Container).findByName("sessionStatusLabel") as JLabel }
+
+        firstSession.signalNaturalExit()
+        assertTrue(firstSession.awaitExitCompleted(5, TimeUnit.SECONDS))
+        await(Duration.ofSeconds(5)) { onEdt { firstChip.text == "Exited" } }
+
+        onEdt {
+            assertEquals("Exited", firstChip.text)
+            assertEquals("Connected", secondChip.text)
+            assertEquals("Connected to second", status.text)
+            assertEquals(0, firstView.closeCount)
+            assertEquals(0, secondView.closeCount)
+        }
+
+        onEdt { panel.closeSessions() }
+        onEdt {
+            assertEquals(1, secondView.closeCount)
+            assertEquals(0, panel.sessionCount)
+            assertEquals(1, tabs.tabCount)
+            assertEquals("Start", tabs.getTitleAt(0))
+        }
+    }
+
+    @Test
+    fun `connection failure does not overwrite an exited selected session`() {
+        val panel = onEdt { WorkbenchPanel(connectAction = {}) }
+        val view = TestTerminalView(JPanel())
+        val session = BlockingExitTerminalSession("exited-session")
+        val page = TerminalSessionPage(panel, view, session)
+        onEdt {
+            page.attach()
+            panel.addSession(session.name, page.component, page::close)
+            page.startExitMonitor { panel.updateSessionStatus(page.component, SessionStatus.EXITED) }
+        }
+        val status = onEdt { panel.findByName("connectionStatus") as JLabel }
+        val connectButton = onEdt { panel.findByName("connectButton") as JButton }
+
+        session.signalNaturalExit()
+        assertTrue(session.awaitExitCompleted(5, TimeUnit.SECONDS))
+        await(Duration.ofSeconds(5)) { onEdt { status.text == "Exited: exited-session" } }
+
+        onEdt { panel.setConnectionState("Connection failed", false) }
+        onEdt {
+            assertEquals("Exited: exited-session", status.text)
+            assertTrue(connectButton.isEnabled)
+        }
+        onEdt { panel.closeSessions() }
+    }
+
     private fun Container.findByName(componentName: String): Component? {
         components.forEach { component ->
             if (component.name == componentName) return component
@@ -217,6 +355,20 @@ class WorkbenchPanelTest {
             }
         }
         return null
+    }
+
+    private fun await(timeout: Duration, condition: () -> Boolean) {
+        val deadline = System.nanoTime() + timeout.toNanos()
+        while (!condition()) {
+            check(System.nanoTime() < deadline) { "Workbench state did not settle within $timeout" }
+            Thread.sleep(10)
+        }
+    }
+
+    private fun <T> onEdt(action: () -> T): T {
+        var result: Result<T>? = null
+        SwingUtilities.invokeAndWait { result = runCatching(action) }
+        return requireNotNull(result).getOrThrow()
     }
 
     private fun Container.layoutTree() {
@@ -274,5 +426,46 @@ class WorkbenchPanelTest {
         override fun awaitExit(): Int = 0
 
         override fun close() = Unit
+    }
+
+    private class BlockingExitTerminalSession(
+        override val name: String,
+    ) : TerminalSession {
+        private val exitSignal = CountDownLatch(1)
+        private val exitObservedLatch = CountDownLatch(1)
+        @Volatile
+        override var isOpen: Boolean = true
+
+        override fun read(buffer: CharArray, offset: Int, length: Int): Int = -1
+
+        override fun write(bytes: ByteArray) = Unit
+
+        override fun write(text: String) = Unit
+
+        override fun resize(columns: Int, rows: Int) = Unit
+
+        override fun ready(): Boolean = false
+
+        override fun awaitExit(): Int {
+            exitSignal.await()
+            exitObservedLatch.countDown()
+            return 0
+        }
+
+        val exitObserved: Boolean
+            get() = exitObservedLatch.count == 0L
+
+        fun signalNaturalExit() {
+            isOpen = false
+            exitSignal.countDown()
+        }
+
+        fun awaitExitCompleted(timeout: Long, unit: TimeUnit): Boolean =
+            exitObservedLatch.await(timeout, unit)
+
+        override fun close() {
+            isOpen = false
+            exitSignal.countDown()
+        }
     }
 }

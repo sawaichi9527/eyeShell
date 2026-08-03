@@ -2,13 +2,13 @@
 
 ## Current Status
 
-The M1I Multi-session Tabs baseline is committed and pushed to `origin/main` (`333b6cc` `feat: add multi-session terminal tabs`); the worktree is clean.
+The M1I Multi-session Tabs baseline is committed and pushed to `origin/main` (`333b6cc` `feat: add multi-session terminal tabs`).
 
-M1J Session Lifecycle Status is planned but not yet implemented. Approved M1J scope: detect remote shell natural exit; display per-tab status `Connected`/`Exited`/`Failed`/`Closing`; preserve an ended session's scrollback; keep unrelated connection failures from affecting live tabs; and cover window-close and tab-close lifecycle with deterministic tests.
+M1J Session Lifecycle Status is implemented in the worktree. Each successful SSH session tab now runs a per-session exit watcher that maps natural remote exit to an `Exited` tab status while preserving the terminal view (scrollback), keeps the bottom bar status-aware, and isolates one session's exit or a connect failure from other tabs. The cross-platform XDG path test fix (`@TempDir`) is also in the worktree.
 
 ### 2026-08-03 Windows handoff (Ubuntu follow-up)
 
-The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShellWindow.kt` attempt at M1J was reviewed on the Windows host, found defective (removed the final-tab Start restore, broke `"Connected to X"`/`"Start"` assertions, had a dead and buggy `markSessionExited`, and no status enum/watcher/tests), and was reverted before handoff. The full analysis and the recommended M1J plan are recorded under `## M1J Plan` below; the next session should start from the clean M1I baseline.
+The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShellWindow.kt` attempt at M1J was reviewed on the Windows host, found defective (removed the final-tab Start restore, broke `"Connected to X"`/`"Start"` assertions, had a dead and buggy `markSessionExited`, and no status enum/watcher/tests), and was reverted before handoff. The full analysis and the recommended M1J plan are recorded under `## M1J Plan` below.
 
 ## Completed
 
@@ -108,10 +108,15 @@ The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShell
 - Bootstrapped the project-local environment on Windows 10/11 x64: Temurin 21.0.12+8 under `.local/jdk-21` and Gradle 9.5.0 plus dependencies under `.local/gradle-home`, driven only by the PowerShell scripts.
 - Added Windows-side strict SHA-256 verification entries for `spring-framework-bom-5.3.39.module` and `junit-bom-6.1.2.pom` so dependency verification passes on the Windows host.
 - Marked the Linux-only XDG config/data home tests with `@EnabledOnOs(OS.LINUX)` (the Windows JVM treats drive-less `/tmp/...` as non-absolute, so those assertions are Linux-semantics-only), and made the active-stream close test stop requiring a highlight publication while the stream is still running.
+- Replaced the two OS-gated XDG path tests with `@TempDir`-based cross-platform assertions (`EyeShellPathsTest` now runs all 6 tests with 0 skips on both Linux and Windows), removing the platform-specific skip while keeping the absolute-XDG-path resolution covered.
+- Added a `SessionStatus` lifecycle enum (`CONNECTED`, `EXITED`, `FAILED`, `CLOSING`) with label/color, and made the workbench tab header carry a per-session status chip plus a status-aware selected-session bottom bar.
+- Added a per-session background virtual-thread exit watcher (`TerminalSessionPage.startExitMonitor`) that blocks on `session.awaitExit()` and posts an EDT `EXITED` update only if the page was not explicitly closed, so natural remote exit repaints the tab without closing the view or clearing scrollback and user-initiated close never publishes a stale update.
+- Wired the exit watcher from `EyeShellWindow.attachTerminal` after a successful tab attach, keeping the existing `WorkbenchPanelTest` cases (which attach pages directly) unaffected.
+- Added deterministic M1J coverage: natural exit marks the tab `Exited` and preserves the view, explicit close suppresses the pending exit update, one exited tab leaves another live tab connected, and a connection failure does not overwrite an exited selected session.
 
 ## In Progress
 
-- Implement M1J Session Lifecycle Status.
+- None.
 
 ## M1J Plan (handoff to Windows/opencode environment)
 
@@ -141,7 +146,7 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 
 ## Next Actions
 
-- Implement M1J Session Lifecycle Status from the clean `333b6cc` baseline using Decision A (`session.awaitExit()` watcher started at `EyeShellWindow.attachTerminal` + `WorkbenchPanel.updateSessionStatus`), per the 2026-08-03 handoff conclusions; keep existing `"Connected to <name>"`/`"Start"` assertions and the final-tab Start restore green, and add deterministic fake-session lifecycle tests.
+- M1J is implemented in the worktree per Decision A and validated on Ubuntu 26.04 (79 root tests, 78 passed, 1 opt-in skip); re-run on the Windows host to confirm the lifecycle tests pass there and update the Windows validation evidence.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
 - Manually validate Add/Manage highlight dialogs and color selection on supported desktop environments.
 - Characterize heap usage with multiple simultaneous 100,000-line sessions and larger rule sets.
@@ -169,10 +174,28 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Commands: `powershell -ExecutionPolicy Bypass -File ".\scripts\bootstrap-jdk.ps1"`; `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" test`; `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" check`; `git diff --check`.
 - Executed at: 2026-08-03
 - Exit codes: 0 for test and check; bootstrap succeeded with JDK SHA-256 verification.
-- Result: 75 root tests: 73 passed, 0 failed, 0 errors; 8 skipped (2 newly Linux-gated XDG path tests plus the pre-existing platform-gated Secret Service/SQLite skips). The previously failing `EyeShellPathsTest` XDG tests and the `JediTermTerminalViewTest` active-stream close test now pass. `check` passed.
+- Result: 75 root tests: 73 passed, 0 failed, 0 errors; 8 skipped (2 newly Linux-gated XDG path tests plus the pre-existing platform-gated Secret Service/SQLite skips). The previously failing `EyeShellPathsTest` XDG tests and the `JediTermTerminalViewTest` active-stream close test now pass. `check` passed. This 8-skip count reflects the state on 2026-08-03; after the later `@TempDir` cross-platform fix, the next Windows run is expected to report 6 skipped (only the opt-in Secret Service live test and SQLite POSIX-gated tests) with `EyeShellPathsTest` at 6/6.
 - Test environment: Windows host (win32, PowerShell), Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10, dependency verification metadata extended for the Windows host.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
-- Remaining unverified scope on Windows: live GUI launch, native SQLite loading/ACL/reparse points and packaged architecture filtering, Windows Credential Manager, OpenSSH agent named pipe, clipboard and atomic-move behavior, packaging, and Ubuntu Linux platform validation of the same fixes.
+- Remaining unverified scope on Windows: live GUI launch, native SQLite loading/ACL/reparse points and packaged architecture filtering, Windows Credential Manager, OpenSSH agent named pipe, clipboard and atomic-move behavior, packaging, and re-running the cross-platform XDG path test fix on the Windows host (expected `EyeShellPathsTest` 6/6).
+
+### Ubuntu host validation (cross-platform XDG path test fix)
+
+- Commands: `./scripts/gradlew-local.sh test --tests "*EyeShellPathsTest" --rerun-tasks`; `./scripts/gradlew-local.sh test`; `./scripts/gradlew-local.sh check`; `git diff --check`.
+- Executed at: 2026-08-03
+- Exit codes: 0 for all commands.
+- Result: Replaced the two OS-gated XDG path tests with `@TempDir`-based cross-platform assertions; `EyeShellPathsTest` now runs 6 tests with 0 skipped on this host. Full `test` and `check` passed. Because the new assertions are platform-neutral, the next Windows `gradlew-local.ps1 test` run is expected to also execute `EyeShellPathsTest` 6/6 with 0 skipped.
+- Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
+- Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
+
+### Ubuntu host validation (M1J Session Lifecycle Status)
+
+- Commands: `./scripts/gradlew-local.sh test --tests "*WorkbenchPanelTest"`; `./scripts/gradlew-local.sh test`; `./scripts/gradlew-local.sh check`; `git diff --check`.
+- Executed at: 2026-08-03
+- Exit codes: 0 for all commands.
+- Result: Added a `SessionStatus` enum and a per-session `awaitExit()`-based exit watcher wired from `EyeShellWindow.attachTerminal`; `WorkbenchPanel` gained a status chip and a status-aware bottom bar. Full suite now runs 79 root tests: 78 passed, 0 failed, and the explicitly opt-in Secret Service live test was skipped as expected; `check` passed. New M1J coverage proves natural exit marks the tab `Exited` without closing the view, explicit close suppresses the pending update, one exited tab leaves another live tab connected, and a connection failure does not overwrite an exited selected session. No dependency, verification metadata, schema, or secret-storage change was introduced.
+- Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
+- Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
 
 ## Known Issues
 
@@ -189,4 +212,4 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Main search/selection results are intentionally not painted over an active alternate screen; they become visible after returning to the main buffer.
 - Highlight rules are Current Session only and are intentionally discarded when the application closes; persistent Global/Host/Workspace scopes require a later catalog migration and scope resolver.
 - M1G stores authentication method but intentionally does not store Private Key File paths or any authentication secret.
-- M1I supports multiple established terminal tabs but intentionally serializes connection dialogs/attempts; natural remote exit does not yet update or remove its tab automatically.
+- M1I supports multiple established terminal tabs but intentionally serializes connection dialogs/attempts. M1J adds natural-exit tab status (`Exited`) but maps any unexpected stop to `Exited`; `Failed`/`Closing` status transitions are not yet produced.
