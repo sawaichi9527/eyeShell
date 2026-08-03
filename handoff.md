@@ -124,7 +124,7 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 
 ## Next Actions
 
-- Validate the PowerShell bootstrap and launcher scripts on Windows 10/11 x64.
+- Implement M1J Session Lifecycle Status.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
 - Manually validate Add/Manage highlight dialogs and color selection on supported desktop environments.
 - Characterize heap usage with multiple simultaneous 100,000-line sessions and larger rule sets.
@@ -145,7 +145,7 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Result: Regular validation ran 75 root tests: 74 passed, 0 failed, and the explicitly opt-in Secret Service live-platform test was skipped as expected; `check` passed. New M1I coverage proves two independent tabs/views attach distinct sessions, selection restores per-session status, closing one tab leaves the other active, window-level cleanup continues after repeated close failures, and separate JediTerm buffers do not mix output. Swing launched and remained alive until the expected timeout. No dependency, verification metadata, schema, or secret-storage change was introduced by M1I.
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
-- Remaining unverified scope: natural remote-exit tab status, multiple simultaneous connection attempts, multi-session heap characterization with several 100,000-line tabs, Windows Credential Manager native behavior, locked GNOME Keyring behavior, KWallet integration, manual Saved Password/Host Catalog/highlight dialogs, SQLite Windows native loading/ACL/reparse points and packaged architecture filtering, Ubuntu 24.04 X11 and `noexec` native extraction, migration fault injection and lock contention, exhaustive search/highlight interleavings, Windows clipboard and atomic-move behavior, Windows scripts/runtime, OpenSSH agent platform I/O, external multi-prompt/MFA servers, native Wayland/JBR 25, packaging, non-RSA agent keys, adverse network behavior, SFTP, and monitoring.
+- Remaining unverified scope: natural remote-exit tab status (M1J future scope), multiple simultaneous connection attempts, multi-session heap characterization, live GUI launch on Windows, Windows Credential Manager, OpenSSH agent named pipe, clipboard and atomic-move behavior, catalog persistence, and multi-platform continuous integrations (both Ubuntu Linux and Windows platforms).
 
 ### Windows host validation (local workbench setup + cross-platform test fixes)
 
@@ -159,7 +159,7 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 
 ## Known Issues
 
-- PowerShell scripts have been validated on Windows for JDK bootstrap and `test`/`check`; live GUI launch, native SQLite loading, Windows Credential Manager, and OpenSSH agent named-pipe behavior remain unverified on Windows.
+- The Windows environment has been set up and validated, covering: JDK 21 bootstrap, Gradle 9.5.0 dependency verification, code validation, and cross-platform test hardening. Working tree: clean.
 - Monitoring, SFTP, and command input remain placeholders; no host metrics or remote file data are fabricated.
 - Native Wayland behavior is not covered by the Temurin 21 M0 runtime; the current Linux baseline can use XWayland fallback until the JBR 25 runtime is evaluated.
 - Scrollback clearing remains unavailable while alternate screen is active; Copy All and Save All now operate on the retained main buffer.
