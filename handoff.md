@@ -2,9 +2,9 @@
 
 ## Current Status
 
-The M1I Multi-session Tabs baseline is committed and pushed to `origin/main` (`333b6cc` `feat: add multi-session terminal tabs`).
+M1I Multi-session Tabs (`333b6cc`), the cross-platform XDG path test fix (`0e79ce5`), and M1J Session Lifecycle Status (`2d27169`) are all committed and pushed to `origin/main`; the worktree is clean on those baselines.
 
-M1J Session Lifecycle Status is implemented in the worktree. Each successful SSH session tab now runs a per-session exit watcher that maps natural remote exit to an `Exited` tab status while preserving the terminal view (scrollback), keeps the bottom bar status-aware, and isolates one session's exit or a connect failure from other tabs. The cross-platform XDG path test fix (`@TempDir`) is also in the worktree.
+M1K Safe Mode is implemented in the worktree. `eyeshell --safe-mode` now lowers the terminal scrollback and max refresh rate, forces the Linux X toolkit or disables Windows Direct3D/OpenGL, and disables FlatLaf animations.
 
 ### 2026-08-03 Windows handoff (Ubuntu follow-up)
 
@@ -113,10 +113,18 @@ The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShell
 - Added a per-session background virtual-thread exit watcher (`TerminalSessionPage.startExitMonitor`) that blocks on `session.awaitExit()` and posts an EDT `EXITED` update only if the page was not explicitly closed, so natural remote exit repaints the tab without closing the view or clearing scrollback and user-initiated close never publishes a stale update.
 - Wired the exit watcher from `EyeShellWindow.attachTerminal` after a successful tab attach, keeping the existing `WorkbenchPanelTest` cases (which attach pages directly) unaffected.
 - Added deterministic M1J coverage: natural exit marks the tab `Exited` and preserves the view, explicit close suppresses the pending exit update, one exited tab leaves another live tab connected, and a connection failure does not overwrite an exited selected session.
+- Added a `SafeMode` boundary (`platform/SafeMode.kt`) that detects the `--safe-mode` launch argument, exposes safe scrollback/refresh-rate overrides, and computes platform startup system properties (Linux forces `sun.awt.X11.XToolkit`; Windows disables `sun.java2d.d3d`/`sun.java2d.opengl`).
+- Made `EyeShellTerminalSettings` accept configurable scrollback and max refresh rate (single default source `MAX_SCROLLBACK_LINES`/`MAX_REFRESH_RATE`), and passed both through `JediTermTerminalView`.
+- Wired `main(args)` to parse `--safe-mode`, apply safe system properties before AWT initialization, disable FlatLaf animations (`flatlaf.animation=false`), and build terminal views with the safe scrollback/refresh-rate.
+- Added deterministic SafeMode coverage: argument detection, safe-vs-default overrides, Windows/Linux startup property maps, and the terminal settings honoring the safe scrollback/refresh-rate.
 
 ## In Progress
 
 - None.
+
+## M1K Plan (Safe Mode)
+
+Safe Mode is implemented in the worktree and validated on Ubuntu 26.04 (85 root tests, 84 passed, 1 opt-in skip). Scope delivered: `--safe-mode` argument detection, lower scrollback (10,000) and max refresh rate (10), Linux X toolkit forcing / Windows Direct3D+OpenGL disabling, and FlatLaf animation off. Not yet covered: live monitoring charts are still placeholders (nothing to pause), and non-essential extension gating has no extensions to disable yet.
 
 ## M1J Plan (handoff to Windows/opencode environment)
 
@@ -146,7 +154,7 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 
 ## Next Actions
 
-- M1J is implemented in the worktree per Decision A and validated on Ubuntu 26.04 (79 root tests, 78 passed, 1 opt-in skip); re-run on the Windows host to confirm the lifecycle tests pass there and update the Windows validation evidence.
+- M1J and M1K are implemented and validated on Ubuntu 26.04; re-run both on the Windows host to confirm the lifecycle and safe-mode tests pass there and update the Windows validation evidence.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
 - Manually validate Add/Manage highlight dialogs and color selection on supported desktop environments.
 - Characterize heap usage with multiple simultaneous 100,000-line sessions and larger rule sets.
@@ -194,6 +202,15 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Executed at: 2026-08-03
 - Exit codes: 0 for all commands.
 - Result: Added a `SessionStatus` enum and a per-session `awaitExit()`-based exit watcher wired from `EyeShellWindow.attachTerminal`; `WorkbenchPanel` gained a status chip and a status-aware bottom bar. Full suite now runs 79 root tests: 78 passed, 0 failed, and the explicitly opt-in Secret Service live test was skipped as expected; `check` passed. New M1J coverage proves natural exit marks the tab `Exited` without closing the view, explicit close suppresses the pending update, one exited tab leaves another live tab connected, and a connection failure does not overwrite an exited selected session. No dependency, verification metadata, schema, or secret-storage change was introduced.
+- Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
+- Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
+
+### Ubuntu host validation (M1K Safe Mode)
+
+- Commands: `./scripts/gradlew-local.sh test --tests "*SafeModeTest"`; `./scripts/gradlew-local.sh test`; `./scripts/gradlew-local.sh check`; `git diff --check`.
+- Executed at: 2026-08-03
+- Exit codes: 0 for all commands.
+- Result: Added a `SafeMode` boundary, made `EyeShellTerminalSettings`/`JediTermTerminalView` accept configurable scrollback and refresh rate, and wired `main(args)` to apply safe startup properties before AWT initialization and disable FlatLaf animations. Full suite now runs 85 root tests: 84 passed, 0 failed, and the explicitly opt-in Secret Service live test was skipped as expected; `check` passed. New M1K coverage proves argument detection, safe-vs-default overrides, Windows/Linux startup property maps, and the terminal settings honoring the safe scrollback/refresh-rate. No dependency, verification metadata, schema, or secret-storage change was introduced.
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
 

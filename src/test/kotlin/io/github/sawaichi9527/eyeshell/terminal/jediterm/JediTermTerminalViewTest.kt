@@ -5,6 +5,7 @@ import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
 import io.github.sawaichi9527.eyeshell.terminal.HighlightMergeMode
 import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
+import io.github.sawaichi9527.eyeshell.platform.SafeMode
 import java.io.StringWriter
 import java.io.IOException
 import java.io.PipedReader
@@ -28,6 +29,16 @@ class JediTermTerminalViewTest {
     @Test
     fun `terminal retains the phase one scrollback baseline`() {
         assertEquals(EyeShellTerminalSettings.MAX_SCROLLBACK_LINES, EyeShellTerminalSettings().bufferMaxLinesCount)
+    }
+
+    @Test
+    fun `safe mode lowers the scrollback and max refresh rate`() {
+        val settings = EyeShellTerminalSettings(
+            scrollbackLines = SafeMode.SAFE_SCROLLBACK_LINES,
+            refreshRate = SafeMode.SAFE_MAX_REFRESH_RATE,
+        )
+        assertEquals(SafeMode.SAFE_SCROLLBACK_LINES, settings.bufferMaxLinesCount)
+        assertEquals(SafeMode.SAFE_MAX_REFRESH_RATE, settings.maxRefreshRate())
     }
 
     @Test

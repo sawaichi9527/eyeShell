@@ -23,8 +23,14 @@ import javax.swing.SwingUtilities
 class JediTermTerminalView(
     columns: Int = 80,
     rows: Int = 24,
+    scrollbackLines: Int = EyeShellTerminalSettings.MAX_SCROLLBACK_LINES,
+    maxRefreshRate: Int = EyeShellTerminalSettings.MAX_REFRESH_RATE,
 ) : TerminalView {
-    private val widget = JediTermWidget(columns, rows, EyeShellTerminalSettings())
+    private val widget = JediTermWidget(
+        columns,
+        rows,
+        EyeShellTerminalSettings(scrollbackLines, maxRefreshRate),
+    )
     private val searchController = JediTermSearchController(widget)
     private val highlightController = JediTermHighlightController(widget)
     private val contextActionProvider = ContextActionProvider(widget, searchController::show)
@@ -208,13 +214,19 @@ private class SessionTtyConnector(
     override fun close() = session.close()
 }
 
-internal class EyeShellTerminalSettings : DefaultSettingsProvider() {
+internal class EyeShellTerminalSettings(
+    private val scrollbackLines: Int = MAX_SCROLLBACK_LINES,
+    private val refreshRate: Int = MAX_REFRESH_RATE,
+) : DefaultSettingsProvider() {
     override fun audibleBell(): Boolean = false
 
-    override fun getBufferMaxLinesCount(): Int = MAX_SCROLLBACK_LINES
+    override fun getBufferMaxLinesCount(): Int = scrollbackLines
+
+    override fun maxRefreshRate(): Int = refreshRate
 
     companion object {
         internal const val MAX_SCROLLBACK_LINES = 100_000
+        internal const val MAX_REFRESH_RATE = 50
     }
 }
 

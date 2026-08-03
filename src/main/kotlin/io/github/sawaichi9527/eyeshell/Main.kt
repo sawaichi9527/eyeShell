@@ -1,8 +1,10 @@
 package io.github.sawaichi9527.eyeshell
 
 import com.formdev.flatlaf.FlatDarkLaf
+import io.github.sawaichi9527.eyeshell.terminal.jediterm.EyeShellTerminalSettings
 import io.github.sawaichi9527.eyeshell.terminal.jediterm.JediTermTerminalView
 import io.github.sawaichi9527.eyeshell.platform.EyeShellPaths
+import io.github.sawaichi9527.eyeshell.platform.SafeMode
 import io.github.sawaichi9527.eyeshell.secrets.SystemPasswordCredentialStore
 import io.github.sawaichi9527.eyeshell.secrets.ProfileCredentialGuard
 import io.github.sawaichi9527.eyeshell.storage.SqliteHostCatalog
@@ -11,7 +13,14 @@ import io.github.sawaichi9527.eyeshell.ui.HostCatalogController
 import io.github.sawaichi9527.eyeshell.ui.SshConnectionController
 import javax.swing.SwingUtilities
 
-fun main() {
+fun main(arguments: Array<String>) {
+    val safeMode = SafeMode.detect(
+        arguments,
+        EyeShellTerminalSettings.MAX_SCROLLBACK_LINES,
+        EyeShellTerminalSettings.MAX_REFRESH_RATE,
+    )
+    safeMode.systemProperties().forEach { (name, value) -> System.setProperty(name, value) }
+    if (safeMode.isActive) System.setProperty(SafeMode.ANIMATION_PROPERTY, "false")
     FlatDarkLaf.setup()
     SwingUtilities.invokeLater {
         val passwordStore = SystemPasswordCredentialStore.create()
@@ -24,7 +33,12 @@ fun main() {
             { owner, preset -> connectionController.connect(owner, preset) },
         )
         EyeShellWindow(
-            terminalViewFactory = ::JediTermTerminalView,
+            terminalViewFactory = {
+                JediTermTerminalView(
+                    scrollbackLines = safeMode.scrollbackLines,
+                    maxRefreshRate = safeMode.maxRefreshRate,
+                )
+            },
             connectAction = { owner -> connectionController.connect(owner) },
             hostsAction = hostCatalogController::open,
             closeAction = {
