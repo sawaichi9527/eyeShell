@@ -4,16 +4,17 @@ import io.github.sawaichi9527.eyeshell.platform.EyeShellPaths
 import java.nio.file.Path
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.condition.EnabledOnOs
-import org.junit.jupiter.api.condition.OS
+import org.junit.jupiter.api.io.TempDir
 
 class EyeShellPathsTest {
+    @TempDir
+    lateinit var temporaryDirectory: Path
+
     @Test
-    @EnabledOnOs(OS.LINUX)
-    fun `uses XDG config home on Linux`() {
+    fun `uses an absolute XDG config home`() {
         assertEquals(
-            Path.of("/tmp/config/eyeShell/known_hosts"),
-            EyeShellPaths.resolveKnownHostsFile("Linux", "/home/user", null, "/tmp/config"),
+            temporaryDirectory.resolve("eyeShell/known_hosts"),
+            EyeShellPaths.resolveKnownHostsFile("Linux", "/home/user", null, temporaryDirectory.toString()),
         )
     }
 
@@ -39,11 +40,10 @@ class EyeShellPathsTest {
     }
 
     @Test
-    @EnabledOnOs(OS.LINUX)
-    fun `uses XDG data home for the catalog on Linux`() {
+    fun `uses an absolute XDG data home for the catalog`() {
         assertEquals(
-            Path.of("/tmp/data/eyeShell/eyeshell.db"),
-            EyeShellPaths.resolveCatalogDatabaseFile("Linux", "/home/user", null, "/tmp/data"),
+            temporaryDirectory.resolve("eyeShell/eyeshell.db"),
+            EyeShellPaths.resolveCatalogDatabaseFile("Linux", "/home/user", null, temporaryDirectory.toString()),
         )
     }
 
