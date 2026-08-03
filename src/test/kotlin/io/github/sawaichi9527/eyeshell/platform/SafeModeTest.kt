@@ -38,12 +38,9 @@ class SafeModeTest {
     }
 
     @Test
-    fun `linux safe mode forces the X toolkit`() {
+    fun `linux safe mode applies no rendering properties`() {
         val safeMode = SafeMode.detect(arrayOf("--safe-mode"), 100_000, 50)
-        assertEquals(
-            mapOf("awt.toolkit" to "sun.awt.X11.XToolkit"),
-            safeMode.systemProperties("Linux"),
-        )
+        assertTrue(safeMode.systemProperties("Linux").isEmpty())
     }
 
     @Test

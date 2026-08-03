@@ -2,9 +2,9 @@
 
 ## Current Status
 
-M1I Multi-session Tabs (`333b6cc`), the cross-platform XDG path test fix (`0e79ce5`), and M1J Session Lifecycle Status (`2d27169`) are all committed and pushed to `origin/main`; the worktree is clean on those baselines.
+M1I Multi-session Tabs (`333b6cc`), the cross-platform XDG path test fix (`0e79ce5`), M1J Session Lifecycle Status (`2d27169`), and M1K Safe Mode (`f433259`) are all committed and pushed to `origin/main`; the worktree is clean on those baselines.
 
-M1K Safe Mode is implemented in the worktree. `eyeshell --safe-mode` now lowers the terminal scrollback and max refresh rate, forces the Linux X toolkit or disables Windows Direct3D/OpenGL, and disables FlatLaf animations.
+M1L Wayland/X11 startup strategy is implemented in the worktree. A `LaunchStrategy` boundary detects the desktop session from `XDG_SESSION_TYPE`/`WAYLAND_DISPLAY`/`DISPLAY`, selects the AWT toolkit (native Wayland when supported, otherwise the X toolkit), and is applied before AWT initialization; Safe Mode continues to force the X toolkit.
 
 ### 2026-08-03 Windows handoff (Ubuntu follow-up)
 
@@ -117,10 +117,18 @@ The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShell
 - Made `EyeShellTerminalSettings` accept configurable scrollback and max refresh rate (single default source `MAX_SCROLLBACK_LINES`/`MAX_REFRESH_RATE`), and passed both through `JediTermTerminalView`.
 - Wired `main(args)` to parse `--safe-mode`, apply safe system properties before AWT initialization, disable FlatLaf animations (`flatlaf.animation=false`), and build terminal views with the safe scrollback/refresh-rate.
 - Added deterministic SafeMode coverage: argument detection, safe-vs-default overrides, Windows/Linux startup property maps, and the terminal settings honoring the safe scrollback/refresh-rate.
+- Added a `LaunchStrategy` boundary (`platform/LaunchStrategy.kt`) that detects the desktop session (`XDG_SESSION_TYPE`/`WAYLAND_DISPLAY`/`DISPLAY`) and selects the AWT toolkit: native Wayland (`sun.awt.WLToolkit`) when the runtime supports it, otherwise the X toolkit (`sun.awt.X11.XToolkit`); Windows stays on the platform default.
+- Wired `main(args)` to resolve the launch strategy from the environment before AWT initialization and apply its toolkit property, while Safe Mode forces the X toolkit through `forceX11`.
+- Moved the Linux `awt.toolkit` override out of `SafeMode` so the launch strategy is the single owner of toolkit selection; Safe Mode still disables Windows Direct3D/OpenGL and FlatLaf animations.
+- Added deterministic M1L coverage: session-type detection from environment variables, Windows platform-default selection, Linux X11/Wayland selection, Wayland fallback to X11 when the toolkit is unavailable, and Safe Mode forcing the X toolkit.
 
 ## In Progress
 
 - None.
+
+## M1L Plan (Wayland/X11 startup strategy)
+
+Implemented in the worktree and validated on Ubuntu 26.04 (91 root tests, 90 passed, 1 opt-in skip). Scope delivered: `DesktopSession.detect` (Wayland/X11/unknown from `XDG_SESSION_TYPE`, `WAYLAND_DISPLAY`, `DISPLAY`), `LaunchStrategy.resolve` (Windows platform default; Linux native Wayland only when `sun.awt.WLToolkit` is available, otherwise X toolkit; Safe Mode forces X11), and `main(args)` applying the toolkit property before AWT init. Native Wayland remains unverified on a WLToolkit-capable JBR 25 runtime; the current Temurin 21 baseline uses the X toolkit via XWayland.
 
 ## M1K Plan (Safe Mode)
 
@@ -154,7 +162,8 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 
 ## Next Actions
 
-- M1J and M1K are implemented and validated on Ubuntu 26.04; re-run both on the Windows host to confirm the lifecycle and safe-mode tests pass there and update the Windows validation evidence.
+- M1J, M1K, and M1L are implemented and validated on Ubuntu 26.04; re-run on the Windows host to confirm the lifecycle, safe-mode, and launch-strategy tests pass there and update the Windows validation evidence.
+- Validate the native Wayland path on a WLToolkit-capable JBR 25 runtime (Ubuntu 24.04/26.04 Wayland session) and confirm the X toolkit still launches under XWayland and full X11.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
 - Manually validate Add/Manage highlight dialogs and color selection on supported desktop environments.
 - Characterize heap usage with multiple simultaneous 100,000-line sessions and larger rule sets.
@@ -214,11 +223,20 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
 
+### Ubuntu host validation (M1L Wayland/X11 startup strategy)
+
+- Commands: `./scripts/gradlew-local.sh test --tests "*LaunchStrategyTest"`; `./scripts/gradlew-local.sh test`; `./scripts/gradlew-local.sh check`; `git diff --check`.
+- Executed at: 2026-08-03
+- Exit codes: 0 for all commands.
+- Result: Added a `LaunchStrategy` boundary that detects the desktop session and selects the AWT toolkit, moved the Linux `awt.toolkit` override out of `SafeMode`, and wired `main(args)` to apply the toolkit property before AWT initialization. Full suite now runs 91 root tests: 90 passed, 0 failed, and the explicitly opt-in Secret Service live test was skipped as expected; `check` passed. New M1L coverage proves session-type detection, Windows platform-default selection, Linux X11/Wayland selection, Wayland fallback to X11 when the toolkit is unavailable, and Safe Mode forcing the X toolkit. No dependency, verification metadata, schema, or secret-storage change was introduced.
+- Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
+- Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
+
 ## Known Issues
 
 - The Windows environment has been set up and validated, covering: JDK 21 bootstrap, Gradle 9.5.0 dependency verification, code validation, and cross-platform test hardening. Working tree: clean.
 - Monitoring, SFTP, and command input remain placeholders; no host metrics or remote file data are fabricated.
-- Native Wayland behavior is not covered by the Temurin 21 M0 runtime; the current Linux baseline can use XWayland fallback until the JBR 25 runtime is evaluated.
+- Native Wayland behavior is not covered by the Temurin 21 M0 runtime; the M1L launch strategy probes for `sun.awt.WLToolkit` and falls back to the X toolkit (XWayland) when it is unavailable, so native Wayland selection is unverified until a WLToolkit-capable JBR 25 runtime is evaluated.
 - Scrollback clearing remains unavailable while alternate screen is active; Copy All and Save All now operate on the retained main buffer.
 - Saved Password OS Credential Store integration passed live GNOME Secret Service lifecycle validation but remains unverified on Windows, locked GNOME Keyring, and KWallet; Private Key Passphrases and all other interactive secrets remain session-only.
 - Public Key authentication is covered with a runtime-generated encrypted RSA OpenSSH key; other key formats/providers and external OpenSSH interoperability remain unverified.

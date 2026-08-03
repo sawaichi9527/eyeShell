@@ -19,7 +19,7 @@ class SafeMode private constructor(
                 "sun.java2d.opengl" to "false",
             )
         } else {
-            mapOf("awt.toolkit" to "sun.awt.X11.XToolkit")
+            emptyMap()
         }
     }
 
