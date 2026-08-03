@@ -55,3 +55,89 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
 }
+
+val jpackageTool = "${System.getProperty("java.home")}/bin/jpackage"
+val packageVersion = version.toString().substringBefore('-')
+
+val preparePackageInput by tasks.registering(Sync::class) {
+    from(configurations.runtimeClasspath)
+    from(tasks.jar)
+    into(layout.buildDirectory.dir("package/input"))
+}
+
+fun jpackageArgs(
+    jpackageTool: String,
+    packageVersion: String,
+    type: String,
+    inputDir: File,
+    destDir: File,
+    mainJar: String,
+): List<String> = listOf(
+    jpackageTool,
+    "--type", type,
+    "--input", inputDir.absolutePath,
+    "--dest", destDir.absolutePath,
+    "--name", "eyeShell",
+    "--app-version", packageVersion,
+    "--main-jar", mainJar,
+    "--main-class", "io.github.sawaichi9527.eyeshell.MainKt",
+    "--vendor", "sawaichi9527",
+    "--java-options", "-Dfile.encoding=UTF-8",
+)
+
+tasks.register<Exec>("jpackageAppImage") {
+    dependsOn(preparePackageInput)
+    val inputDir = layout.buildDirectory.dir("package/input").get().asFile
+    val destDir = layout.buildDirectory.dir("package").get().asFile
+    val mainJar = tasks.jar.get().archiveFileName.get()
+    inputs.files(configurations.runtimeClasspath, tasks.jar)
+    doFirst { destDir.resolve("eyeShell").deleteRecursively() }
+    commandLine(jpackageArgs(jpackageTool, packageVersion, "app-image", inputDir, destDir, mainJar))
+}
+
+val cleanPackageMsi by tasks.registering(Delete::class) {
+    delete(layout.buildDirectory.file("package/eyeShell-${packageVersion}.msi"))
+}
+
+val cleanPackageDeb by tasks.registering(Delete::class) {
+    delete(layout.buildDirectory.file("package/eyeshell_${packageVersion}_amd64.deb"))
+}
+
+tasks.register<Exec>("jpackageInstaller") {
+    dependsOn(preparePackageInput, if (isWindowsBuild) cleanPackageMsi else cleanPackageDeb)
+    val inputDir = layout.buildDirectory.dir("package/input").get().asFile
+    val destDir = layout.buildDirectory.dir("package").get().asFile
+    val mainJar = tasks.jar.get().archiveFileName.get()
+    inputs.files(configurations.runtimeClasspath, tasks.jar)
+    if (isWindowsBuild) {
+        commandLine(jpackageArgs(jpackageTool, packageVersion, "msi", inputDir, destDir, mainJar))
+        outputs.files(layout.buildDirectory.file("package/eyeShell-${packageVersion}.msi"))
+    } else {
+        commandLine(
+            jpackageArgs(jpackageTool, packageVersion, "deb", inputDir, destDir, mainJar) + listOf(
+                "--linux-package-name", "eyeshell",
+                "--linux-deb-maintainer", "sawaichi9527@users.noreply.github.com",
+            ),
+        )
+        outputs.files(layout.buildDirectory.file("package/eyeshell_${packageVersion}_amd64.deb"))
+    }
+}
+
+val cleanPackagePortable by tasks.registering(Delete::class) {
+    delete(layout.buildDirectory.file("package/eyeShell-${packageVersion}.${if (isWindowsBuild) "zip" else "tar.gz"}"))
+}
+
+tasks.register<Exec>("jpackagePortable") {
+    dependsOn("jpackageAppImage", cleanPackagePortable)
+    val appImageDir = layout.buildDirectory.dir("package/eyeShell").get().asFile
+    val portable = layout.buildDirectory.file("package/eyeShell-${packageVersion}.${if (isWindowsBuild) "zip" else "tar.gz"}")
+    inputs.dir(appImageDir)
+    outputs.file(portable)
+    val archivePath = portable.get().asFile.absolutePath
+    if (isWindowsBuild) {
+        commandLine("powershell", "-NoProfile", "-Command",
+            "Compress-Archive -Path '${appImageDir}\\*' -DestinationPath '$archivePath' -Force")
+    } else {
+        commandLine("tar", "-C", appImageDir.absolutePath, "-czf", archivePath, ".")
+    }
+}

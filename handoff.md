@@ -2,9 +2,9 @@
 
 ## Current Status
 
-M1I Multi-session Tabs (`333b6cc`), the cross-platform XDG path test fix (`0e79ce5`), M1J Session Lifecycle Status (`2d27169`), and M1K Safe Mode (`f433259`) are all committed and pushed to `origin/main`; the worktree is clean on those baselines.
+M1I Multi-session Tabs (`333b6cc`), the cross-platform XDG path test fix (`0e79ce5`), M1J Session Lifecycle Status (`2d27169`), M1K Safe Mode (`f433259`), and M1L Wayland/X11 launch strategy (`6402bb8`) are all committed and pushed to `origin/main`; the worktree is clean on those baselines.
 
-M1L Wayland/X11 startup strategy is implemented in the worktree. A `LaunchStrategy` boundary detects the desktop session from `XDG_SESSION_TYPE`/`WAYLAND_DISPLAY`/`DISPLAY`, selects the AWT toolkit (native Wayland when supported, otherwise the X toolkit), and is applied before AWT initialization; Safe Mode continues to force the X toolkit.
+M1M Packaging is implemented in the worktree. `jpackage` tasks produce a bundled-runtime app image, a Linux DEB installer, and a portable `tar.gz` (Windows MSI/ZIP variants are wired for the Windows host), all driven by the project-local JDK with a small testable artifact-naming boundary.
 
 ### 2026-08-03 Windows handoff (Ubuntu follow-up)
 
@@ -121,10 +121,17 @@ The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShell
 - Wired `main(args)` to resolve the launch strategy from the environment before AWT initialization and apply its toolkit property, while Safe Mode forces the X toolkit through `forceX11`.
 - Moved the Linux `awt.toolkit` override out of `SafeMode` so the launch strategy is the single owner of toolkit selection; Safe Mode still disables Windows Direct3D/OpenGL and FlatLaf animations.
 - Added deterministic M1L coverage: session-type detection from environment variables, Windows platform-default selection, Linux X11/Wayland selection, Wayland fallback to X11 when the toolkit is unavailable, and Safe Mode forcing the X toolkit.
+- Added `jpackage`-based packaging tasks in `build.gradle.kts`: `preparePackageInput` (assembles the runtime classpath plus the application jar), `jpackageAppImage` (bundled-runtime app image), `jpackageInstaller` (Linux DEB / Windows MSI), and `jpackagePortable` (Linux `tar.gz` / Windows ZIP), all invoked with the project-local JDK's `jpackage`/`jlink`.
+- Added a `PackageArtifacts` boundary (`platform/PackageArtifacts.kt`) that owns the app/package names, main class, package version (snapshot stripped), and platform archive file names shared by the build.
+- Added deterministic M1M coverage: snapshot-stripped package version, Linux/Windows portable archive names, and Linux/Windows installer names.
 
 ## In Progress
 
 - None.
+
+## M1M Plan (Packaging)
+
+Implemented in the worktree and validated on Ubuntu 26.04 (94 root tests, 93 passed, 1 opt-in skip). Scope delivered: `jpackage` tasks producing a bundled-runtime app image, a Linux DEB (`eyeshell_0.1.0_amd64.deb`), and a portable `eyeShell-0.1.0.tar.gz`, verified by running all three tasks from clean and inspecting the artifacts (`dpkg-deb -I`, `tar -tzf`, launcher + `lib/runtime` presence). The Windows MSI/ZIP branches are wired behind the existing `isWindowsBuild` platform switch but are unverified until run on the Windows host. Note: `outputs.dir` must not be declared on the app-image task because Gradle pre-creates declared output directories, which makes `jpackage` report "destination already exists"; the task deletes the destination in `doFirst` instead.
 
 ## M1L Plan (Wayland/X11 startup strategy)
 
@@ -162,7 +169,8 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 
 ## Next Actions
 
-- M1J, M1K, and M1L are implemented and validated on Ubuntu 26.04; re-run on the Windows host to confirm the lifecycle, safe-mode, and launch-strategy tests pass there and update the Windows validation evidence.
+- M1J, M1K, M1L, and M1M are implemented and validated on Ubuntu 26.04; re-run the tests and the packaging tasks on the Windows host to confirm the lifecycle, safe-mode, launch-strategy, and artifact tests pass there and update the Windows validation evidence.
+- Validate the MSI and ZIP branches of the packaging tasks on Windows 10/11 x64 (MSI requires the WiX toolset, which jpackage invokes on Windows).
 - Validate the native Wayland path on a WLToolkit-capable JBR 25 runtime (Ubuntu 24.04/26.04 Wayland session) and confirm the X toolkit still launches under XWayland and full X11.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
 - Manually validate Add/Manage highlight dialogs and color selection on supported desktop environments.
@@ -232,6 +240,16 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
 
+### Ubuntu host validation (M1M Packaging)
+
+- Commands: `./scripts/gradlew-local.sh jpackageAppImage jpackageInstaller jpackagePortable` (from a clean `build/package`); `./scripts/gradlew-local.sh test --tests "*PackageArtifactsTest"`; `./scripts/gradlew-local.sh test`; `./scripts/gradlew-local.sh check`; `git diff --check`; `dpkg-deb -I build/package/eyeshell_0.1.0_amd64.deb`; `tar -tzf build/package/eyeShell-0.1.0.tar.gz`.
+- Executed at: 2026-08-03
+- Exit codes: 0 for all commands.
+- Result: `jpackage` produced a bundled-runtime app image with a working `bin/eyeShell` launcher and `lib/runtime`, a valid Linux DEB (`eyeshell_0.1.0_amd64.deb`, `Architecture: amd64`, correct maintainer), and a valid portable `eyeShell-0.1.0.tar.gz`; all three tasks ran successfully from a clean state. Full suite now runs 94 root tests: 93 passed, 0 failed, and the explicitly opt-in Secret Service live test was skipped as expected; `check` passed. New M1M coverage proves snapshot-stripped package version and platform archive naming. The `outputs.dir` caveat (Gradle pre-creates declared output directories, causing `jpackage` to fail with "destination already exists") is documented; the app-image task deletes the destination in `doFirst` instead. No dependency, verification metadata, schema, or secret-storage change was introduced.
+- Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with XWayland display available.
+- Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
+- Packaging artifacts: `build/package/eyeShell/` (app image), `build/package/eyeshell_0.1.0_amd64.deb`, `build/package/eyeShell-0.1.0.tar.gz`.
+
 ## Known Issues
 
 - The Windows environment has been set up and validated, covering: JDK 21 bootstrap, Gradle 9.5.0 dependency verification, code validation, and cross-platform test hardening. Working tree: clean.
@@ -248,3 +266,4 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Highlight rules are Current Session only and are intentionally discarded when the application closes; persistent Global/Host/Workspace scopes require a later catalog migration and scope resolver.
 - M1G stores authentication method but intentionally does not store Private Key File paths or any authentication secret.
 - M1I supports multiple established terminal tabs but intentionally serializes connection dialogs/attempts. M1J adds natural-exit tab status (`Exited`) but maps any unexpected stop to `Exited`; `Failed`/`Closing` status transitions are not yet produced.
+- The M1M packaging tasks' Windows branches (MSI/ZIP) are wired but unverified until run on a Windows host; MSI generation requires the WiX toolset that `jpackage` invokes on Windows.
