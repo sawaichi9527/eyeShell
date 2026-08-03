@@ -6,6 +6,10 @@ The M1I Multi-session Tabs baseline is committed and pushed to `origin/main` (`3
 
 M1J Session Lifecycle Status is planned but not yet implemented. Approved M1J scope: detect remote shell natural exit; display per-tab status `Connected`/`Exited`/`Failed`/`Closing`; preserve an ended session's scrollback; keep unrelated connection failures from affecting live tabs; and cover window-close and tab-close lifecycle with deterministic tests.
 
+### 2026-08-03 Windows handoff (Ubuntu follow-up)
+
+The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShellWindow.kt` attempt at M1J was reviewed on the Windows host, found defective (removed the final-tab Start restore, broke `"Connected to X"`/`"Start"` assertions, had a dead and buggy `markSessionExited`, and no status enum/watcher/tests), and was reverted before handoff. The full analysis and the recommended M1J plan are recorded under `## M1J Plan` below; the next session should start from the clean M1I baseline.
+
 ## Completed
 
 - Defined the eyeShell product overview in `README.md`.
@@ -122,9 +126,22 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - **UI wiring:** `WorkbenchPanel.createSessionTabHeader` (EyeShellWindow.kt:259) currently renders a static header; make it status-updatable (small colored status chip beside the title) and update the selected-session bottom bar (`connectionStatus`). Add `WorkbenchPanel.updateSessionStatus(component, status)`.
 - **Config to verify on next session:** `/home/sawaichi/.config/opencode/opencode.json*` and `~/.config/opencode/` project/global settings, and `third-party/jediterm` fork pin — confirm the Windows environment uses the same project-local `.local/` JDK/Gradle and vendored submodule.
 
+### 2026-08-03 conclusion (Windows review, handoff to Ubuntu)
+
+- **Decision: discard the draft.** The prior session left an uncommitted `EyeShellWindow.kt` change that was broken and out of scope; it has been reverted (`git checkout --`), so M1J starts from the clean `333b6cc` baseline.
+- **Facts confirmed on the current tree:**
+  - `TerminalView` (TerminalView.kt) exposes **no** lifecycle signal; `JediTermTerminalView.isSessionRunning` (JediTermTerminalView.kt:89) is `internal` and not reachable from the UI layer.
+  - `TerminalSession` exposes `isOpen` and `awaitExit()` (TerminalSession.kt:6,18) — `awaitExit()` returns on natural EOF, so it is a clean, deterministic blocking detection point.
+  - Existing tests pin exact strings that must be preserved: `connectionStatus` text `"Connected to <name>"` and the restored `"Start"` tab title after the final close (WorkbenchPanelTest.kt), plus `closeSession`'s final-tab restore behavior. Any M1J UI change must keep these green.
+  - `closeSession` must keep its existing `finally` restore of the empty/Start tab; the discarded draft had removed it, which would break `closing all tabs continues after one close failure` and `closing one terminal tab leaves the other session active`.
+- **Recommended detection design (Decision A):** per-session background virtual-thread watcher started from `EyeShellWindow.attachTerminal` after a successful attach; the watcher blocks on `session.awaitExit()` and, on return, posts an EDT update to `WorkbenchPanel.updateSessionStatus(component, EXITED)`. It does **not** close the view or remove the tab, so scrollback is preserved. Starting the watcher at the `EyeShellWindow` layer (not in `TerminalSessionPage.attach()`) keeps existing `WorkbenchPanelTest` cases unaffected.
+  - Alternative Decision B (more invasive): add lifecycle exposure to the `TerminalView` interface (would require updating `TestTerminalView`).
+- **Status scope for M1J (Decision C):** minimal — map any observed natural stop to `EXITED`; `FAILED`/`CLOSING` are deferred to a later milestone.
+- **Test strategy:** new deterministic tests use a controllable fake `TerminalSession` whose `awaitExit()` blocks until the test signals exit; verify the tab stays listed, the view is not closed (scrollback preserved), the header chip and bottom bar update, the close button still closes, and an unrelated session is unaffected.
+
 ## Next Actions
 
-- Implement M1J Session Lifecycle Status.
+- Implement M1J Session Lifecycle Status from the clean `333b6cc` baseline using Decision A (`session.awaitExit()` watcher started at `EyeShellWindow.attachTerminal` + `WorkbenchPanel.updateSessionStatus`), per the 2026-08-03 handoff conclusions; keep existing `"Connected to <name>"`/`"Start"` assertions and the final-tab Start restore green, and add deterministic fake-session lifecycle tests.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
 - Manually validate Add/Manage highlight dialogs and color selection on supported desktop environments.
 - Characterize heap usage with multiple simultaneous 100,000-line sessions and larger rule sets.
