@@ -6,6 +6,8 @@ M1I Multi-session Tabs (`333b6cc`), the cross-platform XDG path test fix (`0e79c
 
 M1M Packaging is implemented in the worktree. `jpackage` tasks produce a bundled-runtime app image, a Linux DEB installer, and a portable `tar.gz` (Windows MSI/ZIP variants are wired for the Windows host), all driven by the project-local JDK with a small testable artifact-naming boundary.
 
+The Ubuntu-implemented M1J/M1K/M1L/M1M changes have been re-validated on the Windows host (94 tests, 6 opt-in/platform-gated skips, `check` passed); see the Windows validation evidence below. The MSI/ZIP packaging branches and live GUI launch remain unverified on Windows.
+
 ### 2026-08-03 Windows handoff (Ubuntu follow-up)
 
 The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShellWindow.kt` attempt at M1J was reviewed on the Windows host, found defective (removed the final-tab Start restore, broke `"Connected to X"`/`"Start"` assertions, had a dead and buggy `markSessionExited`, and no status enum/watcher/tests), and was reverted before handoff. The full analysis and the recommended M1J plan are recorded under `## M1J Plan` below.
@@ -169,7 +171,7 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 
 ## Next Actions
 
-- M1J, M1K, M1L, and M1M are implemented and validated on Ubuntu 26.04; re-run the tests and the packaging tasks on the Windows host to confirm the lifecycle, safe-mode, launch-strategy, and artifact tests pass there and update the Windows validation evidence.
+- M1J, M1K, M1L, and M1M are implemented and validated on Ubuntu 26.04 and re-validated on the Windows host (94 tests, 6 skips, `check` passed); the Windows-side test re-validation is complete and recorded in the validation evidence below.
 - Validate the MSI and ZIP branches of the packaging tasks on Windows 10/11 x64 (MSI requires the WiX toolset, which jpackage invokes on Windows).
 - Validate the native Wayland path on a WLToolkit-capable JBR 25 runtime (Ubuntu 24.04/26.04 Wayland session) and confirm the X toolkit still launches under XWayland and full X11.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
@@ -203,6 +205,16 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Test environment: Windows host (win32, PowerShell), Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10, dependency verification metadata extended for the Windows host.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
 - Remaining unverified scope on Windows: live GUI launch, native SQLite loading/ACL/reparse points and packaged architecture filtering, Windows Credential Manager, OpenSSH agent named pipe, clipboard and atomic-move behavior, packaging, and re-running the cross-platform XDG path test fix on the Windows host (expected `EyeShellPathsTest` 6/6).
+
+### Windows host validation (M1J/M1K/M1L/M1M + cross-platform XDG re-validation)
+
+- Commands: `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" test`; `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" check`; `git diff --check`.
+- Executed at: 2026-08-04
+- Exit codes: 0 for test and check; diff clean.
+- Result: After fast-forwarding to `c1fb045` (which carries the Ubuntu `0e79ce5` XDG fix plus M1J/M1K/M1L/M1M), the full Windows suite runs 94 root tests: 94 executed, 0 failures, 0 errors, 6 skipped (only the opt-in Secret Service live test and SQLite POSIX-gated tests). `EyeShellPathsTest` now runs 6/6 cross-platform with 0 skipped, confirming the Ubuntu-predicted count. `check` passed. No dependency, verification metadata, schema, or secret-storage change was introduced by the Windows re-validation.
+- Test environment: Windows host (win32, PowerShell), Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
+- Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
+- Remaining unverified scope on Windows: live GUI launch, native SQLite loading/ACL/reparse points and packaged architecture filtering, Windows Credential Manager, OpenSSH agent named pipe, clipboard and atomic-move behavior, and the MSI/ZIP branches of the packaging tasks (MSI requires the WiX toolset).
 
 ### Ubuntu host validation (cross-platform XDG path test fix)
 
