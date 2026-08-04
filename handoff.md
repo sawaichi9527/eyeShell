@@ -8,6 +8,8 @@ M1M Packaging is implemented in the worktree. `jpackage` tasks produce a bundled
 
 The Ubuntu-implemented M1J/M1K/M1L/M1M changes have been re-validated on the Windows host (97 tests, 7 opt-in/platform-gated skips, `check` passed). Windows-specific validation is now recorded in the evidence below: native SQLite loads through the real LocalAppData catalog path, system clipboard and NTFS atomic-move behave correctly, the live GUI launches via `gradlew-local.ps1 run`, the Windows Credential Manager lifecycle was verified live against the real store, and the OpenSSH agent named-pipe transport was verified live against the real `ssh-agent` (temporarily enabled and restored). The only remaining Windows items are the MSI/ZIP installer branches, deferred to the formal pre-release milestone.
 
+M2 Linux Agentless Monitoring is in progress on the Windows host. Committed so far: a shared-transport `HostSession` refactor (one `ClientSession` carries a shell channel plus exec channels, `5273075`), the monitor domain/parsers/sampler (`189e99a`), and the `MonitorPanel` bound to the selected tab (`c2182c0`). The full Windows suite is at 114 tests, 8 skips, 0 failures; `check` passes and the live GUI launches. Monitoring samples `/proc/stat`, `/proc/meminfo`, `/proc/loadavg`, `/proc/net/dev`, `df -P`, and `ps` via a single exec channel per sample with `LC_ALL=C LANG=C`, computes CPU/network deltas across samples, and shows system info, CPU, memory, swap, load, network rates, and top processes in the left monitor panel. Remaining M2 work: live end-to-end monitoring verification against a real Linux host, and a handoff record of the Ubuntu-side live validation.
+
 ### 2026-08-03 Windows handoff (Ubuntu follow-up)
 
 The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShellWindow.kt` attempt at M1J was reviewed on the Windows host, found defective (removed the final-tab Start restore, broke `"Connected to X"`/`"Start"` assertions, had a dead and buggy `markSessionExited`, and no status enum/watcher/tests), and was reverted before handoff. The full analysis and the recommended M1J plan are recorded under `## M1J Plan` below.
@@ -129,7 +131,7 @@ The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShell
 
 ## In Progress
 
-- None.
+- M2 Linux Agentless Monitoring: shared-transport refactor, monitor parsers/sampler, and the selected-tab monitor panel are committed and Windows-validated (114 tests, 8 skips). Remaining: live end-to-end monitoring verification against a real Linux host (on Ubuntu) and the handoff record of that validation.
 
 ## M1M Plan (Packaging)
 
@@ -232,6 +234,16 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Test environment: Windows 10 LTSC (win32, PowerShell), Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
 - Note: the Windows OpenSSH agent named-pipe access still relies on Temurin/OpenJDK asynchronous file-channel behavior for `\\.\pipe\openssh-ssh-agent`; this is not a portable Java SE named-pipe API, but the live test confirms it works on the pinned runtime.
+
+### Windows host validation (M2 monitor shared transport, parsers, sampler, and panel)
+
+- Commands: `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" test`; `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" check`; `git diff --check`; `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" run` (live GUI smoke).
+- Executed at: 2026-08-04
+- Exit codes: 0 for test, check, and diff; the GUI launched with the new monitor panel and stayed alive until closed.
+- Result: Refactored the SSH transport into a `HostSession` boundary so one `ClientSession` carries a shell channel plus exec channels (terminal close no longer tears down the whole transport). Added a `monitor` package with immutable `MonitorSnapshot` metrics, `LC_ALL=C LANG=C` commands, parsers for `/proc/stat`, `/proc/meminfo` (including swap), `/proc/loadavg`, `/proc/net/dev`, `df -P`, and `ps`, and a `MonitorSampler` that samples a shared exec channel on a background virtual thread with CPU/network delta computation and exponential backoff on failure. Added a `MonitorPanel` on the left side that shows system info, CPU, memory, swap, load, network rates, and top processes, bound to the selected tab: switching tabs switches the monitored session, and closing a tab stops its sampler and resets the panel. Full suite runs 114 root tests: 114 executed, 0 failures, 0 errors, 8 skipped (platform/opt-in gated); `check` passed; live GUI launched via `gradlew-local.ps1 run`. No dependency, verification metadata, schema, or secret-storage change was introduced.
+- Test environment: Windows 10 LTSC (win32, PowerShell), Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
+- Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
+- Remaining M2 scope: live end-to-end monitoring against a real Linux host (on Ubuntu) to confirm the sampled `/proc`/`df`/`ps` output renders correctly in the panel.
 
 ### Ubuntu host validation (cross-platform XDG path test fix)
 
