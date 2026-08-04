@@ -12,6 +12,27 @@ M2 Linux Agentless Monitoring is in progress on the Windows host. Committed so f
 
 SFTP (Phase 2 high-priority item) is implemented on the Windows host: `sshd-sftp:2.19.0` was added with SHA-256 verification metadata (`3d645ff`), a `MinaSftpClient` boundary reuses the shared transport, an `SftpController` runs directory ops and a background transfer queue with `.part` staging and retry (`bd5fd16`), and an `SftpPanel` in the bottom dock lists files and offers upload/download/new folder/rename/delete bound to the selected session (`108e9e8`). An embedded-SSH SFTP subsystem integration test and an `SftpPanel` UI test are included; the full Windows suite is at 125 tests, 8 skips, 0 failures and the live GUI launches. Remaining SFTP work: drag-and-drop and transfer progress percentages (currently status-only), and live validation against a real Linux host on Ubuntu.
 
+### 2026-08-04 GUI review findings (pending fixes)
+
+A manual GUI review on the Windows host reported five issues that are NOT yet fixed. These are the next work items.
+
+| # | Issue | Root cause / current state | Planned fix |
+|---|---|---|---|
+| 1 | The Hosts add/edit dialog has no password-save field. | `HostCatalogController.showHostEditor` only collects name/host/port/username/auth/group/tags. | Add a Password field, a `Remember password in OS credential store` checkbox, and a `Clear saved password` button. Confirmed semantics (1+3): a blank password keeps the existing saved password; the Clear button forgets it. Passwords go only to the OS Credential Manager, never SQLite. |
+| 2 | The first connection attempt fails with a `NullPointerException` dialog; retrying succeeds. | The `WorkbenchPanel` tab-change hook fired during window construction and referenced the not-yet-assigned `workbench`; the SFTP hook was guarded by the `initialized` flag (`90cfee0`) but needs a regression test. SFTP/monitor init must not be able to fail terminal attach. | Add a construction-time selection-hook regression test; isolate SFTP controller and monitor sampler initialization so a failure only disables that feature instead of surfacing as "Could not open terminal tab"; surface the full root-cause chain in the error dialog. |
+| 3 | After connecting to a Linux host, the monitor panel shows no data. | `MonitorCommands.sample()` joins commands with a raw form-feed character; the remote shell treats it as whitespace, so no section delimiter reaches the parser and the panel shows "Metrics unsupported on this host." | Emit `printf '\f'` between sections (with a leading `export LC_ALL=C LANG=C`) so the parser's `splitSample` sees real boundaries; also show the connected host IP in the monitor panel. |
+| 4 | There is no `+` button on the tab strip to open a new connection. | `createSessionWorkspace()` renders only a `JTabbedPane`. | Add a `+` button at the right end of the tab strip that behaves like the bottom `Connect...`; disable it when no connect action exists. Must not disturb the empty `Start` tab behavior. |
+| 5 | After typing `exit` in the terminal, pressing Enter cannot restore the connection. | An `EXITED` session only updates the status chip and preserves scrollback; there is no reconnect action. | On Enter when the selected session is `EXITED`, reconnect using the original host preset (reusing a saved password, or reopening the connection dialog). Proposed behavior: open a new tab and keep the old exited tab's scrollback. |
+
+Confirmed decisions for the host editor password handling:
+- Blank password keeps the existing saved password (no accidental overwrite).
+- A `Clear saved password` button forgets the stored credential.
+- Remember/clear are only enabled when the OS credential store is available and the host uses PASSWORD authentication.
+
+Open questions handed to the next session:
+- Confirm issue #5 behavior: reconnect opens a NEW tab and keeps the old exited tab's scrollback (recommended), rather than replacing the tab.
+- Confirm whether editing an existing PASSWORD host should pre-fill the saved password in the dialog (recommended: no, keep it blank and show "Saved password will be used").
+
 ### 2026-08-03 Windows handoff (Ubuntu follow-up)
 
 The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShellWindow.kt` attempt at M1J was reviewed on the Windows host, found defective (removed the final-tab Start restore, broke `"Connected to X"`/`"Start"` assertions, had a dead and buggy `markSessionExited`, and no status enum/watcher/tests), and was reverted before handoff. The full analysis and the recommended M1J plan are recorded under `## M1J Plan` below.
@@ -135,6 +156,7 @@ The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShell
 
 - M2 Linux Agentless Monitoring: shared-transport refactor, monitor parsers/sampler, and the selected-tab monitor panel are committed and Windows-validated (116 tests, 8 skips), including an embedded-SSH end-to-end test that confirms sampled output renders in the panel. Remaining: a live end-to-end monitoring check against a real Linux host (on Ubuntu).
 - SFTP: shared-transport SFTP client, controller with a background transfer queue, and the dock SFTP panel are committed and Windows-validated (125 tests, 8 skips). Remaining: drag-and-drop, transfer progress percentages, and a live check against a real Linux host (on Ubuntu).
+- Five GUI review findings from 2026-08-04 are pending fixes (see "2026-08-04 GUI review findings" under Current Status): host-editor password save field, first-connect NPE regression guard, monitor section-delimiter bug, tab-strip `+` button, and Enter-to-reconnect after exit.
 
 ## M1M Plan (Packaging)
 
