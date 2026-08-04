@@ -50,7 +50,7 @@ class EyeShellWindow(
         monitorSelectionChanged = { component ->
             val page = pagesByComponent[component]
             if (page == null) {
-                workbench.monitorIdle()
+                if (initialized) workbench.monitorIdle()
             } else {
                 page.startMonitor { snapshot ->
                     SwingUtilities.invokeLater {
@@ -63,9 +63,14 @@ class EyeShellWindow(
         },
         sftpSelectionChanged = { component ->
             val page = pagesByComponent[component]
-            workbench.bindSftp(page?.sftpController())
+            if (page != null) {
+                workbench.bindSftp(page.sftpController())
+            } else if (initialized) {
+                workbench.bindSftp(null)
+            }
         },
     )
+    private var initialized = false
 
     init {
         defaultCloseOperation = DISPOSE_ON_CLOSE
@@ -73,6 +78,7 @@ class EyeShellWindow(
         size = Dimension(1280, 800)
         contentPane = workbench
         setLocationRelativeTo(null)
+        initialized = true
     }
 
     fun attachTerminal(hostSession: HostSession) {
