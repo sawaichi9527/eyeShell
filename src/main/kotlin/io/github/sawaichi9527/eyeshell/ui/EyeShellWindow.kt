@@ -1,5 +1,6 @@
 package io.github.sawaichi9527.eyeshell.ui
 
+import io.github.sawaichi9527.eyeshell.ssh.HostSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
 import java.awt.BorderLayout
@@ -53,11 +54,11 @@ class EyeShellWindow(
         setLocationRelativeTo(null)
     }
 
-    fun attachTerminal(session: TerminalSession) {
+    fun attachTerminal(hostSession: HostSession) {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal sessions must be attached on the Swing EDT" }
         val terminalView = terminalViewFactory()
         val page = try {
-            TerminalSessionPage(this, terminalView, session)
+            TerminalSessionPage(this, terminalView, hostSession)
         } catch (failure: Throwable) {
             try {
                 terminalView.close()
@@ -68,7 +69,7 @@ class EyeShellWindow(
         }
         try {
             page.attach()
-            workbench.addSession(session.name, page.component, page::close)
+            workbench.addSession(hostSession.endpoint.displayName, page.component, page::close)
         } catch (failure: Throwable) {
             try {
                 page.close()
@@ -111,10 +112,11 @@ class EyeShellWindow(
 internal class TerminalSessionPage(
     private val owner: Component,
     private val terminalView: TerminalView,
-    private val session: TerminalSession,
+    private val hostSession: HostSession,
 ) : AutoCloseable {
     private val closed = AtomicBoolean()
     private val exitMonitorStarted = AtomicBoolean()
+    private val session: TerminalSession = hostSession.openTerminal()
     private val outputController = TerminalOutputController(terminalView)
     private val highlightController = TerminalHighlightController(terminalView)
     val component: JComponent = JPanel(BorderLayout()).apply {
@@ -147,6 +149,11 @@ internal class TerminalSessionPage(
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         outputController.close(terminalView::close)
+        try {
+            session.close()
+        } finally {
+            hostSession.close()
+        }
     }
 }
 

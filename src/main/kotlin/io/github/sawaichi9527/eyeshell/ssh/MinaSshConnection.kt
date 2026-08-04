@@ -30,15 +30,13 @@ import org.apache.sshd.common.util.security.SecurityUtils
 class MinaSshConnection private constructor(
     private val client: SshClient,
     private val clientSession: ClientSession,
-    val endpoint: SshEndpoint,
-) : AutoCloseable {
+    override val endpoint: SshEndpoint,
+) : HostSession {
     private val closed = AtomicBoolean()
-    private val terminalOpened = AtomicBoolean()
 
-    fun openTerminal(columns: Int = 80, rows: Int = 24): TerminalSession {
+    override fun openTerminal(columns: Int, rows: Int): TerminalSession {
         require(columns > 0 && rows > 0)
         check(!closed.get()) { "SSH connection is closed" }
-        check(terminalOpened.compareAndSet(false, true)) { "A terminal channel is already open" }
 
         val channel = clientSession.createShellChannel()
         try {
@@ -48,13 +46,37 @@ class MinaSshConnection private constructor(
             channel.ptyLines = rows
             channel.setRedirectErrorStream(true)
             channel.open().verify(CHANNEL_TIMEOUT)
-            return MinaSshTerminalSession(endpoint.displayName, channel, this)
+            return MinaSshTerminalSession(endpoint.displayName, channel)
         } catch (failure: Exception) {
             channel.close(true)
-            close()
             throw failure
         }
     }
+
+    override fun execute(command: String): ExecResult {
+        check(!closed.get()) { "SSH connection is closed" }
+        val channel = clientSession.createExecChannel(command)
+        val output = StringBuilder()
+        try {
+            channel.setStreaming(StreamingChannel.Streaming.Sync)
+            channel.setRedirectErrorStream(true)
+            channel.open().verify(CHANNEL_TIMEOUT)
+            channel.invertedOut.reader(StandardCharsets.UTF_8).use { reader ->
+                val buffer = CharArray(4096)
+                while (true) {
+                    val count = reader.read(buffer)
+                    if (count < 0) break
+                    output.append(buffer, 0, count)
+                }
+            }
+            channel.waitFor(EnumSet.of(ClientChannelEvent.CLOSED), EXEC_TIMEOUT.toMillis())
+            return ExecResult(channel.exitStatus ?: 0, output.toString())
+        } finally {
+            channel.close(true)
+        }
+    }
+
+    override fun isOpen(): Boolean = !closed.get() && clientSession.isOpen
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
@@ -66,6 +88,7 @@ class MinaSshConnection private constructor(
         private val CONNECT_TIMEOUT = Duration.ofSeconds(10)
         private val AUTH_TIMEOUT = Duration.ofSeconds(15)
         private val CHANNEL_TIMEOUT = Duration.ofSeconds(10)
+        private val EXEC_TIMEOUT = Duration.ofSeconds(10)
 
         fun connect(
             endpoint: SshEndpoint,
@@ -229,7 +252,6 @@ private class KeyboardUserInteraction(
 private class MinaSshTerminalSession(
     override val name: String,
     private val channel: ChannelShell,
-    private val connection: MinaSshConnection,
 ) : TerminalSession {
     private val closed = AtomicBoolean()
     private val reader = InputStreamReader(channel.invertedOut, StandardCharsets.UTF_8)
@@ -265,6 +287,5 @@ private class MinaSshTerminalSession(
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         channel.close(false)
-        connection.close()
     }
 }

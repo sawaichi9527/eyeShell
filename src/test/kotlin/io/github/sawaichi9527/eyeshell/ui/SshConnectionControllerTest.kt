@@ -6,7 +6,9 @@ import io.github.sawaichi9527.eyeshell.secrets.PasswordCredentialStore
 import io.github.sawaichi9527.eyeshell.secrets.ProfileCredentialGuard
 import io.github.sawaichi9527.eyeshell.secrets.StoredPassword
 import io.github.sawaichi9527.eyeshell.ssh.ChangedHostKeyHandler
+import io.github.sawaichi9527.eyeshell.ssh.ExecResult
 import io.github.sawaichi9527.eyeshell.ssh.HostKeyVerifier
+import io.github.sawaichi9527.eyeshell.ssh.HostSession
 import io.github.sawaichi9527.eyeshell.ssh.SshAuthentication
 import io.github.sawaichi9527.eyeshell.ssh.SshEndpoint
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
@@ -29,7 +31,7 @@ class SshConnectionControllerTest {
         val terminal = FakeTerminalSession()
         val connector = SshTerminalConnector { _, _, _, _, _ ->
             assertTrue(store.saved.isEmpty(), "Password was saved before the terminal opened")
-            terminal
+            FakeHostSession(terminal)
         }
         val controller = SshConnectionController(store, connector)
         val request = passwordRequest(profileId, remember = true)
@@ -71,7 +73,7 @@ class SshConnectionControllerTest {
     fun `keeps an opened terminal when credential persistence fails`() {
         val store = RecordingPasswordStore(failSave = true)
         val terminal = FakeTerminalSession()
-        val controller = SshConnectionController(store, SshTerminalConnector { _, _, _, _, _ -> terminal })
+        val controller = SshConnectionController(store, SshTerminalConnector { _, _, _, _, _ -> FakeHostSession(terminal) })
         val request = passwordRequest(UUID.randomUUID(), remember = true)
 
         try {
@@ -93,7 +95,7 @@ class SshConnectionControllerTest {
         val guard = ProfileCredentialGuard()
         val controller = SshConnectionController(
             store,
-            SshTerminalConnector { _, _, _, _, _ -> FakeTerminalSession() },
+            SshTerminalConnector { _, _, _, _, _ -> FakeHostSession(FakeTerminalSession()) },
             guard,
         )
         val request = passwordRequest(profileId, remember = true)
@@ -200,5 +202,20 @@ class SshConnectionControllerTest {
         override fun ready(): Boolean = false
         override fun awaitExit(): Int = 0
         override fun close() { isOpen = false }
+    }
+
+    private class FakeHostSession(
+        private val terminal: TerminalSession,
+        override val endpoint: SshEndpoint = SshEndpoint("example.test", 22, "operator"),
+    ) : HostSession {
+        private var closed = false
+
+        override fun openTerminal(columns: Int, rows: Int): TerminalSession = terminal
+
+        override fun execute(command: String): ExecResult = ExecResult(0, "")
+
+        override fun isOpen(): Boolean = !closed
+
+        override fun close() { closed = true }
     }
 }

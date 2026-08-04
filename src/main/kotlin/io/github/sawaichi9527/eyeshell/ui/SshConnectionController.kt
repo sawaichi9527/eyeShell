@@ -4,6 +4,7 @@ import io.github.sawaichi9527.eyeshell.ssh.ChangedHostKey
 import io.github.sawaichi9527.eyeshell.ssh.ChangedHostKeyHandler
 import io.github.sawaichi9527.eyeshell.platform.EyeShellPaths
 import io.github.sawaichi9527.eyeshell.ssh.HostKeyVerifier
+import io.github.sawaichi9527.eyeshell.ssh.HostSession
 import io.github.sawaichi9527.eyeshell.ssh.KnownHostsStore
 import io.github.sawaichi9527.eyeshell.ssh.KeyboardInteractiveChallenge
 import io.github.sawaichi9527.eyeshell.ssh.KeyboardInteractiveResponder
@@ -140,12 +141,12 @@ internal class SshConnectionController(
                 SwingUtilities.invokeLater {
                     if (owner.isDisplayable && !closed.get()) {
                         try {
-                            owner.attachTerminal(opened.terminal)
+                            owner.attachTerminal(opened.hostSession)
                             if (opened.passwordSaveFailed) {
                                 showCredentialWarning(owner, "Connected, but the password could not be saved.")
                             }
                         } catch (failure: Exception) {
-                            opened.terminal.close()
+                            opened.hostSession.close()
                             owner.setConnectionState("Connection failed", false)
                             JOptionPane.showMessageDialog(
                                 owner,
@@ -155,7 +156,7 @@ internal class SshConnectionController(
                             )
                         }
                     } else {
-                        opened.terminal.close()
+                        opened.hostSession.close()
                     }
                 }
             } catch (failure: Exception) {
@@ -181,13 +182,19 @@ internal class SshConnectionController(
         unknownHostVerifier: HostKeyVerifier,
         changedHostKeyHandler: ChangedHostKeyHandler,
     ): OpenedTerminal {
-        val terminal = terminalConnector.open(
+        val hostSession = terminalConnector.open(
             endpoint = request.endpoint,
             authentication = request.authentication,
             knownHostsStore = knownHostsStore,
             unknownHostVerifier = unknownHostVerifier,
             changedHostKeyHandler = changedHostKeyHandler,
         )
+        val terminal = try {
+            hostSession.openTerminal()
+        } catch (failure: Exception) {
+            hostSession.close()
+            throw failure
+        }
         val saveFailed = request.passwordProfileId?.takeIf { request.rememberPassword }?.let { profileId ->
             val password = (request.authentication as? SshAuthentication.Password)?.copyValue()
             try {
@@ -204,7 +211,7 @@ internal class SshConnectionController(
                 password?.fill('\u0000')
             }
         } ?: false
-        return OpenedTerminal(terminal, saveFailed)
+        return OpenedTerminal(hostSession, terminal, saveFailed)
     }
 
     private fun confirmHostKey(owner: EyeShellWindow, hostKey: PresentedHostKey): Boolean {
@@ -536,6 +543,7 @@ internal data class HostConnectionPreset(
 )
 
 internal data class OpenedTerminal(
+    val hostSession: HostSession,
     val terminal: TerminalSession,
     val passwordSaveFailed: Boolean,
 )
@@ -547,7 +555,7 @@ internal fun interface SshTerminalConnector {
         knownHostsStore: KnownHostsStore,
         unknownHostVerifier: HostKeyVerifier,
         changedHostKeyHandler: ChangedHostKeyHandler,
-    ): TerminalSession
+    ): HostSession
 }
 
 private object MinaTerminalConnector : SshTerminalConnector {
@@ -557,21 +565,13 @@ private object MinaTerminalConnector : SshTerminalConnector {
         knownHostsStore: KnownHostsStore,
         unknownHostVerifier: HostKeyVerifier,
         changedHostKeyHandler: ChangedHostKeyHandler,
-    ): TerminalSession {
-        val connection = MinaSshConnection.connect(
-            endpoint = endpoint,
-            authentication = authentication,
-            knownHostsStore = knownHostsStore,
-            unknownHostVerifier = unknownHostVerifier,
-            changedHostKeyHandler = changedHostKeyHandler,
-        )
-        return try {
-            connection.openTerminal()
-        } catch (failure: Exception) {
-            connection.close()
-            throw failure
-        }
-    }
+    ): HostSession = MinaSshConnection.connect(
+        endpoint = endpoint,
+        authentication = authentication,
+        knownHostsStore = knownHostsStore,
+        unknownHostVerifier = unknownHostVerifier,
+        changedHostKeyHandler = changedHostKeyHandler,
+    )
 }
 
 internal enum class ConnectionAuthenticationMethod(

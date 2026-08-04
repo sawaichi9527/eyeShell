@@ -1,5 +1,7 @@
 package io.github.sawaichi9527.eyeshell.ui
 
+import io.github.sawaichi9527.eyeshell.ssh.ExecResult
+import io.github.sawaichi9527.eyeshell.ssh.HostSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
 import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
@@ -55,9 +57,9 @@ class WorkbenchPanelTest {
             hostsButton.doClick()
             assertEquals(1, hostsCount.get())
 
-            val firstPage = TerminalSessionPage(panel, firstView, firstSession).also { it.attach() }
+            val firstPage = TerminalSessionPage(panel, firstView, TestHostSession(firstSession)).also { it.attach() }
             panel.addSession(firstSession.name, firstPage.component, firstPage::close)
-            val secondPage = TerminalSessionPage(panel, secondView, secondSession).also { it.attach() }
+            val secondPage = TerminalSessionPage(panel, secondView, TestHostSession(secondSession)).also { it.attach() }
             panel.addSession(secondSession.name, secondPage.component, secondPage::close)
 
             assertSame(firstSession, firstView.attachedSession)
@@ -82,7 +84,7 @@ class WorkbenchPanelTest {
             val panel = WorkbenchPanel()
             val view = TestTerminalView(terminal)
             val session = TestTerminalSession()
-            val page = TerminalSessionPage(panel, view, session).also { it.attach() }
+            val page = TerminalSessionPage(panel, view, TestHostSession(session)).also { it.attach() }
             panel.addSession(session.name, page.component, page::close)
 
             assertSame(terminal, panel.findByName("testTerminal"))
@@ -97,8 +99,8 @@ class WorkbenchPanelTest {
             val panel = WorkbenchPanel(connectAction = {})
             val firstView = TestTerminalView(JPanel())
             val secondView = TestTerminalView(JPanel())
-            val firstPage = TerminalSessionPage(panel, firstView, TestTerminalSession("first")).also { it.attach() }
-            val secondPage = TerminalSessionPage(panel, secondView, TestTerminalSession("second")).also { it.attach() }
+            val firstPage = TerminalSessionPage(panel, firstView, TestHostSession(TestTerminalSession("first"))).also { it.attach() }
+            val secondPage = TerminalSessionPage(panel, secondView, TestHostSession(TestTerminalSession("second"))).also { it.attach() }
             panel.addSession("first", firstPage.component, firstPage::close)
             panel.addSession("second", secondPage.component, secondPage::close)
             val tabs = panel.findByName("sessionTabs") as JTabbedPane
@@ -219,7 +221,7 @@ class WorkbenchPanelTest {
         val panel = onEdt { WorkbenchPanel() }
         val view = TestTerminalView(JPanel())
         val session = BlockingExitTerminalSession("exited-session")
-        val page = TerminalSessionPage(panel, view, session)
+        val page = TerminalSessionPage(panel, view, TestHostSession(session))
         onEdt {
             page.attach()
             panel.addSession(session.name, page.component, page::close)
@@ -264,7 +266,7 @@ class WorkbenchPanelTest {
         val panel = onEdt { WorkbenchPanel() }
         val view = TestTerminalView(JPanel())
         val session = BlockingExitTerminalSession("closed-session")
-        val page = TerminalSessionPage(panel, view, session)
+        val page = TerminalSessionPage(panel, view, TestHostSession(session))
         val updates = AtomicInteger()
         onEdt {
             page.attach()
@@ -286,8 +288,8 @@ class WorkbenchPanelTest {
         val secondView = TestTerminalView(JPanel())
         val firstSession = BlockingExitTerminalSession("first")
         val secondSession = TestTerminalSession("second")
-        val firstPage = TerminalSessionPage(panel, firstView, firstSession)
-        val secondPage = TerminalSessionPage(panel, secondView, secondSession)
+        val firstPage = TerminalSessionPage(panel, firstView, TestHostSession(firstSession))
+        val secondPage = TerminalSessionPage(panel, secondView, TestHostSession(secondSession))
         onEdt {
             firstPage.attach()
             secondPage.attach()
@@ -326,7 +328,7 @@ class WorkbenchPanelTest {
         val panel = onEdt { WorkbenchPanel(connectAction = {}) }
         val view = TestTerminalView(JPanel())
         val session = BlockingExitTerminalSession("exited-session")
-        val page = TerminalSessionPage(panel, view, session)
+        val page = TerminalSessionPage(panel, view, TestHostSession(session))
         onEdt {
             page.attach()
             panel.addSession(session.name, page.component, page::close)
@@ -426,6 +428,22 @@ class WorkbenchPanelTest {
         override fun awaitExit(): Int = 0
 
         override fun close() = Unit
+    }
+
+    private class TestHostSession(
+        private val terminal: TerminalSession,
+        override val endpoint: io.github.sawaichi9527.eyeshell.ssh.SshEndpoint =
+            io.github.sawaichi9527.eyeshell.ssh.SshEndpoint("test.example", 22, "operator"),
+    ) : HostSession {
+        private var closed = false
+
+        override fun openTerminal(columns: Int, rows: Int): TerminalSession = terminal
+
+        override fun execute(command: String): ExecResult = ExecResult(0, "")
+
+        override fun isOpen(): Boolean = !closed
+
+        override fun close() { closed = true }
     }
 
     private class BlockingExitTerminalSession(
