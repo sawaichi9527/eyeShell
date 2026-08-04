@@ -6,7 +6,7 @@ M1I Multi-session Tabs (`333b6cc`), the cross-platform XDG path test fix (`0e79c
 
 M1M Packaging is implemented in the worktree. `jpackage` tasks produce a bundled-runtime app image, a Linux DEB installer, and a portable `tar.gz` (Windows MSI/ZIP variants are wired for the Windows host), all driven by the project-local JDK with a small testable artifact-naming boundary.
 
-The Ubuntu-implemented M1J/M1K/M1L/M1M changes have been re-validated on the Windows host (94 tests, 6 opt-in/platform-gated skips, `check` passed); see the Windows validation evidence below. The MSI/ZIP packaging branches and live GUI launch remain unverified on Windows.
+The Ubuntu-implemented M1J/M1K/M1L/M1M changes have been re-validated on the Windows host (94 tests, 6 opt-in/platform-gated skips, `check` passed); see the Windows validation evidence below. Development-stage validation uses `gradlew-local.ps1 run` for GUI smoke checks plus milestone `jpackageAppImage` bundles; the Windows MSI/ZIP installer branches and live GUI launch validation are deferred to the formal pre-release milestone.
 
 ### 2026-08-03 Windows handoff (Ubuntu follow-up)
 
@@ -133,7 +133,7 @@ The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShell
 
 ## M1M Plan (Packaging)
 
-Implemented in the worktree and validated on Ubuntu 26.04 (94 root tests, 93 passed, 1 opt-in skip). Scope delivered: `jpackage` tasks producing a bundled-runtime app image, a Linux DEB (`eyeshell_0.1.0_amd64.deb`), and a portable `eyeShell-0.1.0.tar.gz`, verified by running all three tasks from clean and inspecting the artifacts (`dpkg-deb -I`, `tar -tzf`, launcher + `lib/runtime` presence). The Windows MSI/ZIP branches are wired behind the existing `isWindowsBuild` platform switch but are unverified until run on the Windows host. Note: `outputs.dir` must not be declared on the app-image task because Gradle pre-creates declared output directories, which makes `jpackage` report "destination already exists"; the task deletes the destination in `doFirst` instead.
+Implemented in the worktree and validated on Ubuntu 26.04 (94 root tests, 93 passed, 1 opt-in skip). Scope delivered: `jpackage` tasks producing a bundled-runtime app image, a Linux DEB (`eyeshell_0.1.0_amd64.deb`), and a portable `eyeShell-0.1.0.tar.gz`, verified by running all three tasks from clean and inspecting the artifacts (`dpkg-deb -I`, `tar -tzf`, launcher + `lib/runtime` presence). The Windows MSI/ZIP branches are wired behind the existing `isWindowsBuild` platform switch but are unverified until run on the Windows host; per the 2026-08-04 decision, their validation is deferred to the formal pre-release milestone (MSI requires the WiX toolset). Development-stage validation uses `gradlew-local.ps1 run` for GUI smoke checks and milestone `jpackageAppImage` bundles. Note: `outputs.dir` must not be declared on the app-image task because Gradle pre-creates declared output directories, which makes `jpackage` report "destination already exists"; the task deletes the destination in `doFirst` instead.
 
 ## M1L Plan (Wayland/X11 startup strategy)
 
@@ -172,7 +172,7 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 ## Next Actions
 
 - M1J, M1K, M1L, and M1M are implemented and validated on Ubuntu 26.04 and re-validated on the Windows host (94 tests, 6 skips, `check` passed); the Windows-side test re-validation is complete and recorded in the validation evidence below.
-- Validate the MSI and ZIP branches of the packaging tasks on Windows 10/11 x64 (MSI requires the WiX toolset, which jpackage invokes on Windows).
+- Pre-release: validate the Windows MSI (requires the WiX toolset, which jpackage invokes on Windows) and ZIP installer branches of the packaging tasks; development-stage validation uses `gradlew-local.ps1 run` for GUI smoke checks and milestone `jpackageAppImage` bundles instead.
 - Validate the native Wayland path on a WLToolkit-capable JBR 25 runtime (Ubuntu 24.04/26.04 Wayland session) and confirm the X toolkit still launches under XWayland and full X11.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
 - Manually validate Add/Manage highlight dialogs and color selection on supported desktop environments.
@@ -204,7 +204,7 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Result: 75 root tests: 73 passed, 0 failed, 0 errors; 8 skipped (2 newly Linux-gated XDG path tests plus the pre-existing platform-gated Secret Service/SQLite skips). The previously failing `EyeShellPathsTest` XDG tests and the `JediTermTerminalViewTest` active-stream close test now pass. `check` passed. This 8-skip count reflects the state on 2026-08-03; after the later `@TempDir` cross-platform fix, the next Windows run is expected to report 6 skipped (only the opt-in Secret Service live test and SQLite POSIX-gated tests) with `EyeShellPathsTest` at 6/6.
 - Test environment: Windows host (win32, PowerShell), Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10, dependency verification metadata extended for the Windows host.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
-- Remaining unverified scope on Windows: live GUI launch, native SQLite loading/ACL/reparse points and packaged architecture filtering, Windows Credential Manager, OpenSSH agent named pipe, clipboard and atomic-move behavior, packaging, and re-running the cross-platform XDG path test fix on the Windows host (expected `EyeShellPathsTest` 6/6).
+- Remaining unverified scope on Windows: live GUI launch (development-stage smoke uses `gradlew-local.ps1 run`; milestone bundles use `jpackageAppImage`), native SQLite loading/ACL/reparse points and packaged architecture filtering, Windows Credential Manager, OpenSSH agent named pipe, clipboard and atomic-move behavior, packaging installers (deferred to pre-release), and re-running the cross-platform XDG path test fix on the Windows host (expected `EyeShellPathsTest` 6/6).
 
 ### Windows host validation (M1J/M1K/M1L/M1M + cross-platform XDG re-validation)
 
@@ -214,7 +214,7 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Result: After fast-forwarding to `c1fb045` (which carries the Ubuntu `0e79ce5` XDG fix plus M1J/M1K/M1L/M1M), the full Windows suite runs 94 root tests: 94 executed, 0 failures, 0 errors, 6 skipped (only the opt-in Secret Service live test and SQLite POSIX-gated tests). `EyeShellPathsTest` now runs 6/6 cross-platform with 0 skipped, confirming the Ubuntu-predicted count. `check` passed. No dependency, verification metadata, schema, or secret-storage change was introduced by the Windows re-validation.
 - Test environment: Windows host (win32, PowerShell), Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
-- Remaining unverified scope on Windows: live GUI launch, native SQLite loading/ACL/reparse points and packaged architecture filtering, Windows Credential Manager, OpenSSH agent named pipe, clipboard and atomic-move behavior, and the MSI/ZIP branches of the packaging tasks (MSI requires the WiX toolset).
+- Remaining unverified scope on Windows: live GUI launch (development-stage smoke uses `gradlew-local.ps1 run`; milestone bundles use `jpackageAppImage`), native SQLite loading/ACL/reparse points and packaged architecture filtering, Windows Credential Manager, OpenSSH agent named pipe, clipboard and atomic-move behavior, and the MSI/ZIP branches of the packaging tasks (MSI requires the WiX toolset; both deferred to the formal pre-release milestone).
 
 ### Ubuntu host validation (cross-platform XDG path test fix)
 
