@@ -1,5 +1,6 @@
 package io.github.sawaichi9527.eyeshell.ssh
 
+import io.github.sawaichi9527.eyeshell.sftp.SftpClient
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
@@ -77,6 +78,8 @@ class MinaSshConnection private constructor(
     }
 
     override fun isOpen(): Boolean = !closed.get() && clientSession.isOpen
+
+    override fun sftp(): SftpClient = MinaSftpClient(clientSession)
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return

@@ -116,6 +116,9 @@ class MonitorSamplerTest {
             return ExecResult(0, output)
         }
 
+        override fun sftp(): io.github.sawaichi9527.eyeshell.sftp.SftpClient =
+            throw UnsupportedOperationException()
+
         override fun isOpen(): Boolean = !closed.get()
 
         override fun close() { closed.set(true) }

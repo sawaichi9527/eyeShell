@@ -463,6 +463,9 @@ class WorkbenchPanelTest {
 
         override fun execute(command: String): ExecResult = ExecResult(0, "")
 
+        override fun sftp(): io.github.sawaichi9527.eyeshell.sftp.SftpClient =
+            throw UnsupportedOperationException()
+
         override fun isOpen(): Boolean = !closed
 
         override fun close() { closed = true }
