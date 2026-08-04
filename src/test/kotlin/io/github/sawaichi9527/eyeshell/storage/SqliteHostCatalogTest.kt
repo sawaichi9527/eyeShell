@@ -213,6 +213,24 @@ class SqliteHostCatalogTest {
         assertTrue(resources.single().toString().contains("without-natives"), resources.single().toString())
     }
 
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    fun `loads native SQLite and persists the catalog on the Windows data path`() {
+        val database = io.github.sawaichi9527.eyeshell.platform.EyeShellPaths.catalogDatabaseFile()
+        val created = SqliteHostCatalog(database).use { catalog ->
+            catalog.createHost(draft("Windows host", "windows.example"))
+        }
+        SqliteHostCatalog(database).use { catalog ->
+            assertEquals(created, catalog.listHosts().single())
+        }
+        assertTrue(Files.isRegularFile(database))
+        try {
+            Files.deleteIfExists(database)
+            Files.deleteIfExists(database.resolveSibling("${database.fileName}-journal"))
+        } catch (_: Exception) {
+        }
+    }
+
     private fun draft(name: String, host: String) = HostDraft(
         name = name,
         endpoint = SshEndpoint(host, 22, "operator"),

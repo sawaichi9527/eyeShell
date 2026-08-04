@@ -6,7 +6,7 @@ M1I Multi-session Tabs (`333b6cc`), the cross-platform XDG path test fix (`0e79c
 
 M1M Packaging is implemented in the worktree. `jpackage` tasks produce a bundled-runtime app image, a Linux DEB installer, and a portable `tar.gz` (Windows MSI/ZIP variants are wired for the Windows host), all driven by the project-local JDK with a small testable artifact-naming boundary.
 
-The Ubuntu-implemented M1J/M1K/M1L/M1M changes have been re-validated on the Windows host (94 tests, 6 opt-in/platform-gated skips, `check` passed); see the Windows validation evidence below. Development-stage validation uses `gradlew-local.ps1 run` for GUI smoke checks plus milestone `jpackageAppImage` bundles; the Windows MSI/ZIP installer branches and live GUI launch validation are deferred to the formal pre-release milestone.
+The Ubuntu-implemented M1J/M1K/M1L/M1M changes have been re-validated on the Windows host (97 tests, 7 opt-in/platform-gated skips, `check` passed). Windows-specific validation is now recorded in the evidence below: native SQLite loads through the real LocalAppData catalog path, system clipboard and NTFS atomic-move behave correctly, the live GUI launches via `gradlew-local.ps1 run`, and the Windows Credential Manager lifecycle was verified live against the real store. The only remaining Windows item is the OpenSSH agent named-pipe transport (`\\.\pipe\openssh-ssh-agent`), which requires an enabled `ssh-agent` service and was deferred; the MSI/ZIP installer branches remain deferred to the formal pre-release milestone.
 
 ### 2026-08-03 Windows handoff (Ubuntu follow-up)
 
@@ -171,20 +171,18 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 
 ## Next Actions
 
-- M1J, M1K, M1L, and M1M are implemented and validated on Ubuntu 26.04 and re-validated on the Windows host (94 tests, 6 skips, `check` passed); the Windows-side test re-validation is complete and recorded in the validation evidence below.
+- M1J, M1K, M1L, and M1M are implemented and validated on Ubuntu 26.04 and re-validated on the Windows host (97 tests, 7 skips, `check` passed); Windows-specific platform validation is complete except the OpenSSH agent named-pipe and MSI/ZIP installers (see below).
 - Pre-release: validate the Windows MSI (requires the WiX toolset, which jpackage invokes on Windows) and ZIP installer branches of the packaging tasks; development-stage validation uses `gradlew-local.ps1 run` for GUI smoke checks and milestone `jpackageAppImage` bundles instead.
 - Validate the native Wayland path on a WLToolkit-capable JBR 25 runtime (Ubuntu 24.04/26.04 Wayland session) and confirm the X toolkit still launches under XWayland and full X11.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
 - Manually validate Add/Manage highlight dialogs and color selection on supported desktop environments.
 - Characterize heap usage with multiple simultaneous 100,000-line sessions and larger rule sets.
-- Validate SQLite native loading, data paths, ACLs/reparse points, and classifier packaging on Windows 10/11 x64.
 - Validate SQLite native loading under Ubuntu 24.04 X11 and enterprise `noexec` temporary filesystems.
-- Validate Windows Credential Manager read/write/update/delete on Windows 10/11 x64.
 - Validate locked GNOME Keyring behavior and repeat the lifecycle against a Secret Service-compatible KWallet setup.
 - Decide whether a future catalog revision may store a Private Key File path reference; M1G intentionally does not persist it.
 - Validate keyboard-interactive dialogs against external multi-prompt and MFA-capable SSH servers.
 - Validate OpenSSH agent authentication on Ubuntu 24.04/26.04 with a desktop-inherited `SSH_AUTH_SOCK`.
-- Validate the asynchronous OpenSSH agent named-pipe transport on Windows 10/11 x64 with the pinned Temurin 21 runtime.
+- Validate the asynchronous OpenSSH agent named-pipe transport on Windows 10/11 x64 (`\\.\pipe\openssh-ssh-agent`); the `ssh-agent` service was Stopped/Disabled on this host, so this requires enabling the service and loading a test key before running.
 
 ## Validation Evidence
 
@@ -215,6 +213,16 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Test environment: Windows host (win32, PowerShell), Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
 - Remaining unverified scope on Windows: live GUI launch (development-stage smoke uses `gradlew-local.ps1 run`; milestone bundles use `jpackageAppImage`), native SQLite loading/ACL/reparse points and packaged architecture filtering, Windows Credential Manager, OpenSSH agent named pipe, clipboard and atomic-move behavior, and the MSI/ZIP branches of the packaging tasks (MSI requires the WiX toolset; both deferred to the formal pre-release milestone).
+
+### Windows host validation (Windows-specific platform features)
+
+- Commands: `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" test --tests "io.github.sawaichi9527.eyeshell.storage.SqliteHostCatalogTest"`; `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" test --tests "io.github.sawaichi9527.eyeshell.ui.TerminalOutputControllerTest"`; `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" test --tests "io.github.sawaichi9527.eyeshell.secrets.SystemPasswordCredentialStoreTest"` with `EYESHELL_TEST_LIVE_WINDOWS_CREDENTIAL_MANAGER=1`; `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" run` (live GUI smoke); `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" test`; `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" check`; `git diff --check`.
+- Executed at: 2026-08-04
+- Exit codes: 0 for all test/check/diff commands; the GUI launched and stayed alive until manually closed.
+- Result: Added a Windows-gated `SqliteHostCatalogTest` case that opens the catalog at the real `EyeShellPaths.catalogDatabaseFile()` LocalAppData path and round-trips a host, proving native SQLite loads on Windows; added a Windows-gated `TerminalOutputControllerTest` case proving the system clipboard round-trips collected UTF-8 output on Windows (atomic NTFS `ATOMIC_MOVE` was already covered by the existing suite); and added a Windows-gated live `SystemPasswordCredentialStoreTest` case that, when `EYESHELL_TEST_LIVE_WINDOWS_CREDENTIAL_MANAGER=1`, saves/retrieves/updates/forgets a test credential against the real Windows Credential Manager. The live GUI launched via `gradlew-local.ps1 run` with a window titled `eyeShell` and remained alive until closed. The full suite now runs 97 root tests: 97 executed, 0 failures, 0 errors, 7 skipped (6 opt-in/platform-gated plus the env-gated live Windows Credential Manager test that skips unless the env var is set); `check` passed. No dependency, verification metadata, schema, or secret-storage change was introduced.
+- Test environment: Windows host (win32, PowerShell), Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
+- Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
+- Remaining unverified scope on Windows: the OpenSSH agent named-pipe transport (`\\.\pipe\openssh-ssh-agent`) requires an enabled `ssh-agent` service and a loaded test key, so it was deferred (the service is Stopped/Disabled on this host); and the MSI/ZIP branches of the packaging tasks remain deferred to the formal pre-release milestone (MSI requires the WiX toolset).
 
 ### Ubuntu host validation (cross-platform XDG path test fix)
 

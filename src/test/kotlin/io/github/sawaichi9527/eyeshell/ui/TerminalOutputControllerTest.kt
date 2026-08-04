@@ -73,6 +73,20 @@ class TerminalOutputControllerTest {
     }
 
     @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    fun `system clipboard round-trips collected output on Windows`() {
+        val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+        val text = collectAllOutput(TestTerminalView { it.write("Unicode 中文 😀\r\n") }.captureAllOutput(), 100)
+
+        SwingUtilities.invokeAndWait {
+            clipboard.setContents(java.awt.datatransfer.StringSelection(text), null)
+            val contents = clipboard.getContents(null)
+                ?.getTransferData(java.awt.datatransfer.DataFlavor.stringFlavor)
+            assertEquals(text, contents)
+        }
+    }
+
+    @Test
     fun `controller defers terminal close only until snapshot capture finishes`() {
         val view = BlockingCaptureTerminalView()
         val controller = TerminalOutputController(view)

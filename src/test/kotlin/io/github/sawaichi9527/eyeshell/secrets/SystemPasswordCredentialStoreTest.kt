@@ -112,6 +112,32 @@ class SystemPasswordCredentialStoreTest {
         }
     }
 
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    fun `live Windows Credential Manager supports the credential lifecycle`() {
+        assumeTrue(System.getenv("EYESHELL_TEST_LIVE_WINDOWS_CREDENTIAL_MANAGER") == "1")
+        val profileId = UUID.randomUUID()
+        val firstPassword = charArrayOf('e', 'y', 'e', 'S', 'h', 'e', 'l', 'l', '-', 'o', 'n', 'e')
+        val secondPassword = charArrayOf('e', 'y', 'e', 'S', 'h', 'e', 'l', 'l', '-', 't', 'w', 'o')
+        val store = WindowsPasswordCredentialStore()
+
+        try {
+            assertEquals(CredentialStoreStatus.AVAILABLE, store.status())
+            try {
+                store.save(profileId, firstPassword)
+                assertStoredPassword(store, profileId, firstPassword)
+                store.save(profileId, secondPassword)
+                assertStoredPassword(store, profileId, secondPassword)
+            } finally {
+                store.forget(profileId)
+            }
+            assertNull(store.retrieve(profileId))
+        } finally {
+            firstPassword.fill('\u0000')
+            secondPassword.fill('\u0000')
+        }
+    }
+
     private fun assertStoredPassword(
         store: PasswordCredentialStore,
         profileId: UUID,
