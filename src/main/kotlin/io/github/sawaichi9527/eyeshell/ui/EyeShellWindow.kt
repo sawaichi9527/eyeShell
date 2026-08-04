@@ -61,6 +61,10 @@ class EyeShellWindow(
                 }
             }
         },
+        sftpSelectionChanged = { component ->
+            val page = pagesByComponent[component]
+            workbench.bindSftp(page?.sftpController())
+        },
     )
 
     init {
@@ -142,10 +146,21 @@ internal class TerminalSessionPage(
     private val outputController = TerminalOutputController(terminalView)
     private val highlightController = TerminalHighlightController(terminalView)
     private val monitorSampler = MonitorSampler(hostSession)
+    private val sftpCreated = AtomicBoolean()
+    private var sftpController: io.github.sawaichi9527.eyeshell.sftp.SftpController? = null
     val component: JComponent = JPanel(BorderLayout()).apply {
         name = "terminalWorkspace"
         getAccessibleContext().accessibleName = "Terminal workspace"
         add(terminalView.component, BorderLayout.CENTER)
+    }
+
+    fun sftpController(): io.github.sawaichi9527.eyeshell.sftp.SftpController? {
+        if (!sftpCreated.compareAndSet(false, true)) return sftpController
+        return try {
+            io.github.sawaichi9527.eyeshell.sftp.SftpController(hostSession.sftp()).also { sftpController = it }
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     fun attach() {
@@ -181,6 +196,7 @@ internal class TerminalSessionPage(
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         monitorSampler.close()
+        sftpController?.close()
         outputController.close(terminalView::close)
         try {
             session.close()
@@ -194,6 +210,7 @@ class WorkbenchPanel(
     connectAction: (() -> Unit)? = null,
     hostsAction: (() -> Unit)? = null,
     monitorSelectionChanged: ((Component) -> Unit)? = null,
+    sftpSelectionChanged: ((Component) -> Unit)? = null,
 ) : JPanel(BorderLayout()) {
     private val canConnect = connectAction != null
     private val sessionTabs = JTabbedPane(JTabbedPane.TOP).apply {
@@ -205,6 +222,7 @@ class WorkbenchPanel(
     private var connecting = false
     private val monitorPanel = MonitorPanel()
     private val onMonitorSelectionChanged = monitorSelectionChanged
+    private val onSftpSelectionChanged = sftpSelectionChanged
     private val connectionStatus = JLabel("Not connected").apply {
         name = "connectionStatus"
     }
@@ -235,8 +253,10 @@ class WorkbenchPanel(
             val selected = sessionTabs.selectedComponent
             if (selected != null && sessions.containsKey(selected)) {
                 onMonitorSelectionChanged?.invoke(selected)
+                onSftpSelectionChanged?.invoke(selected)
             } else {
                 monitorPanel.resetToIdle()
+                onSftpSelectionChanged?.invoke(selected)
             }
         }
         showEmptySession()
@@ -309,6 +329,11 @@ class WorkbenchPanel(
 
     internal fun isSelectedSession(component: Component): Boolean =
         sessionTabs.selectedComponent === component
+
+    internal fun bindSftp(controller: io.github.sawaichi9527.eyeshell.sftp.SftpController?) {
+        check(SwingUtilities.isEventDispatchThread()) { "SFTP binding must run on the Swing EDT" }
+        toolDock.bindSftp(controller)
+    }
 
     private fun createWorkbenchSplit(): JSplitPane = JSplitPane(
         JSplitPane.HORIZONTAL_SPLIT,
@@ -429,10 +454,11 @@ private fun accumulateFailure(current: Throwable?, next: Throwable): Throwable {
 }
 
 private class CollapsibleToolDock : JPanel(BorderLayout()) {
+    private val sftpPanel = SftpPanel()
     private val content = JTabbedPane(JTabbedPane.TOP).apply {
         name = "toolDockContent"
         preferredSize = Dimension(0, 220)
-        addTab("SFTP", emptyToolPanel("Connect to a host to browse remote files."))
+        addTab("SFTP", sftpPanel)
         addTab("Commands", emptyToolPanel("Saved commands will appear here."))
         isVisible = false
     }
@@ -444,6 +470,10 @@ private class CollapsibleToolDock : JPanel(BorderLayout()) {
         getAccessibleContext().accessibleName = "Session tools"
         border = BorderFactory.createMatteBorder(1, 0, 0, 0, foreground)
         add(content, BorderLayout.CENTER)
+    }
+
+    fun bindSftp(controller: io.github.sawaichi9527.eyeshell.sftp.SftpController?) {
+        sftpPanel.bind(controller)
     }
 
     fun setExpanded(expanded: Boolean) {
