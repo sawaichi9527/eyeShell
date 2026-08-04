@@ -10,6 +10,8 @@ The Ubuntu-implemented M1J/M1K/M1L/M1M changes have been re-validated on the Win
 
 M2 Linux Agentless Monitoring is in progress on the Windows host. Committed so far: a shared-transport `HostSession` refactor (one `ClientSession` carries a shell channel plus exec channels, `5273075`), the monitor domain/parsers/sampler (`189e99a`), and the `MonitorPanel` bound to the selected tab (`c2182c0`). The full Windows suite is at 116 tests, 8 skips, 0 failures; `check` passes and the live GUI launches. Monitoring samples `/proc/stat`, `/proc/meminfo`, `/proc/loadavg`, `/proc/net/dev`, `df -P`, and `ps` via a single exec channel per sample with `LC_ALL=C LANG=C`, computes CPU/network deltas across samples, and shows system info, CPU, memory, swap, load, network rates, and top processes in the left monitor panel. An embedded-SSH end-to-end test (`adb9c3a`) verifies on Windows that a Linux-style remote's sampled output renders correctly in the panel. Remaining M2 work: a live end-to-end monitoring check against a real Linux host on Ubuntu to confirm real-world output renders (the sampled pipeline itself is already verified).
 
+SFTP (Phase 2 high-priority item) is implemented on the Windows host: `sshd-sftp:2.19.0` was added with SHA-256 verification metadata (`3d645ff`), a `MinaSftpClient` boundary reuses the shared transport, an `SftpController` runs directory ops and a background transfer queue with `.part` staging and retry (`bd5fd16`), and an `SftpPanel` in the bottom dock lists files and offers upload/download/new folder/rename/delete bound to the selected session (`108e9e8`). An embedded-SSH SFTP subsystem integration test and an `SftpPanel` UI test are included; the full Windows suite is at 125 tests, 8 skips, 0 failures and the live GUI launches. Remaining SFTP work: drag-and-drop and transfer progress percentages (currently status-only), and live validation against a real Linux host on Ubuntu.
+
 ### 2026-08-03 Windows handoff (Ubuntu follow-up)
 
 The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShellWindow.kt` attempt at M1J was reviewed on the Windows host, found defective (removed the final-tab Start restore, broke `"Connected to X"`/`"Start"` assertions, had a dead and buggy `markSessionExited`, and no status enum/watcher/tests), and was reverted before handoff. The full analysis and the recommended M1J plan are recorded under `## M1J Plan` below.
@@ -132,6 +134,7 @@ The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShell
 ## In Progress
 
 - M2 Linux Agentless Monitoring: shared-transport refactor, monitor parsers/sampler, and the selected-tab monitor panel are committed and Windows-validated (116 tests, 8 skips), including an embedded-SSH end-to-end test that confirms sampled output renders in the panel. Remaining: a live end-to-end monitoring check against a real Linux host (on Ubuntu).
+- SFTP: shared-transport SFTP client, controller with a background transfer queue, and the dock SFTP panel are committed and Windows-validated (125 tests, 8 skips). Remaining: drag-and-drop, transfer progress percentages, and a live check against a real Linux host (on Ubuntu).
 
 ## M1M Plan (Packaging)
 
@@ -174,6 +177,7 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 ## Next Actions
 
 - M1J, M1K, M1L, and M1M are implemented and validated on Ubuntu 26.04 and re-validated on the Windows host (97 tests, 7 skips, `check` passed); Windows-specific platform validation is complete except the MSI/ZIP installers (see below).
+- M2 monitoring and SFTP are implemented and Windows-validated (125 tests, 8 skips); the remaining cross-platform work is a live check of both against a real Linux host on Ubuntu, plus SFTP drag-and-drop and transfer progress percentages.
 - Pre-release: validate the Windows MSI (requires the WiX toolset, which jpackage invokes on Windows) and ZIP installer branches of the packaging tasks; development-stage validation uses `gradlew-local.ps1 run` for GUI smoke checks and milestone `jpackageAppImage` bundles instead.
 - Validate the native Wayland path on a WLToolkit-capable JBR 25 runtime (Ubuntu 24.04/26.04 Wayland session) and confirm the X toolkit still launches under XWayland and full X11.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
@@ -244,6 +248,16 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Test environment: Windows 10 LTSC (win32, PowerShell), Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
 - Remaining M2 scope: a live end-to-end monitoring check against a real Linux host (on Ubuntu) to confirm real-world output renders; the sampled pipeline itself is already verified end to end on Windows.
+
+### Windows host validation (SFTP on the shared transport)
+
+- Commands: `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" test`; `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" check`; `git diff --check`; `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" run` (live GUI smoke).
+- Executed at: 2026-08-04
+- Exit codes: 0 for test, check, and diff; the GUI launched with the SFTP dock panel and stayed alive until closed.
+- Result: Added `sshd-sftp:2.19.0` with SHA-256 verification metadata and a `MinaSftpClient` boundary that reuses the shared `HostSession` transport for SFTP. Added an `SftpController` that runs directory/stat/mkdir/rename/delete and a background transfer queue (uploads and downloads staged through `.part` files, with retry on transient failure and overwrite rejection). Added an `SftpPanel` in the bottom dock bound to the selected tab: it navigates remote directories, lists files, and offers upload, download, new folder, rename, and delete, with a transfer-queue table. An embedded-SSH integration test starts an in-process `SshServer` with the SFTP subsystem and a virtual filesystem, and verifies list/mkdir/upload/download/rename/delete over a real SFTP channel. A `SftpPanel` UI test verifies the disconnected and connected states. The full suite runs 125 root tests: 125 executed, 0 failures, 0 errors, 8 skipped (platform/opt-in gated); `check` passed; live GUI launched via `gradlew-local.ps1 run`. A window-construction guard was added so the selection hooks never reference the not-yet-assigned workbench. No dependency beyond `sshd-sftp`, schema, or secret-storage change was introduced.
+- Test environment: Windows 10 LTSC (win32, PowerShell), Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
+- Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
+- Remaining SFTP scope: drag-and-drop, transfer progress percentages (currently status-only), and a live check against a real Linux host (on Ubuntu).
 
 ### Ubuntu host validation (cross-platform XDG path test fix)
 
