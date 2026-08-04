@@ -6,7 +6,7 @@ M1I Multi-session Tabs (`333b6cc`), the cross-platform XDG path test fix (`0e79c
 
 M1M Packaging is implemented in the worktree. `jpackage` tasks produce a bundled-runtime app image, a Linux DEB installer, and a portable `tar.gz` (Windows MSI/ZIP variants are wired for the Windows host), all driven by the project-local JDK with a small testable artifact-naming boundary.
 
-The Ubuntu-implemented M1J/M1K/M1L/M1M changes have been re-validated on the Windows host (97 tests, 7 opt-in/platform-gated skips, `check` passed). Windows-specific validation is now recorded in the evidence below: native SQLite loads through the real LocalAppData catalog path, system clipboard and NTFS atomic-move behave correctly, the live GUI launches via `gradlew-local.ps1 run`, and the Windows Credential Manager lifecycle was verified live against the real store. The only remaining Windows item is the OpenSSH agent named-pipe transport (`\\.\pipe\openssh-ssh-agent`), which requires an enabled `ssh-agent` service and was deferred; the MSI/ZIP installer branches remain deferred to the formal pre-release milestone.
+The Ubuntu-implemented M1J/M1K/M1L/M1M changes have been re-validated on the Windows host (97 tests, 7 opt-in/platform-gated skips, `check` passed). Windows-specific validation is now recorded in the evidence below: native SQLite loads through the real LocalAppData catalog path, system clipboard and NTFS atomic-move behave correctly, the live GUI launches via `gradlew-local.ps1 run`, the Windows Credential Manager lifecycle was verified live against the real store, and the OpenSSH agent named-pipe transport was verified live against the real `ssh-agent` (temporarily enabled and restored). The only remaining Windows items are the MSI/ZIP installer branches, deferred to the formal pre-release milestone.
 
 ### 2026-08-03 Windows handoff (Ubuntu follow-up)
 
@@ -171,7 +171,7 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 
 ## Next Actions
 
-- M1J, M1K, M1L, and M1M are implemented and validated on Ubuntu 26.04 and re-validated on the Windows host (97 tests, 7 skips, `check` passed); Windows-specific platform validation is complete except the OpenSSH agent named-pipe and MSI/ZIP installers (see below).
+- M1J, M1K, M1L, and M1M are implemented and validated on Ubuntu 26.04 and re-validated on the Windows host (97 tests, 7 skips, `check` passed); Windows-specific platform validation is complete except the MSI/ZIP installers (see below).
 - Pre-release: validate the Windows MSI (requires the WiX toolset, which jpackage invokes on Windows) and ZIP installer branches of the packaging tasks; development-stage validation uses `gradlew-local.ps1 run` for GUI smoke checks and milestone `jpackageAppImage` bundles instead.
 - Validate the native Wayland path on a WLToolkit-capable JBR 25 runtime (Ubuntu 24.04/26.04 Wayland session) and confirm the X toolkit still launches under XWayland and full X11.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
@@ -182,7 +182,6 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Decide whether a future catalog revision may store a Private Key File path reference; M1G intentionally does not persist it.
 - Validate keyboard-interactive dialogs against external multi-prompt and MFA-capable SSH servers.
 - Validate OpenSSH agent authentication on Ubuntu 24.04/26.04 with a desktop-inherited `SSH_AUTH_SOCK`.
-- Validate the asynchronous OpenSSH agent named-pipe transport on Windows 10/11 x64 (`\\.\pipe\openssh-ssh-agent`); the `ssh-agent` service was Stopped/Disabled on this host, so this requires enabling the service and loading a test key before running.
 
 ## Validation Evidence
 
@@ -222,7 +221,17 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Result: Added a Windows-gated `SqliteHostCatalogTest` case that opens the catalog at the real `EyeShellPaths.catalogDatabaseFile()` LocalAppData path and round-trips a host, proving native SQLite loads on Windows; added a Windows-gated `TerminalOutputControllerTest` case proving the system clipboard round-trips collected UTF-8 output on Windows (atomic NTFS `ATOMIC_MOVE` was already covered by the existing suite); and added a Windows-gated live `SystemPasswordCredentialStoreTest` case that, when `EYESHELL_TEST_LIVE_WINDOWS_CREDENTIAL_MANAGER=1`, saves/retrieves/updates/forgets a test credential against the real Windows Credential Manager. The live GUI launched via `gradlew-local.ps1 run` with a window titled `eyeShell` and remained alive until closed. The full suite now runs 97 root tests: 97 executed, 0 failures, 0 errors, 7 skipped (6 opt-in/platform-gated plus the env-gated live Windows Credential Manager test that skips unless the env var is set); `check` passed. No dependency, verification metadata, schema, or secret-storage change was introduced.
 - Test environment: Windows host (win32, PowerShell), Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
-- Remaining unverified scope on Windows: the OpenSSH agent named-pipe transport (`\\.\pipe\openssh-ssh-agent`) requires an enabled `ssh-agent` service and a loaded test key, so it was deferred (the service is Stopped/Disabled on this host); and the MSI/ZIP branches of the packaging tasks remain deferred to the formal pre-release milestone (MSI requires the WiX toolset).
+- Remaining unverified scope on Windows: the MSI/ZIP branches of the packaging tasks remain deferred to the formal pre-release milestone (MSI requires the WiX toolset).
+
+### Windows host validation (OpenSSH agent named-pipe transport)
+
+- Commands: temporarily `Set-Service ssh-agent -StartupType Automatic` + `Start-Service ssh-agent` (elevated, via UAC), then `powershell -ExecutionPolicy Bypass -File ".\scripts\gradlew-local.ps1" test --tests "io.github.sawaichi9527.eyeshell.ssh.MinaSshConnectionTest" --rerun-tasks` with `EYESHELL_TEST_LIVE_WINDOWS_AGENT=1`, then `ssh-add -l`, then `Stop-Service ssh-agent -Force` + `Set-Service ssh-agent -StartupType Disabled` (elevated, restored).
+- Executed at: 2026-08-04
+- Exit codes: 0 for the test run; the service was returned to its original `Stopped`/`Disabled` state and `ssh-add -l` reported no identities afterward.
+- Result: Added a Windows-gated live `MinaSshConnectionTest` case that generates a throwaway RSA key, writes it with the OpenSSH writer, loads it into the real `ssh-agent` via `ssh-add`, starts an embedded `SshServer` authorizing that public key, and authenticates over `SshAuthentication.Agent.system()` (which resolves to the `\\.\pipe\openssh-ssh-agent` named-pipe endpoint consumed by `WindowsOpenSshAgent` through `AsynchronousFileChannel`). The test passed (0.595s) and the shell I/O round-tripped `ready\r\n`, proving the named-pipe transport works on Windows 10 LTSC with the pinned Temurin 21 runtime. The test removes the identity (`ssh-add -d`) and deletes the temp key in `finally`; no key or secret is committed. The named-pipe transport is no longer listed as unverified.
+- Test environment: Windows 10 LTSC (win32, PowerShell), Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
+- Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
+- Note: the Windows OpenSSH agent named-pipe access still relies on Temurin/OpenJDK asynchronous file-channel behavior for `\\.\pipe\openssh-ssh-agent`; this is not a portable Java SE named-pipe API, but the live test confirms it works on the pinned runtime.
 
 ### Ubuntu host validation (cross-platform XDG path test fix)
 
@@ -279,7 +288,7 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Saved Password OS Credential Store integration passed live GNOME Secret Service lifecycle validation but remains unverified on Windows, locked GNOME Keyring, and KWallet; Private Key Passphrases and all other interactive secrets remain session-only.
 - Public Key authentication is covered with a runtime-generated encrypted RSA OpenSSH key; other key formats/providers and external OpenSSH interoperability remain unverified.
 - Changed Host Keys require manual verification and Known Hosts file editing outside eyeShell; automatic replacement is intentionally unavailable.
-- Windows OpenSSH agent access relies on Temurin/OpenJDK asynchronous file-channel behavior for `\\.\pipe\openssh-ssh-agent`; this is not a portable Java SE named-pipe API and remains unverified on Windows 10/11.
+- Windows OpenSSH agent access relies on Temurin/OpenJDK asynchronous file-channel behavior for `\\.\pipe\openssh-ssh-agent`; this is not a portable Java SE named-pipe API, but the live Windows validation confirmed it works on the pinned Temurin 21 runtime.
 - Linux agent authentication requires eyeShell to inherit a valid `SSH_AUTH_SOCK`; eyeShell intentionally does not discover arbitrary sockets or start an agent.
 - Save All requires atomic move support in the selected target file system; unsupported providers fail without replacing the existing target.
 - Main search/selection results are intentionally not painted over an active alternate screen; they become visible after returning to the main buffer.

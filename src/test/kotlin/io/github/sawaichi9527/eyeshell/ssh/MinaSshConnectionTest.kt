@@ -73,6 +73,21 @@ class MinaSshConnectionTest {
             start()
         }
 
+    private fun createAgentServer(hostKeyFile: Path, authorizedKey: java.security.PublicKey): SshServer =
+        SshServer.setUpDefaultServer().apply {
+            host = "127.0.0.1"
+            port = 0
+            keyPairProvider = SimpleGeneratorHostKeyProvider(hostKeyFile).apply {
+                algorithm = "RSA"
+                keySize = 2048
+            }
+            publickeyAuthenticator = org.apache.sshd.server.auth.pubkey.PublickeyAuthenticator { username, key, _ ->
+                username == USERNAME && KeyUtils.compareKeys(authorizedKey, key)
+            }
+            shellFactory = ShellFactory { EchoShellCommand() }
+            start()
+        }
+
     @AfterEach
     fun stopServer() {
         server.stop(true)
@@ -301,6 +316,54 @@ class MinaSshConnectionTest {
         }
     }
 
+    @Test
+    @org.junit.jupiter.api.condition.EnabledOnOs(org.junit.jupiter.api.condition.OS.WINDOWS)
+    fun `live Windows OpenSSH agent authenticates over the named pipe`() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(
+            System.getenv("EYESHELL_TEST_LIVE_WINDOWS_AGENT") == "1",
+        )
+        val agentKeyPair = KeyPairGenerator.getInstance("RSA").apply { initialize(2048) }.generateKeyPair()
+        val privateKeyFile = temporaryDirectory.resolve("agent-test-key")
+        java.nio.file.Files.newOutputStream(privateKeyFile).use { output ->
+            OpenSSHKeyPairResourceWriter.INSTANCE.writePrivateKey(
+                agentKeyPair,
+                "",
+                OpenSSHKeyEncryptionContext(),
+                output,
+            )
+        }
+        val agent = SshAuthentication.Agent.system()
+        try {
+            assertTrue(runSshAdd(listOf(privateKeyFile.toString())), "ssh-add of the test key failed")
+            val liveServer = createAgentServer(
+                temporaryDirectory.resolve("host-key-agent.ser"),
+                agentKeyPair.public,
+            )
+            try {
+                val endpoint = SshEndpoint("127.0.0.1", liveServer.port, USERNAME)
+                val connection = agent.use { authentication ->
+                    MinaSshConnection.connect(
+                        endpoint,
+                        authentication,
+                        knownHostsStore(),
+                        HostKeyVerifier { true },
+                    )
+                }
+                val terminal = connection.openTerminal()
+                try {
+                    assertTrue(readUntil(terminal, "ready\r\n").contains("ready\r\n"))
+                } finally {
+                    terminal.close()
+                }
+            } finally {
+                liveServer.stop(true)
+            }
+        } finally {
+            runSshAdd(listOf("-d", privateKeyFile.toString()))
+            java.nio.file.Files.deleteIfExists(privateKeyFile)
+        }
+    }
+
     private fun connectWithPassword(
         endpoint: SshEndpoint,
         knownHosts: KnownHostsStore,
@@ -311,6 +374,14 @@ class MinaSshConnectionTest {
 
     private fun knownHostsStore(): KnownHostsStore =
         KnownHostsStore(temporaryDirectory.resolve("config").resolve("known_hosts"))
+
+    private fun runSshAdd(arguments: List<String>): Boolean {
+        val process = ProcessBuilder("ssh-add", *arguments.toTypedArray())
+            .redirectErrorStream(true)
+            .start()
+        process.inputStream.readBytes()
+        return process.waitFor(15, java.util.concurrent.TimeUnit.SECONDS) && process.exitValue() == 0
+    }
 
     private fun readUntil(
         terminal: io.github.sawaichi9527.eyeshell.terminal.TerminalSession,
