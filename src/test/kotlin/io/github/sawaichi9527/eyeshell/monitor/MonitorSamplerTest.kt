@@ -34,6 +34,7 @@ class MonitorSamplerTest {
             assertEquals("lab", received.system!!.hostname)
             assertEquals(2, received.cpu!!.cores)
             assertEquals(16_000_000L * 1024L, received.memory!!.totalBytes)
+            assertEquals(2_000_000L * 1024L, received.swap!!.totalBytes)
             assertEquals(0.52, received.load!!.oneMinute)
             assertEquals(2, received.filesystems.size)
             assertEquals(1, received.processes.size)
@@ -86,6 +87,8 @@ class MonitorSamplerTest {
         ${"\u000C"}MemTotal:       16000000 kB
         MemFree:         4000000 kB
         MemAvailable:    6000000 kB
+        SwapTotal:       2000000 kB
+        SwapFree:         500000 kB
         ${"\u000C"}0.52 0.33 0.20 2/345 12345
         ${"\u000C"}Inter-|   Receive                                                |  Transmit
          face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed

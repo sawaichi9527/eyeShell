@@ -1,5 +1,7 @@
 package io.github.sawaichi9527.eyeshell.ui
 
+import io.github.sawaichi9527.eyeshell.monitor.MonitorSampler
+import io.github.sawaichi9527.eyeshell.monitor.MonitorSnapshot
 import io.github.sawaichi9527.eyeshell.ssh.HostSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
@@ -41,9 +43,24 @@ class EyeShellWindow(
     private val closeAction: () -> Unit = {},
 ) : JFrame("eyeShell") {
     private val closed = AtomicBoolean()
-    private val workbench = WorkbenchPanel(
+    private val pagesByComponent = mutableMapOf<JComponent, TerminalSessionPage>()
+    private val workbench: WorkbenchPanel = WorkbenchPanel(
         connectAction = connectAction?.let { action -> { action(this) } },
         hostsAction = hostsAction?.let { action -> { action(this) } },
+        monitorSelectionChanged = { component ->
+            val page = pagesByComponent[component]
+            if (page == null) {
+                workbench.monitorIdle()
+            } else {
+                page.startMonitor { snapshot ->
+                    SwingUtilities.invokeLater {
+                        if (!closed.get() && workbench.isSelectedSession(component)) {
+                            workbench.setMonitorSnapshot(snapshot)
+                        }
+                    }
+                }
+            }
+        },
     )
 
     init {
@@ -69,7 +86,11 @@ class EyeShellWindow(
         }
         try {
             page.attach()
-            workbench.addSession(hostSession.endpoint.displayName, page.component, page::close)
+            pagesByComponent[page.component] = page
+            workbench.addSession(hostSession.endpoint.displayName, page.component, {
+                pagesByComponent.remove(page.component)
+                page.close()
+            })
         } catch (failure: Throwable) {
             try {
                 page.close()
@@ -116,9 +137,11 @@ internal class TerminalSessionPage(
 ) : AutoCloseable {
     private val closed = AtomicBoolean()
     private val exitMonitorStarted = AtomicBoolean()
+    private val monitorStarted = AtomicBoolean()
     private val session: TerminalSession = hostSession.openTerminal()
     private val outputController = TerminalOutputController(terminalView)
     private val highlightController = TerminalHighlightController(terminalView)
+    private val monitorSampler = MonitorSampler(hostSession)
     val component: JComponent = JPanel(BorderLayout()).apply {
         name = "terminalWorkspace"
         getAccessibleContext().accessibleName = "Terminal workspace"
@@ -132,6 +155,15 @@ internal class TerminalSessionPage(
             addHighlightRule = { highlightController.addRule(owner) },
             manageHighlightRules = { highlightController.manageRules(owner) },
         )
+    }
+
+    fun startMonitor(onSnapshot: (MonitorSnapshot) -> Unit) {
+        if (!monitorStarted.compareAndSet(false, true)) return
+        monitorSampler.start(onSnapshot)
+    }
+
+    fun stopMonitor() {
+        monitorSampler.close()
     }
 
     fun startExitMonitor(onExit: () -> Unit) {
@@ -148,6 +180,7 @@ internal class TerminalSessionPage(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        monitorSampler.close()
         outputController.close(terminalView::close)
         try {
             session.close()
@@ -160,6 +193,7 @@ internal class TerminalSessionPage(
 class WorkbenchPanel(
     connectAction: (() -> Unit)? = null,
     hostsAction: (() -> Unit)? = null,
+    monitorSelectionChanged: ((Component) -> Unit)? = null,
 ) : JPanel(BorderLayout()) {
     private val canConnect = connectAction != null
     private val sessionTabs = JTabbedPane(JTabbedPane.TOP).apply {
@@ -169,6 +203,8 @@ class WorkbenchPanel(
     private val sessions = linkedMapOf<Component, SessionTab>()
     private val emptySession = createEmptySession()
     private var connecting = false
+    private val monitorPanel = MonitorPanel()
+    private val onMonitorSelectionChanged = monitorSelectionChanged
     private val connectionStatus = JLabel("Not connected").apply {
         name = "connectionStatus"
     }
@@ -194,7 +230,15 @@ class WorkbenchPanel(
 
     init {
         name = "workbench"
-        sessionTabs.addChangeListener { updateSelectedSessionStatus() }
+        sessionTabs.addChangeListener {
+            updateSelectedSessionStatus()
+            val selected = sessionTabs.selectedComponent
+            if (selected != null && sessions.containsKey(selected)) {
+                onMonitorSelectionChanged?.invoke(selected)
+            } else {
+                monitorPanel.resetToIdle()
+            }
+        }
         showEmptySession()
         add(createWorkbenchSplit(), BorderLayout.CENTER)
     }
@@ -253,9 +297,22 @@ class WorkbenchPanel(
         failure?.let { throw it }
     }
 
+    internal fun setMonitorSnapshot(snapshot: MonitorSnapshot) {
+        check(SwingUtilities.isEventDispatchThread()) { "Monitor snapshots must publish on the Swing EDT" }
+        monitorPanel.update(snapshot)
+    }
+
+    internal fun monitorIdle() {
+        check(SwingUtilities.isEventDispatchThread()) { "Monitor state must reset on the Swing EDT" }
+        monitorPanel.resetToIdle()
+    }
+
+    internal fun isSelectedSession(component: Component): Boolean =
+        sessionTabs.selectedComponent === component
+
     private fun createWorkbenchSplit(): JSplitPane = JSplitPane(
         JSplitPane.HORIZONTAL_SPLIT,
-        createMonitorPanel(),
+        monitorPanel,
         createSessionWorkspace(),
     ).apply {
         name = "workbenchSplit"
@@ -273,20 +330,6 @@ class WorkbenchPanel(
             add(createCommandBar(), BorderLayout.NORTH)
             add(toolDock, BorderLayout.CENTER)
         }, BorderLayout.SOUTH)
-    }
-
-    private fun createMonitorPanel(): JPanel = JPanel().apply {
-        name = "monitorPanel"
-        getAccessibleContext().accessibleName = "Monitor"
-        layout = BoxLayout(this, BoxLayout.Y_AXIS)
-        border = BorderFactory.createEmptyBorder(18, 16, 18, 16)
-        minimumSize = Dimension(190, 0)
-        preferredSize = Dimension(230, 0)
-
-        add(sectionTitle("Monitor"))
-        add(Box.createVerticalStrut(18))
-        add(emptyState("Connect to a host to view live metrics."))
-        add(Box.createVerticalGlue())
     }
 
     private fun createEmptySession(): JPanel = JPanel(BorderLayout()).apply {

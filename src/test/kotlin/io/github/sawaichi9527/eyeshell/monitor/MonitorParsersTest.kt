@@ -145,6 +145,21 @@ class MonitorParsersTest {
     }
 
     @Test
+    fun `parses swap from meminfo`() {
+        val output = """
+            SwapTotal:      2000000 kB
+            SwapFree:        500000 kB
+        """.trimIndent()
+
+        val swap = MonitorParsers.parseSwap(output)
+
+        assertNotNull(swap)
+        assertEquals(2_000_000L * 1024L, swap!!.totalBytes)
+        assertEquals(1_500_000L * 1024L, swap.usedBytes)
+        assertEquals(75.0, swap.percent)
+    }
+
+    @Test
     fun `malformed output returns null or empty instead of throwing`() {
         assertNull(MonitorParsers.parseSystemInfo(""))
         assertNull(MonitorParsers.cpuRaw("no cpu line"))

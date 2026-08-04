@@ -61,6 +61,21 @@ object MonitorParsers {
         return MemoryUsage(totalBytes = total, usedBytes = used, percent = percent)
     }
 
+    fun parseSwap(output: String): SwapUsage? {
+        val values = output.lines().mapNotNull { line ->
+            val parts = line.trim().split(Regex("\\s+"))
+            if (parts.isEmpty()) return@mapNotNull null
+            val key = parts.first().removeSuffix(":")
+            val value = parts.getOrNull(1)?.toLongOrNull() ?: return@mapNotNull null
+            key to (value * 1024L)
+        }.toMap()
+        val total = values["SwapTotal"] ?: return null
+        val free = values["SwapFree"] ?: return null
+        val used = (total - free).coerceAtLeast(0L)
+        val percent = if (total == 0L) 0.0 else (used.toDouble() / total * 100.0).coerceIn(0.0, 100.0)
+        return SwapUsage(totalBytes = total, usedBytes = used, percent = percent)
+    }
+
     fun parseLoad(output: String): LoadAverage? {
         val fields = output.trim().split(Regex("\\s+"))
         val one = fields.getOrNull(0)?.toDoubleOrNull() ?: return null

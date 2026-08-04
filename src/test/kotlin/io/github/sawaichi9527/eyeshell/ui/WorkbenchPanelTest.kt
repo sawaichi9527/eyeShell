@@ -349,6 +349,28 @@ class WorkbenchPanelTest {
         onEdt { panel.closeSessions() }
     }
 
+    @Test
+    fun `monitor selection hook fires when the selected tab changes`() {
+        SwingUtilities.invokeAndWait {
+            val selected = mutableListOf<String>()
+            val panel = WorkbenchPanel(monitorSelectionChanged = { component ->
+                selected += component.name ?: "unnamed"
+            })
+            val first = JPanel().apply { name = "firstComponent" }
+            val second = JPanel().apply { name = "secondComponent" }
+            panel.addSession("first", first, {})
+            panel.addSession("second", second, {})
+            val tabs = panel.findByName("sessionTabs") as JTabbedPane
+
+            tabs.selectedComponent = first
+            tabs.selectedComponent = second
+
+            assertTrue(selected.contains("firstComponent"))
+            assertTrue(selected.contains("secondComponent"))
+            panel.closeSessions()
+        }
+    }
+
     private fun Container.findByName(componentName: String): Component? {
         components.forEach { component ->
             if (component.name == componentName) return component

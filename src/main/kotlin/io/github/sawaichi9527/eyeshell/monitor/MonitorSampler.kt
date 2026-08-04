@@ -59,6 +59,7 @@ class MonitorSampler(
         previousNetwork = currentNetwork ?: previousNetwork
 
         val memory = sections.getOrNull(1)?.let(MonitorParsers::parseMemory)
+        val swap = sections.getOrNull(1)?.let(MonitorParsers::parseSwap)
         val load = sections.getOrNull(2)?.let(MonitorParsers::parseLoad)
         val filesystems = sections.getOrNull(4)?.let(MonitorParsers::parseFilesystems).orEmpty()
         val processes = sections.getOrNull(5)?.let(MonitorParsers::parseProcesses).orEmpty()
@@ -70,6 +71,7 @@ class MonitorSampler(
             system = systemInfo,
             cpu = cpu,
             memory = memory,
+            swap = swap,
             load = load,
             network = network,
             filesystems = filesystems.take(processLimit),

@@ -4,12 +4,16 @@ data class MonitorSnapshot(
     val system: SystemInfo? = null,
     val cpu: CpuUsage? = null,
     val memory: MemoryUsage? = null,
+    val swap: SwapUsage? = null,
     val load: LoadAverage? = null,
     val network: NetworkUsage? = null,
     val filesystems: List<FilesystemUsage> = emptyList(),
     val processes: List<ProcessUsage> = emptyList(),
     val unsupported: Boolean = false,
 ) {
+    val swapPresent: Boolean
+        get() = swap != null && swap.totalBytes > 0
+
     val hasData: Boolean
         get() = system != null || cpu != null || memory != null || load != null ||
             network != null || filesystems.isNotEmpty() || processes.isNotEmpty()
@@ -28,6 +32,12 @@ data class CpuUsage(
 )
 
 data class MemoryUsage(
+    val totalBytes: Long,
+    val usedBytes: Long,
+    val percent: Double,
+)
+
+data class SwapUsage(
     val totalBytes: Long,
     val usedBytes: Long,
     val percent: Double,
