@@ -158,6 +158,18 @@ The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShell
 - SFTP: shared-transport SFTP client, controller with a background transfer queue, and the dock SFTP panel are committed and Windows-validated (125 tests, 8 skips). Remaining: drag-and-drop, transfer progress percentages, and a live check against a real Linux host (on Ubuntu).
 - Five GUI review findings from 2026-08-04 are pending fixes (see "2026-08-04 GUI review findings" under Current Status): host-editor password save field, first-connect NPE regression guard, monitor section-delimiter bug, tab-strip `+` button, and Enter-to-reconnect after exit.
 
+## Token Usage Tracking
+
+Convention: at the end of each milestone (or when a session reaches its natural rotation point), run the `tokenscope` tool for that session and append a one-line summary to this section so the project's cumulative token/cost usage stays visible in the handoff instead of being reconstructed from old sessions later.
+
+How to read the figures: tokenscope reports per-session totals (including that session's subagents). To get the project total, sum the `Recorded Total` tokens and `Recorded Cost` lines across sessions listed here. `Cache read` dominates (roughly 84% in this session), which keeps effective cost far below raw-token cost; per-model pricing varies.
+
+Cumulative project usage (each line = one session/milestone):
+
+| Session / milestone | Recorded total tokens | Recorded cost | Date |
+|---|---|---|---|
+| M2 monitor + SFTP + Windows validation + GUI review (session `ses_03b045f65ffeXifNFIud1iPjQb`) | 236,817,579 (≈84% cache read; 953 provider steps) | $1.10 | 2026-08-06 |
+
 ## M1M Plan (Packaging)
 
 Implemented in the worktree and validated on Ubuntu 26.04 (94 root tests, 93 passed, 1 opt-in skip). Scope delivered: `jpackage` tasks producing a bundled-runtime app image, a Linux DEB (`eyeshell_0.1.0_amd64.deb`), and a portable `eyeShell-0.1.0.tar.gz`, verified by running all three tasks from clean and inspecting the artifacts (`dpkg-deb -I`, `tar -tzf`, launcher + `lib/runtime` presence). The Windows MSI/ZIP branches are wired behind the existing `isWindowsBuild` platform switch but are unverified until run on the Windows host; per the 2026-08-04 decision, their validation is deferred to the formal pre-release milestone (MSI requires the WiX toolset). Development-stage validation uses `gradlew-local.ps1 run` for GUI smoke checks and milestone `jpackageAppImage` bundles. Note: `outputs.dir` must not be declared on the app-image task because Gradle pre-creates declared output directories, which makes `jpackage` report "destination already exists"; the task deletes the destination in `doFirst` instead.
