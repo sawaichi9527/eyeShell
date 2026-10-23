@@ -5,7 +5,7 @@ object MonitorCommands {
     const val SECTION_DELIMITER = "\u000C"
     internal const val DELIMITER_COMMAND = "printf '\\f'"
 
-    private val SAMPLE_SECTIONS = listOf(
+    internal val SAMPLE_SECTIONS = listOf(
         "cat /proc/stat",
         "cat /proc/meminfo",
         "cat /proc/loadavg",
