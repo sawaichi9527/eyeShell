@@ -9,6 +9,7 @@ data class MonitorSnapshot(
     val network: NetworkUsage? = null,
     val filesystems: List<FilesystemUsage> = emptyList(),
     val processes: List<ProcessUsage> = emptyList(),
+    val endpoint: String? = null,
     val unsupported: Boolean = false,
 ) {
     val swapPresent: Boolean

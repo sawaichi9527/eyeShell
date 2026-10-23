@@ -33,7 +33,7 @@ class MonitorSampler(
                 } catch (_: Throwable) {
                     failed = true
                     currentBackoff = (currentBackoff.multipliedBy(2)).coerceAtMost(backoffLimit)
-                    MonitorSnapshot(unsupported = true)
+                    MonitorSnapshot(endpoint = hostSession.endpoint.host, unsupported = true)
                 }
                 if (!closed.get()) onSnapshot(snapshot)
                 sleep(waitDuration(failed))
@@ -64,10 +64,11 @@ class MonitorSampler(
         val filesystems = sections.getOrNull(4)?.let(MonitorParsers::parseFilesystems).orEmpty()
         val processes = sections.getOrNull(5)?.let(MonitorParsers::parseProcesses).orEmpty()
         if (cpu == null && memory == null && load == null && network == null) {
-            return MonitorSnapshot(unsupported = true)
+            return MonitorSnapshot(endpoint = hostSession.endpoint.host, unsupported = true)
         }
         currentBackoff = backoff
         return MonitorSnapshot(
+            endpoint = hostSession.endpoint.host,
             system = systemInfo,
             cpu = cpu,
             memory = memory,

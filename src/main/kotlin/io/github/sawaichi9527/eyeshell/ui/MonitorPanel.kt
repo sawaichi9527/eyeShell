@@ -20,6 +20,7 @@ class MonitorPanel : JPanel(BorderLayout()) {
         layout = BoxLayout(this, BoxLayout.Y_AXIS)
     }
     private val hostname = sectionLabel()
+    private val address = sectionLabel()
     private val system = sectionLabel()
     private val uptime = sectionLabel()
     private val load = sectionLabel()
@@ -64,7 +65,9 @@ class MonitorPanel : JPanel(BorderLayout()) {
             system.text = "${systemInfo.operatingSystem} ${systemInfo.kernel}"
             uptime.text = "Uptime: ${formatUptime(systemInfo.uptimeSeconds)}"
         }
+        address.text = snapshot.endpoint.orEmpty()
         content.add(field("Host", hostname))
+        if (snapshot.endpoint != null) content.add(field("Address", address))
         content.add(field("OS", system))
         content.add(field("Uptime", uptime))
         content.add(Box.createVerticalStrut(6))

@@ -86,6 +86,7 @@ class MonitorIntegrationTest {
             val received = requireNotNull(snapshot)
             assertNotNull(received.system)
             assertEquals("lab-server", received.system!!.hostname)
+            assertEquals("127.0.0.1", received.endpoint)
             assertNotNull(received.cpu)
             assertNotNull(received.memory)
             assertNotNull(received.swap)
@@ -128,6 +129,7 @@ class MonitorIntegrationTest {
             }
             val text = renderText(panel)
             assertTrue(text.contains("lab-server"))
+            assertTrue(text.contains("127.0.0.1"))
             assertTrue(text.contains("CPU"))
             assertTrue(text.contains("Memory"))
             val processRows = renderTable(panel)
@@ -189,7 +191,8 @@ class MonitorIntegrationTest {
                     try {
                         val body = when {
                             command.contains("uname") -> SYSTEM_INFO
-                            else -> SAMPLE
+                            command.contains(MonitorCommands.DELIMITER_COMMAND) -> SAMPLE
+                            else -> ""
                         }
                         output.write(body.toByteArray(StandardCharsets.UTF_8))
                         output.flush()
