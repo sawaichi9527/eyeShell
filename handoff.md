@@ -339,6 +339,16 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
 - Packaging artifacts: `build/package/eyeShell/` (app image), `build/package/eyeshell_0.1.0_amd64.deb`, `build/package/eyeShell-0.1.0.tar.gz`.
 
+### Ubuntu host validation (fresh clone build environment setup)
+
+- Commands: `./scripts/bootstrap-jdk.sh`; `./scripts/gradlew-local.sh test --console=plain`; `./scripts/gradlew-local.sh check --console=plain`; `git diff --check`.
+- Executed at: 2026-10-23
+- Exit codes: 0 for bootstrap, test, check, and diff check.
+- Result: A fresh clone on this host had no system JDK, so the project-local Temurin 21.0.12+8 was bootstrapped into `.local/jdk-21` with its pinned SHA-256 verified, and Gradle 9.5.0 downloaded into `.local/gradle-home`. The first `test` run failed during configuration because `gradle/verification-metadata.xml` had no checksum for `org.jetbrains.kotlinx:kotlinx-coroutines-bom:1.8.0` (a Kotlin Gradle plugin classpath artifact). The POM was fetched independently from Maven Central and its SHA-256 (`1239e9dbe1397cd5971342956b2511bc3ace7b641842e4372a088dcfa8b9ad55`) matched both the Gradle cache file and the published `.sha1`; that single artifact entry was added, with no verification relaxation. The full suite then ran 125 root tests: 125 executed, 0 failures, 0 errors, 5 skipped (all opt-in/platform-gated: Windows clipboard, Windows OpenSSH agent, Windows data-path SQLite, Windows Credential Manager, and the env-gated live Linux Secret Service test). `check` passed.
+- Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
+- Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
+- Remaining unverified scope: live GUI launch on this host, live monitoring and SFTP against a real Linux host, and the Windows-gated cases listed above.
+
 ## Known Issues
 
 - The Windows environment has been set up and validated, covering: JDK 21 bootstrap, Gradle 9.5.0 dependency verification, code validation, and cross-platform test hardening. Working tree: clean.
