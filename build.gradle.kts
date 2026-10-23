@@ -27,6 +27,7 @@ application {
 dependencies {
     implementation("com.formdev:flatlaf:3.7.2")
     implementation("com.google.re2j:re2j:1.8")
+    implementation("net.i2p.crypto:eddsa:0.3.0")
     compileOnly("net.java.dev.jna:jna:5.19.1")
     compileOnly("de.swiesend:secret-service:1.8.1-jdk17")
     if (isWindowsBuild) {

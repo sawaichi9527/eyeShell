@@ -128,6 +128,61 @@ class MinaSshConnectionTest {
     }
 
     @Test
+    fun `authenticates with an Ed25519 public key`() {
+        val ed25519KeyPair = net.i2p.crypto.eddsa.KeyPairGenerator().generateKeyPair()
+        val privateKeyFile = temporaryDirectory.resolve("id_ed25519")
+        java.nio.file.Files.newOutputStream(privateKeyFile).use { output ->
+            OpenSSHKeyPairResourceWriter.INSTANCE.writePrivateKey(
+                ed25519KeyPair,
+                "",
+                OpenSSHKeyEncryptionContext(),
+                output,
+            )
+        }
+        try {
+            java.nio.file.Files.setPosixFilePermissions(
+                privateKeyFile,
+                setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE),
+            )
+        } catch (_: UnsupportedOperationException) {
+            // Windows ACLs are outside this Linux-focused test assertion.
+        }
+
+        val edServer = org.apache.sshd.server.SshServer.setUpDefaultServer().apply {
+            host = "127.0.0.1"
+            port = 0
+            keyPairProvider = SimpleGeneratorHostKeyProvider(temporaryDirectory.resolve("host-key-ed25519.ser")).apply {
+                algorithm = "EdDSA"
+                keySize = 256
+            }
+            publickeyAuthenticator = org.apache.sshd.server.auth.pubkey.PublickeyAuthenticator { username, key, _ ->
+                username == USERNAME && KeyUtils.compareKeys(ed25519KeyPair.public, key)
+            }
+            shellFactory = ShellFactory { EchoShellCommand() }
+            start()
+        }
+        try {
+            val endpoint = SshEndpoint("127.0.0.1", edServer.port, USERNAME)
+            val connection = SshAuthentication.PublicKey(privateKeyFile, CharArray(0)).use { authentication ->
+                MinaSshConnection.connect(
+                    endpoint,
+                    authentication,
+                    knownHostsStore(),
+                    HostKeyVerifier { true },
+                )
+            }
+            val terminal = connection.openTerminal()
+            try {
+                assertTrue(readUntil(terminal, "ready\r\n").contains("ready\r\n"))
+            } finally {
+                terminal.close()
+            }
+        } finally {
+            edServer.stop(true)
+        }
+    }
+
+    @Test
     fun `rejects unverified host key before authentication`() {
         val endpoint = SshEndpoint("127.0.0.1", server.port, USERNAME)
 
