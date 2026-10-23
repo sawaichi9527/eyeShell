@@ -6,6 +6,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
+private const val PROGRESS_INTERVAL_NANOS = 50_000_000L
+
 class SftpController(
     private val sftpClient: SftpClient,
     private val maxRetries: Int = 2,
@@ -75,13 +77,19 @@ class SftpController(
         listeners = listOf(listener)
     }
 
-    private fun runTransfer(job: TransferJob) {
-        update(job.copy(status = TransferStatus.RUNNING))
+    private fun runTransfer(initialJob: TransferJob) {
+        var job = initialJob.copy(status = TransferStatus.RUNNING, progressPercent = 0)
+        update(job)
         var lastFailure: Throwable? = null
         for (attempt in 0..maxRetries) {
             if (closed.get()) {
                 update(job.copy(status = TransferStatus.CANCELLED))
                 return
+            }
+            job = job.copy(progressPercent = 0)
+            val onProgress = progressReporter { percent ->
+                job = job.copy(progressPercent = percent)
+                update(job)
             }
             val result = runCatching {
                 when (job.request.direction) {
@@ -89,11 +97,13 @@ class SftpController(
                         job.request.remotePath,
                         job.request.localFile,
                         overwrite = job.request.overwrite || attempt > 0,
+                        onProgress = onProgress,
                     )
                     TransferDirection.UPLOAD -> sftpClient.upload(
                         job.request.localFile,
                         job.request.remotePath,
                         overwrite = job.request.overwrite || attempt > 0,
+                        onProgress = onProgress,
                     )
                 }
             }
@@ -104,6 +114,26 @@ class SftpController(
             lastFailure = result.exceptionOrNull()
         }
         update(job.copy(status = TransferStatus.FAILED, failure = lastFailure))
+    }
+
+    private fun progressReporter(onPercent: (Int) -> Unit): (Long, Long) -> Unit {
+        val lastPercent = AtomicLong(-1)
+        val lastPublishedAt = AtomicLong(0)
+        return { transferred, total ->
+            val percent = if (total > 0) {
+                ((transferred.coerceAtMost(total) * 100) / total).toInt().coerceIn(0, 100)
+            } else {
+                0
+            }
+            val now = System.nanoTime()
+            if (percent > lastPercent.get() &&
+                (percent == 100 || now - lastPublishedAt.get() >= PROGRESS_INTERVAL_NANOS)
+            ) {
+                lastPercent.set(percent.toLong())
+                lastPublishedAt.set(now)
+                onPercent(percent)
+            }
+        }
     }
 
     private fun update(job: TransferJob) {

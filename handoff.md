@@ -10,7 +10,7 @@ The Ubuntu-implemented M1J/M1K/M1L/M1M changes have been re-validated on the Win
 
 M2 Linux Agentless Monitoring is in progress on the Windows host. Committed so far: a shared-transport `HostSession` refactor (one `ClientSession` carries a shell channel plus exec channels, `5273075`), the monitor domain/parsers/sampler (`189e99a`), and the `MonitorPanel` bound to the selected tab (`c2182c0`). The full Windows suite is at 116 tests, 8 skips, 0 failures; `check` passes and the live GUI launches. Monitoring samples `/proc/stat`, `/proc/meminfo`, `/proc/loadavg`, `/proc/net/dev`, `df -P`, and `ps` via a single exec channel per sample with `LC_ALL=C LANG=C`, computes CPU/network deltas across samples, and shows system info, CPU, memory, swap, load, network rates, and top processes in the left monitor panel. An embedded-SSH end-to-end test (`adb9c3a`) verifies on Windows that a Linux-style remote's sampled output renders correctly in the panel. A live run against the real Linux host is recorded in the validation evidence below (2026-10-24).
 
-SFTP (Phase 2 high-priority item) is implemented on the Windows host: `sshd-sftp:2.19.0` was added with SHA-256 verification metadata (`3d645ff`), a `MinaSftpClient` boundary reuses the shared transport, an `SftpController` runs directory ops and a background transfer queue with `.part` staging and retry (`bd5fd16`), and an `SftpPanel` in the bottom dock lists files and offers upload/download/new folder/rename/delete bound to the selected session (`108e9e8`). An embedded-SSH SFTP subsystem integration test and an `SftpPanel` UI test are included; the full Windows suite is at 125 tests, 8 skips, 0 failures and the live GUI launches. Live SFTP validation against the real filesystem on this Linux host is recorded below (2026-10-24). Remaining SFTP work: drag-and-drop and transfer progress percentages (currently status-only).
+SFTP (Phase 2 high-priority item) is implemented on the Windows host: `sshd-sftp:2.19.0` was added with SHA-256 verification metadata (`3d645ff`), a `MinaSftpClient` boundary reuses the shared transport, an `SftpController` runs directory ops and a background transfer queue with `.part` staging and retry (`bd5fd16`), and an `SftpPanel` in the bottom dock lists files and offers upload/download/new folder/rename/delete bound to the selected session (`108e9e8`). An embedded-SSH SFTP subsystem integration test and an `SftpPanel` UI test are included; the full Windows suite is at 125 tests, 8 skips, 0 failures and the live GUI launches. Live SFTP validation against the real filesystem on this Linux host is recorded below (2026-10-24). Drag-and-drop upload of local files and per-transfer progress percentages are implemented and validated (2026-10-24).
 
 ### 2026-08-04 GUI review findings (fixed 2026-10-23)
 
@@ -155,7 +155,7 @@ The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShell
 ## In Progress
 
 - M2 Linux Agentless Monitoring: shared-transport refactor, monitor parsers/sampler, and the selected-tab monitor panel are committed and Windows-validated (116 tests, 8 skips), including an embedded-SSH end-to-end test that confirms sampled output renders in the panel. Live validation against this real Linux host is recorded under Validation Evidence (2026-10-24).
-- SFTP: shared-transport SFTP client, controller with a background transfer queue, and the dock SFTP panel are committed and Windows-validated (125 tests, 8 skips). Live SFTP validation against this host's real filesystem is recorded under Validation Evidence (2026-10-24). Remaining: drag-and-drop and transfer progress percentages.
+- SFTP: shared-transport SFTP client, controller with a background transfer queue, and the dock SFTP panel are committed and Windows-validated (125 tests, 8 skips). Live SFTP validation against this host's real filesystem is recorded under Validation Evidence (2026-10-24). Drag-and-drop upload and per-transfer progress percentages are implemented and validated (2026-10-24).
 - Five GUI review findings from 2026-08-04 are fixed (see "2026-08-04 GUI review findings" under Current Status); validation is recorded under Validation Evidence (2026-10-23).
 
 ## Token Usage Tracking
@@ -211,7 +211,7 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 ## Next Actions
 
 - M1J, M1K, M1L, and M1M are implemented and validated on Ubuntu 26.04 and re-validated on the Windows host (97 tests, 7 skips, `check` passed); Windows-specific platform validation is complete except the MSI/ZIP installers (see below).
-- M2 monitoring and SFTP are implemented and Windows-validated (125 tests, 8 skips); both are now also validated live against this Linux host (2026-10-24). Remaining SFTP work: drag-and-drop and transfer progress percentages.
+- M2 monitoring and SFTP are implemented and Windows-validated (125 tests, 8 skips); both are now also validated live against this Linux host (2026-10-24). SFTP drag-and-drop upload and transfer progress percentages are implemented (2026-10-24).
 - Pre-release: validate the Windows MSI (requires the WiX toolset, which jpackage invokes on Windows) and ZIP installer branches of the packaging tasks; development-stage validation uses `gradlew-local.ps1 run` for GUI smoke checks and milestone `jpackageAppImage` bundles instead.
 - Validate the native Wayland path on a WLToolkit-capable JBR 25 runtime (Ubuntu 24.04/26.04 Wayland session) and confirm the X toolkit still launches under XWayland and full X11.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
@@ -369,10 +369,21 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
 - Remaining unverified scope: interoperability with a real OpenSSH server (the live server is Apache MINA), live rendering in the monitor panel (the sampler snapshot is asserted; the panel is covered separately by `MonitorIntegrationTest`/`MonitorPanelTest`), and Windows-gated cases on this host.
 
+### Ubuntu host validation (SFTP drag-and-drop upload and transfer progress)
+
+- Commands: `./scripts/gradlew-local.sh test --tests "*SftpControllerTest" --tests "*SftpPanelTest" --tests "*SftpIntegrationTest"`; `./scripts/gradlew-local.sh test --rerun-tasks`; `EYESHELL_TEST_LIVE_LINUX_HOST=1 ./scripts/gradlew-local.sh test --tests "*LiveLinuxHostValidationTest" --rerun-tasks`; `./scripts/gradlew-local.sh check`; `git diff --check`.
+- Executed at: 2026-10-24
+- Exit codes: 0 for all commands.
+- Result: Added byte-level progress callbacks to `SftpClient.upload`/`download` and implemented them in `MinaSftpClient` with a chunked copy loop. `SftpController` publishes 0% when a job starts, increasing percentages throttled to 50 ms, and 100% on completion; the transfer table gained a `Progress` column. `SftpPanel` accepts local-file drops (panel and file-table handlers) and uploads them to the current directory; dropped directories are rejected with a message, and remote path joining was corrected so the root directory produces `/name` instead of `//name`. New tests cover intermediate progress plus the final 100% state, the drop-to-upload flow through the real `TransferHandler` path, and the progress columns. The default suite now runs 141 tests: 141 executed, 0 failures, 0 errors, 7 skipped (the prior opt-in/platform set). The live SFTP validation also passed again with the new progress-aware client. `check` passed.
+- Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
+- Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
+- Remaining unverified scope: the OS-level drag gesture and Windows drag-and-drop integration were not automated (the `TransferHandler` import path is tested directly); dragging a remote file out to the desktop is intentionally unsupported.
+
 ## Known Issues
 
 - The Windows environment has been set up and validated, covering: JDK 21 bootstrap, Gradle 9.5.0 dependency verification, code validation, and cross-platform test hardening. Working tree: clean.
 - The Commands tool tab remains a placeholder; monitoring and SFTP are implemented and live-validated on this Linux host.
+- SFTP drag-and-drop supports local-to-remote upload only; dragging a remote file out to the desktop is not supported (use the Download action).
 - Native Wayland behavior is not covered by the Temurin 21 M0 runtime; the M1L launch strategy probes for `sun.awt.WLToolkit` and falls back to the X toolkit (XWayland) when it is unavailable, so native Wayland selection is unverified until a WLToolkit-capable JBR 25 runtime is evaluated.
 - Scrollback clearing remains unavailable while alternate screen is active; Copy All and Save All now operate on the retained main buffer.
 - Saved Password OS Credential Store integration passed live GNOME Secret Service lifecycle validation but remains unverified on Windows, locked GNOME Keyring, and KWallet; Private Key Passphrases and all other interactive secrets remain session-only.

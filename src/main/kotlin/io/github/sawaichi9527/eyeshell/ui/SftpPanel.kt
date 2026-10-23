@@ -7,6 +7,7 @@ import io.github.sawaichi9527.eyeshell.sftp.TransferDirection
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Dimension
+import java.awt.datatransfer.DataFlavor
 import java.io.File
 import java.nio.file.Files
 import java.text.DecimalFormat
@@ -20,6 +21,7 @@ import javax.swing.JTable
 import javax.swing.JTextField
 import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
+import javax.swing.TransferHandler
 import javax.swing.table.DefaultTableModel
 
 class SftpPanel : JPanel(BorderLayout()) {
@@ -47,12 +49,39 @@ class SftpPanel : JPanel(BorderLayout()) {
         setRowHeight(20)
         autoCreateRowSorter = true
     }
-    private val transferModel = object : DefaultTableModel(arrayOf("Direction", "Path", "Status"), 0) {
+    private val transferModel = object : DefaultTableModel(arrayOf("Direction", "Path", "Progress", "Status"), 0) {
         override fun isCellEditable(row: Int, column: Int): Boolean = false
     }
     private val transferTable = JTable(transferModel).apply {
         name = "sftpTransferTable"
         setRowHeight(18)
+    }
+    private val dropHandler = object : TransferHandler() {
+        override fun canImport(support: TransferHandler.TransferSupport): Boolean =
+            controller != null && support.isDataFlavorSupported(DataFlavor.javaFileListFlavor)
+
+        override fun importData(support: TransferHandler.TransferSupport): Boolean {
+            val active = controller ?: return false
+            if (!support.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) return false
+            val files = runCatching {
+                @Suppress("UNCHECKED_CAST")
+                support.transferable.getTransferData(DataFlavor.javaFileListFlavor) as? List<File>
+            }.getOrNull().orEmpty()
+            val uploadable = files.filter { it.isFile }
+            val rejected = files.filterNot { it.isFile }
+            if (rejected.isNotEmpty()) {
+                JOptionPane.showMessageDialog(
+                    this@SftpPanel,
+                    "Only files can be uploaded by drag and drop.",
+                    "Unsupported drop",
+                    JOptionPane.INFORMATION_MESSAGE,
+                )
+            }
+            uploadable.forEach { file ->
+                enqueueTransfer(active, file.toPath(), remotePathFor(file.name), TransferDirection.UPLOAD)
+            }
+            return uploadable.isNotEmpty()
+        }
     }
 
     init {
@@ -60,6 +89,8 @@ class SftpPanel : JPanel(BorderLayout()) {
         cards.add(emptyLabel, "disconnected")
         cards.add(buildConnectedPanel(), "connected")
         add(cards, BorderLayout.CENTER)
+        transferHandler = dropHandler
+        fileTable.transferHandler = dropHandler
         showDisconnected()
     }
 
@@ -157,6 +188,7 @@ class SftpPanel : JPanel(BorderLayout()) {
             transferModel.addRow(arrayOf<Any>(
                 job.request.direction.name,
                 if (job.request.direction == TransferDirection.UPLOAD) job.request.localFile.fileName.toString() else job.request.remotePath,
+                "${job.progressPercent}%",
                 job.status.name,
             ))
         }
@@ -181,7 +213,7 @@ class SftpPanel : JPanel(BorderLayout()) {
         if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return
         val selected = chooser.selectedFile
         if (selected.isFile) {
-            enqueueTransfer(active, selected.toPath(), "${currentDirectory}/${selected.name}", TransferDirection.UPLOAD)
+            enqueueTransfer(active, selected.toPath(), remotePathFor(selected.name), TransferDirection.UPLOAD)
         }
     }
 
@@ -189,7 +221,7 @@ class SftpPanel : JPanel(BorderLayout()) {
         val active = controller ?: return
         val chooser = JFileChooser().apply { selectedFile = File(file.name) }
         if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return
-        enqueueTransfer(active, chooser.selectedFile.toPath(), "${currentDirectory}/${file.name}", TransferDirection.DOWNLOAD)
+        enqueueTransfer(active, chooser.selectedFile.toPath(), remotePathFor(file.name), TransferDirection.DOWNLOAD)
     }
 
     private fun enqueueTransfer(active: SftpController, local: java.nio.file.Path, remote: String, direction: TransferDirection) {
@@ -216,7 +248,7 @@ class SftpPanel : JPanel(BorderLayout()) {
         val active = controller ?: return
         val name = JOptionPane.showInputDialog(this, "Folder name:", "New Folder", JOptionPane.PLAIN_MESSAGE) ?: return
         if (name.isBlank()) return
-        active.makeDirectory("${currentDirectory}/$name") { result ->
+        active.makeDirectory(remotePathFor(name)) { result ->
             SwingUtilities.invokeLater {
                 result.onSuccess { refresh() }
                     .onFailure { failure -> JOptionPane.showMessageDialog(this, failure.message, "Could not create folder", JOptionPane.ERROR_MESSAGE) }
@@ -229,7 +261,7 @@ class SftpPanel : JPanel(BorderLayout()) {
         val file = selectedFile() ?: return
         val newName = JOptionPane.showInputDialog(this, "New name:", file.name) ?: return
         if (newName.isBlank()) return
-        active.rename("${currentDirectory}/${file.name}", "${currentDirectory}/$newName") { result ->
+        active.rename(remotePathFor(file.name), remotePathFor(newName)) { result ->
             SwingUtilities.invokeLater {
                 result.onSuccess { refresh() }
                     .onFailure { failure -> JOptionPane.showMessageDialog(this, failure.message, "Could not rename", JOptionPane.ERROR_MESSAGE) }
@@ -250,7 +282,7 @@ class SftpPanel : JPanel(BorderLayout()) {
         ) {
             return
         }
-        active.delete("${currentDirectory}/${file.name}") { result ->
+        active.delete(remotePathFor(file.name)) { result ->
             SwingUtilities.invokeLater {
                 result.onSuccess { refresh() }
                     .onFailure { failure -> JOptionPane.showMessageDialog(this, failure.message, "Could not delete", JOptionPane.ERROR_MESSAGE) }
@@ -278,6 +310,9 @@ class SftpPanel : JPanel(BorderLayout()) {
         val trimmed = path.trim().ifEmpty { "/" }
         return if (trimmed.startsWith("/")) trimmed else "/$trimmed"
     }
+
+    private fun remotePathFor(name: String): String =
+        if (currentDirectory == "/") "/$name" else "${currentDirectory.trimEnd('/')}/$name"
 
     private fun formatSize(bytes: Long): String {
         if (bytes < 1024) return "$bytes B"

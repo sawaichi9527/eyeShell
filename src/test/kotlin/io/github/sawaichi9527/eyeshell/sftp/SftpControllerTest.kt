@@ -127,6 +127,32 @@ class SftpControllerTest {
     }
 
     @Test
+    fun `publishes intermediate upload progress and settles at 100 percent`() {
+        val local = temporaryDirectory.resolve("progress.txt")
+        Files.writeString(local, "x".repeat(100))
+        val client = FakeSftpClient(progressSteps = 3, progressDelayMillis = 60)
+        val controller = SftpController(client)
+        val runningPercentages = java.util.concurrent.CopyOnWriteArrayList<Int>()
+        val latch = CountDownLatch(1)
+        controller.setListener { job ->
+            if (job.status == TransferStatus.RUNNING) runningPercentages += job.progressPercent
+            if (job.status == TransferStatus.COMPLETED) latch.countDown()
+        }
+
+        try {
+            controller.enqueue(SftpTransferRequest("/remote/progress.txt", local, TransferDirection.UPLOAD))
+            assertTrue(latch.await(5, TimeUnit.SECONDS), "upload did not complete")
+
+            val job = controller.jobsSnapshot().single()
+            assertEquals(TransferStatus.COMPLETED, job.status)
+            assertEquals(100, job.progressPercent)
+            assertTrue(runningPercentages.any { it in 1..99 }, "expected intermediate progress, got $runningPercentages")
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
     fun `executes mkdir rename and delete`() {
         val client = FakeSftpClient()
         val controller = SftpController(client)
@@ -153,6 +179,8 @@ class SftpControllerTest {
         val entries: List<RemoteFile> = emptyList(),
         val remoteFiles: Map<String, String> = emptyMap(),
         var failuresRemaining: Int = 0,
+        private val progressSteps: Int = 1,
+        private val progressDelayMillis: Long = 0,
     ) : SftpClient {
         val mkdirs = mutableListOf<String>()
         val renames = mutableListOf<Pair<String, String>>()
@@ -176,21 +204,46 @@ class SftpControllerTest {
             deleted += path
         }
 
-        override fun download(remotePath: String, localFile: Path, overwrite: Boolean) {
+        override fun download(
+            remotePath: String,
+            localFile: Path,
+            overwrite: Boolean,
+            onProgress: (Long, Long) -> Unit,
+        ) {
             val content = remoteFiles[remotePath] ?: throw java.io.IOException("No such file")
             if (failuresRemaining > 0) {
                 failuresRemaining--
                 throw java.io.IOException("transient download failure")
             }
             Files.writeString(localFile, content)
+            reportProgress(content.length.toLong(), onProgress)
         }
 
-        override fun upload(localFile: Path, remotePath: String, overwrite: Boolean) {
+        override fun upload(
+            localFile: Path,
+            remotePath: String,
+            overwrite: Boolean,
+            onProgress: (Long, Long) -> Unit,
+        ) {
             if (failuresRemaining > 0) {
                 failuresRemaining--
                 throw java.io.IOException("transient upload failure")
             }
-            uploaded[remotePath] = Files.readString(localFile)
+            val content = Files.readString(localFile)
+            uploaded[remotePath] = content
+            reportProgress(content.length.toLong(), onProgress)
+        }
+
+        private fun reportProgress(total: Long, onProgress: (Long, Long) -> Unit) {
+            if (progressSteps <= 1) {
+                onProgress(total, total)
+                return
+            }
+            for (step in 1 until progressSteps) {
+                onProgress(total * step / progressSteps, total)
+                if (progressDelayMillis > 0) Thread.sleep(progressDelayMillis)
+            }
+            onProgress(total, total)
         }
 
         override fun close() {

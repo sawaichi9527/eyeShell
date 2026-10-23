@@ -52,15 +52,21 @@ internal class MinaSftpClient(
 
     override fun delete(path: String) = client.remove(path)
 
-    override fun download(remotePath: String, localFile: Path, overwrite: Boolean) {
+    override fun download(
+        remotePath: String,
+        localFile: Path,
+        overwrite: Boolean,
+        onProgress: (transferredBytes: Long, totalBytes: Long) -> Unit,
+    ) {
         if (Files.exists(localFile) && !overwrite) {
             throw IOException("Local file already exists: $localFile")
         }
+        val total = stat(remotePath)?.sizeBytes ?: 0L
         val temporary = localFile.resolveSibling(".${localFile.fileName}.part")
         Files.deleteIfExists(temporary)
         try {
             client.read(remotePath).use { input ->
-                Files.newOutputStream(temporary).use { output -> input.copyTo(output) }
+                Files.newOutputStream(temporary).use { output -> copyWithProgress(input, output, total, onProgress) }
             }
             moveIntoPlace(temporary, localFile)
         } finally {
@@ -68,11 +74,17 @@ internal class MinaSftpClient(
         }
     }
 
-    override fun upload(localFile: Path, remotePath: String, overwrite: Boolean) {
+    override fun upload(
+        localFile: Path,
+        remotePath: String,
+        overwrite: Boolean,
+        onProgress: (transferredBytes: Long, totalBytes: Long) -> Unit,
+    ) {
         val targetExists = stat(remotePath) != null
         if (targetExists && !overwrite) {
             throw IOException("Remote file already exists: $remotePath")
         }
+        val total = Files.size(localFile)
         val temporary = remotePath.substringBeforeLast('/', "").let { directory ->
             val name = remotePath.substringAfterLast('/')
             val part = ".$name.part"
@@ -80,7 +92,7 @@ internal class MinaSftpClient(
         }
         try {
             client.write(temporary).use { output ->
-                Files.newInputStream(localFile).use { input -> input.copyTo(output) }
+                Files.newInputStream(localFile).use { input -> copyWithProgress(input, output, total, onProgress) }
             }
             client.rename(temporary, remotePath)
         } finally {
@@ -92,6 +104,24 @@ internal class MinaSftpClient(
     }
 
     override fun close() = client.close()
+
+    private fun copyWithProgress(
+        input: java.io.InputStream,
+        output: java.io.OutputStream,
+        totalBytes: Long,
+        onProgress: (transferredBytes: Long, totalBytes: Long) -> Unit,
+    ) {
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var transferred = 0L
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            output.write(buffer, 0, read)
+            transferred += read
+            onProgress(transferred, totalBytes)
+        }
+        onProgress(transferred, totalBytes)
+    }
 
     private fun moveIntoPlace(temporary: Path, target: Path) {
         try {

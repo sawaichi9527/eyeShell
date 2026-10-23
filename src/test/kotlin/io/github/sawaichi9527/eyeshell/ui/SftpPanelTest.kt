@@ -4,13 +4,21 @@ import io.github.sawaichi9527.eyeshell.sftp.RemoteFile
 import io.github.sawaichi9527.eyeshell.sftp.SftpClient
 import io.github.sawaichi9527.eyeshell.sftp.SftpController
 import java.awt.Container
+import java.awt.datatransfer.DataFlavor
+import java.awt.datatransfer.Transferable
+import java.io.File
+import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 import javax.swing.SwingUtilities
+import javax.swing.TransferHandler
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 
 class SftpPanelTest {
+    @TempDir
+    lateinit var temporaryDirectory: Path
     @Test
     fun `shows disconnected then lists remote files after binding`() {
         val panelRef = arrayOfNulls<SftpPanel>(1)
@@ -35,6 +43,42 @@ class SftpPanelTest {
         assertTrue(onEdt(panel) { it.containsTextField("/") })
 
         controller.close()
+    }
+
+    @Test
+    fun `dropping a local file uploads it to the current directory and shows progress`() {
+        val local = temporaryDirectory.resolve("drop.txt")
+        Files.writeString(local, "dropped content")
+        val client = FakeSftpClient()
+        lateinit var panel: SftpPanel
+        lateinit var controller: SftpController
+
+        SwingUtilities.invokeAndWait {
+            panel = SftpPanel()
+            controller = SftpController(client)
+            panel.bind(controller)
+        }
+
+        try {
+            val transferable = fileListTransferable(listOf(local.toFile()))
+            SwingUtilities.invokeAndWait {
+                val support = TransferHandler.TransferSupport(panel, transferable)
+                assertTrue(panel.transferHandler.canImport(support))
+                assertTrue(panel.transferHandler.importData(support))
+            }
+
+            assertTrue(
+                await(5, TimeUnit.SECONDS) { client.uploaded["/drop.txt"] == "dropped content" },
+                "dropped file was not uploaded to the current directory",
+            )
+            assertTrue(
+                await(5, TimeUnit.SECONDS) { onEdt(panel) { it.tableRowCount("100%") } },
+                "transfer table never showed 100%",
+            )
+            assertTrue(onEdt(panel) { it.tableRowCount("COMPLETED") })
+        } finally {
+            controller.close()
+        }
     }
 
     @Test
@@ -93,16 +137,40 @@ class SftpPanelTest {
         }
     }
 
+    private fun fileListTransferable(files: List<File>): Transferable = object : Transferable {
+        override fun getTransferDataFlavors(): Array<DataFlavor> = arrayOf(DataFlavor.javaFileListFlavor)
+
+        override fun isDataFlavorSupported(flavor: DataFlavor): Boolean = flavor == DataFlavor.javaFileListFlavor
+
+        override fun getTransferData(flavor: DataFlavor): Any = files
+    }
+
     private class FakeSftpClient(
         val entries: List<RemoteFile> = emptyList(),
     ) : SftpClient {
+        val uploaded = mutableMapOf<String, String>()
+
         override fun list(path: String): List<RemoteFile> = entries
         override fun stat(path: String): RemoteFile? = null
         override fun makeDirectory(path: String) = Unit
         override fun rename(from: String, to: String) = Unit
         override fun delete(path: String) = Unit
-        override fun download(remotePath: String, localFile: Path, overwrite: Boolean) = Unit
-        override fun upload(localFile: Path, remotePath: String, overwrite: Boolean) = Unit
+        override fun download(
+            remotePath: String,
+            localFile: Path,
+            overwrite: Boolean,
+            onProgress: (Long, Long) -> Unit,
+        ) = Unit
+        override fun upload(
+            localFile: Path,
+            remotePath: String,
+            overwrite: Boolean,
+            onProgress: (Long, Long) -> Unit,
+        ) {
+            val content = Files.readString(localFile)
+            uploaded[remotePath] = content
+            onProgress(content.length.toLong(), content.length.toLong())
+        }
         override fun close() = Unit
     }
 }

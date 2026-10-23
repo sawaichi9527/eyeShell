@@ -13,9 +13,19 @@ interface SftpClient : AutoCloseable {
 
     fun delete(path: String)
 
-    fun download(remotePath: String, localFile: Path, overwrite: Boolean)
+    fun download(
+        remotePath: String,
+        localFile: Path,
+        overwrite: Boolean,
+        onProgress: (transferredBytes: Long, totalBytes: Long) -> Unit = { _, _ -> },
+    )
 
-    fun upload(localFile: Path, remotePath: String, overwrite: Boolean)
+    fun upload(
+        localFile: Path,
+        remotePath: String,
+        overwrite: Boolean,
+        onProgress: (transferredBytes: Long, totalBytes: Long) -> Unit = { _, _ -> },
+    )
 
     override fun close()
 }
