@@ -189,6 +189,64 @@ class HostCatalogControllerTest {
         }
     }
 
+    @Test
+    fun `blank editor password keeps the saved password`() {
+        val host = savedHost()
+        val passwordStore = RecordingPasswordStore(charArrayOf('o', 'l', 'd'))
+        val controller = HostCatalogController(TestCatalog(listOf(host)), passwordStore) { _, _ -> true }
+
+        try {
+            val action = controller.applyEditorCredentials(host, editor(host, null, clear = false))
+
+            assertEquals(CredentialAction.NONE, action)
+            assertTrue(passwordStore.saved.isEmpty())
+            assertTrue(passwordStore.forgotten.isEmpty())
+            val kept = passwordStore.retrieve(host.profileId)?.copyValue()
+            assertArrayEquals(charArrayOf('o', 'l', 'd'), kept)
+            kept?.fill('\u0000')
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `entered editor password is saved and the buffer is zeroed`() {
+        val host = savedHost()
+        val passwordStore = RecordingPasswordStore()
+        val controller = HostCatalogController(TestCatalog(listOf(host)), passwordStore) { _, _ -> true }
+        val secret = charArrayOf('n', 'e', 'w')
+
+        try {
+            val action = controller.applyEditorCredentials(host, editor(host, secret, clear = false))
+
+            assertEquals(CredentialAction.SAVED, action)
+            assertArrayEquals(charArrayOf('n', 'e', 'w'), passwordStore.saved.single())
+            assertArrayEquals(charArrayOf('\u0000', '\u0000', '\u0000'), secret)
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `clear request forgets the saved password`() {
+        val host = savedHost()
+        val passwordStore = RecordingPasswordStore(charArrayOf('o', 'l', 'd'))
+        val controller = HostCatalogController(TestCatalog(listOf(host)), passwordStore) { _, _ -> true }
+
+        try {
+            val action = controller.applyEditorCredentials(host, editor(host, null, clear = true))
+
+            assertEquals(CredentialAction.CLEARED, action)
+            assertEquals(listOf(host.profileId), passwordStore.forgotten)
+            assertTrue(passwordStore.saved.isEmpty())
+        } finally {
+            controller.close()
+        }
+    }
+
+    private fun editor(host: SavedHost, password: CharArray?, clear: Boolean) =
+        HostCatalogController.HostEditorResult(host.draft, password, clear)
+
     private fun savedHost() = SavedHost(
         1,
         UUID.fromString("00000000-0000-0000-0000-000000000001"),

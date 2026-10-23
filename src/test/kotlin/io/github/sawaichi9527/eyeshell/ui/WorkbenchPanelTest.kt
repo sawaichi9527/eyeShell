@@ -32,6 +32,82 @@ import org.junit.jupiter.api.Test
 
 class WorkbenchPanelTest {
     @Test
+    fun `enter on an exited session requests a reconnect once`() {
+        val reconnects = AtomicInteger()
+        val exited = CountDownLatch(1)
+        lateinit var panel: WorkbenchPanel
+        lateinit var page: TerminalSessionPage
+        lateinit var view: TestTerminalView
+
+        SwingUtilities.invokeAndWait {
+            panel = WorkbenchPanel()
+            view = TestTerminalView(JPanel())
+            page = TerminalSessionPage(panel, view, TestHostSession(TestTerminalSession("exited")))
+            page.attach()
+            panel.addSession("exited", page.component, page::close)
+            page.startExitMonitor {
+                panel.updateSessionStatus(page.component, SessionStatus.EXITED)
+                page.enableReconnectOnEnter {
+                    if (!panel.isSessionExited(page.component)) return@enableReconnectOnEnter false
+                    reconnects.incrementAndGet()
+                    true
+                }
+                exited.countDown()
+            }
+        }
+
+        try {
+            assertTrue(exited.await(5, TimeUnit.SECONDS), "session never reported exit")
+            SwingUtilities.invokeAndWait {
+                val focusManager = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager()
+                val event = java.awt.event.KeyEvent(
+                    view.component,
+                    java.awt.event.KeyEvent.KEY_PRESSED,
+                    System.currentTimeMillis(),
+                    0,
+                    java.awt.event.KeyEvent.VK_ENTER,
+                    '\n',
+                )
+                assertTrue(focusManager.dispatchEvent(event))
+                assertEquals(1, reconnects.get())
+
+                val second = java.awt.event.KeyEvent(
+                    view.component,
+                    java.awt.event.KeyEvent.KEY_PRESSED,
+                    System.currentTimeMillis(),
+                    0,
+                    java.awt.event.KeyEvent.VK_ENTER,
+                    '\n',
+                )
+                assertEquals(1, reconnects.get())
+                focusManager.dispatchEvent(second)
+                assertEquals(1, reconnects.get())
+            }
+        } finally {
+            SwingUtilities.invokeAndWait { panel.closeSessions() }
+        }
+    }
+
+    @Test
+    fun `window construction attaches the first session without selection hook failures`() {
+        SwingUtilities.invokeAndWait {
+            val window = EyeShellWindow(
+                terminalViewFactory = { TestTerminalView(JPanel()) },
+                connectAction = {},
+                closeAction = {},
+            )
+            try {
+                window.attachTerminal(TestHostSession(TestTerminalSession("first")))
+                val tabs = window.findByName("sessionTabs") as JTabbedPane
+                assertEquals(1, tabs.tabCount)
+                assertEquals("operator@test.example:22", tabs.getTitleAt(0))
+            } finally {
+                window.dispose()
+            }
+        }
+    }
+
+    @Test
     fun `connect action stays available after multiple terminal tabs attach`() {
         SwingUtilities.invokeAndWait {
             val connectCount = AtomicInteger()
@@ -74,6 +150,39 @@ class WorkbenchPanelTest {
             sessionTabs.selectedComponent = firstPage.component
             assertEquals("Connected to first", connectionStatus.text)
             panel.closeSessions()
+        }
+    }
+
+    @Test
+    fun `tab strip exposes a new connection button`() {
+        SwingUtilities.invokeAndWait {
+            val connectCount = AtomicInteger()
+            val panel = WorkbenchPanel(connectAction = connectCount::incrementAndGet)
+            val tabs = panel.findByName("sessionTabs") as JTabbedPane
+            val plus = tabs.getClientProperty("JTabbedPane.trailingComponent") as? JButton
+
+            assertNotNull(plus)
+            assertTrue(plus!!.isEnabled)
+            assertEquals(1, tabs.tabCount)
+            assertEquals("Start", tabs.getTitleAt(0))
+
+            plus.doClick()
+            assertEquals(1, connectCount.get())
+
+            panel.setConnectionState("Connecting...", true)
+            assertFalse(plus.isEnabled)
+        }
+    }
+
+    @Test
+    fun `new connection button is disabled without a connect action`() {
+        SwingUtilities.invokeAndWait {
+            val panel = WorkbenchPanel()
+            val tabs = panel.findByName("sessionTabs") as JTabbedPane
+            val plus = tabs.getClientProperty("JTabbedPane.trailingComponent") as? JButton
+
+            assertNotNull(plus)
+            assertFalse(plus!!.isEnabled)
         }
     }
 

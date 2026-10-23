@@ -141,7 +141,12 @@ internal class SshConnectionController(
                 SwingUtilities.invokeLater {
                     if (owner.isDisplayable && !closed.get()) {
                         try {
-                            owner.attachTerminal(opened.hostSession)
+                            val reconnectPreset = HostConnectionPreset(
+                                profileId = request.passwordProfileId ?: UUID.randomUUID(),
+                                endpoint = request.endpoint,
+                                authenticationMethod = request.authentication.toConnectionMethod(),
+                            )
+                            owner.attachTerminal(opened.hostSession) { connect(owner, reconnectPreset) }
                             if (opened.passwordSaveFailed) {
                                 showCredentialWarning(owner, "Connected, but the password could not be saved.")
                             }
@@ -150,7 +155,7 @@ internal class SshConnectionController(
                             owner.setConnectionState("Connection failed", false)
                             JOptionPane.showMessageDialog(
                                 owner,
-                                failure.message ?: failure.javaClass.simpleName,
+                                describeFailure(failure),
                                 "Could not open terminal tab",
                                 JOptionPane.ERROR_MESSAGE,
                             )
@@ -167,7 +172,7 @@ internal class SshConnectionController(
                         JOptionPane.showMessageDialog(
                             owner,
                             changedKey?.let(::changedHostKeyMessage)
-                                ?: (failure.message ?: failure.javaClass.simpleName),
+                                ?: describeFailure(failure),
                             "SSH connection failed",
                             JOptionPane.ERROR_MESSAGE,
                         )
@@ -534,6 +539,24 @@ internal class SshConnectionController(
         val dismiss = Runnable { connectionDialog.getAndSet(null)?.dispose() }
         if (SwingUtilities.isEventDispatchThread()) dismiss.run() else SwingUtilities.invokeLater(dismiss)
     }
+}
+
+private fun SshAuthentication.toConnectionMethod(): ConnectionAuthenticationMethod = when (this) {
+    is SshAuthentication.Password -> ConnectionAuthenticationMethod.PASSWORD
+    is SshAuthentication.PublicKey -> ConnectionAuthenticationMethod.PUBLIC_KEY
+    is SshAuthentication.KeyboardInteractive -> ConnectionAuthenticationMethod.KEYBOARD_INTERACTIVE
+    is SshAuthentication.Agent -> ConnectionAuthenticationMethod.SSH_AGENT
+}
+
+internal fun describeFailure(failure: Throwable): String {
+    val messages = generateSequence(failure) { current ->
+        current.cause?.takeIf { cause -> cause !== current }
+    }
+        .mapNotNull { it.message?.trim()?.takeIf(String::isNotEmpty) }
+        .distinct()
+        .toList()
+    return messages.takeIf(List<String>::isNotEmpty)?.joinToString("\nCaused by: ")
+        ?: failure.javaClass.simpleName
 }
 
 internal data class HostConnectionPreset(

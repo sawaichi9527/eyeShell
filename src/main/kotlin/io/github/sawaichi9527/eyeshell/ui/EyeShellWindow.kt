@@ -12,6 +12,9 @@ import java.awt.Dimension
 import java.awt.Font
 import java.awt.FlowLayout
 import java.awt.Insets
+import java.awt.KeyboardFocusManager
+import java.awt.KeyEventDispatcher
+import java.awt.event.KeyEvent
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.swing.BorderFactory
 import javax.swing.Box
@@ -52,21 +55,35 @@ class EyeShellWindow(
             if (page == null) {
                 if (initialized) workbench.monitorIdle()
             } else {
-                page.startMonitor { snapshot ->
-                    SwingUtilities.invokeLater {
-                        if (!closed.get() && workbench.isSelectedSession(component)) {
-                            workbench.setMonitorSnapshot(snapshot)
+                try {
+                    page.startMonitor { snapshot ->
+                        SwingUtilities.invokeLater {
+                            if (!closed.get() && workbench.isSelectedSession(component)) {
+                                workbench.setMonitorSnapshot(snapshot)
+                            }
                         }
                     }
+                } catch (_: Throwable) {
+                    if (initialized) workbench.monitorIdle()
                 }
             }
         },
         sftpSelectionChanged = { component ->
-            val page = pagesByComponent[component]
-            if (page != null) {
-                workbench.bindSftp(page.sftpController())
-            } else if (initialized) {
-                workbench.bindSftp(null)
+            try {
+                val page = pagesByComponent[component]
+                if (page != null) {
+                    workbench.bindSftp(page.sftpController())
+                } else if (initialized) {
+                    workbench.bindSftp(null)
+                }
+            } catch (_: Throwable) {
+                if (initialized) {
+                    try {
+                        workbench.bindSftp(null)
+                    } catch (_: Throwable) {
+                        // A broken SFTP panel must not break terminal attachment.
+                    }
+                }
             }
         },
     )
@@ -81,7 +98,7 @@ class EyeShellWindow(
         initialized = true
     }
 
-    fun attachTerminal(hostSession: HostSession) {
+    fun attachTerminal(hostSession: HostSession, reconnect: (() -> Boolean)? = null) {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal sessions must be attached on the Swing EDT" }
         val terminalView = terminalViewFactory()
         val page = try {
@@ -111,6 +128,9 @@ class EyeShellWindow(
         }
         page.startExitMonitor {
             workbench.updateSessionStatus(page.component, SessionStatus.EXITED)
+            if (reconnect != null) {
+                page.enableReconnectOnEnter { workbench.isSessionExited(page.component) && reconnect() }
+            }
         }
     }
 
@@ -154,6 +174,7 @@ internal class TerminalSessionPage(
     private val monitorSampler = MonitorSampler(hostSession)
     private val sftpCreated = AtomicBoolean()
     private var sftpController: io.github.sawaichi9527.eyeshell.sftp.SftpController? = null
+    private var reconnectDispatcher: KeyEventDispatcher? = null
     val component: JComponent = JPanel(BorderLayout()).apply {
         name = "terminalWorkspace"
         getAccessibleContext().accessibleName = "Terminal workspace"
@@ -178,9 +199,15 @@ internal class TerminalSessionPage(
         )
     }
 
-    fun startMonitor(onSnapshot: (MonitorSnapshot) -> Unit) {
-        if (!monitorStarted.compareAndSet(false, true)) return
-        monitorSampler.start(onSnapshot)
+    fun startMonitor(onSnapshot: (MonitorSnapshot) -> Unit): Boolean {
+        if (!monitorStarted.compareAndSet(false, true)) return false
+        return try {
+            monitorSampler.start(onSnapshot)
+            true
+        } catch (_: Throwable) {
+            monitorSampler.close()
+            false
+        }
     }
 
     fun stopMonitor() {
@@ -199,8 +226,39 @@ internal class TerminalSessionPage(
         }
     }
 
+    fun enableReconnectOnEnter(action: () -> Boolean) {
+        if (reconnectDispatcher != null) return
+        var consumed = false
+        val dispatcher = KeyEventDispatcher { event ->
+            val source = event.component
+            val matches = event.id == KeyEvent.KEY_PRESSED &&
+                event.keyCode == KeyEvent.VK_ENTER &&
+                source != null &&
+                SwingUtilities.isDescendingFrom(source, component)
+            when {
+                consumed || !matches -> false
+                action() -> {
+                    consumed = true
+                    removeReconnectOnEnter()
+                    true
+                }
+                else -> false
+            }
+        }
+        reconnectDispatcher = dispatcher
+        KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(dispatcher)
+    }
+
+    private fun removeReconnectOnEnter() {
+        reconnectDispatcher?.let {
+            KeyboardFocusManager.getCurrentKeyboardFocusManager().removeKeyEventDispatcher(it)
+        }
+        reconnectDispatcher = null
+    }
+
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        removeReconnectOnEnter()
         monitorSampler.close()
         sftpController?.close()
         outputController.close(terminalView::close)
@@ -216,7 +274,7 @@ class WorkbenchPanel(
     connectAction: (() -> Unit)? = null,
     hostsAction: (() -> Unit)? = null,
     monitorSelectionChanged: ((Component) -> Unit)? = null,
-    sftpSelectionChanged: ((Component) -> Unit)? = null,
+    sftpSelectionChanged: ((Component?) -> Unit)? = null,
 ) : JPanel(BorderLayout()) {
     private val canConnect = connectAction != null
     private val sessionTabs = JTabbedPane(JTabbedPane.TOP).apply {
@@ -237,6 +295,14 @@ class WorkbenchPanel(
         isEnabled = canConnect
         addActionListener { connectAction?.invoke() }
     }
+    private val newSessionButton = JButton("+").apply {
+        name = "newSessionButton"
+        toolTipText = "New connection"
+        isEnabled = canConnect
+        isFocusable = false
+        margin = Insets(0, 6, 0, 6)
+        addActionListener { connectAction?.invoke() }
+    }
     private val hostsButton = JButton("Hosts...").apply {
         name = "hostsButton"
         isEnabled = hostsAction != null
@@ -254,6 +320,7 @@ class WorkbenchPanel(
 
     init {
         name = "workbench"
+        sessionTabs.putClientProperty("JTabbedPane.trailingComponent", newSessionButton)
         sessionTabs.addChangeListener {
             updateSelectedSessionStatus()
             val selected = sessionTabs.selectedComponent
@@ -297,6 +364,7 @@ class WorkbenchPanel(
         check(SwingUtilities.isEventDispatchThread()) { "Connection state must be updated on the Swing EDT" }
         this.connecting = connecting
         connectButton.isEnabled = !connecting && canConnect
+        newSessionButton.isEnabled = !connecting && canConnect
         if (connecting || sessions.isEmpty()) {
             connectionStatus.text = message
         } else {
@@ -335,6 +403,9 @@ class WorkbenchPanel(
 
     internal fun isSelectedSession(component: Component): Boolean =
         sessionTabs.selectedComponent === component
+
+    internal fun isSessionExited(component: Component): Boolean =
+        sessions[component]?.status == SessionStatus.EXITED
 
     internal fun bindSftp(controller: io.github.sawaichi9527.eyeshell.sftp.SftpController?) {
         check(SwingUtilities.isEventDispatchThread()) { "SFTP binding must run on the Swing EDT" }

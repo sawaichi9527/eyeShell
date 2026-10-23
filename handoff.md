@@ -12,17 +12,17 @@ M2 Linux Agentless Monitoring is in progress on the Windows host. Committed so f
 
 SFTP (Phase 2 high-priority item) is implemented on the Windows host: `sshd-sftp:2.19.0` was added with SHA-256 verification metadata (`3d645ff`), a `MinaSftpClient` boundary reuses the shared transport, an `SftpController` runs directory ops and a background transfer queue with `.part` staging and retry (`bd5fd16`), and an `SftpPanel` in the bottom dock lists files and offers upload/download/new folder/rename/delete bound to the selected session (`108e9e8`). An embedded-SSH SFTP subsystem integration test and an `SftpPanel` UI test are included; the full Windows suite is at 125 tests, 8 skips, 0 failures and the live GUI launches. Remaining SFTP work: drag-and-drop and transfer progress percentages (currently status-only), and live validation against a real Linux host on Ubuntu.
 
-### 2026-08-04 GUI review findings (pending fixes)
+### 2026-08-04 GUI review findings (fixed 2026-10-23)
 
-A manual GUI review on the Windows host reported five issues that are NOT yet fixed. These are the next work items.
+A manual GUI review on the Windows host reported five issues. All five are now implemented on the Ubuntu host; the root causes below are kept for traceability.
 
-| # | Issue | Root cause / current state | Planned fix |
+| # | Issue | Root cause / current state | Fix |
 |---|---|---|---|
-| 1 | The Hosts add/edit dialog has no password-save field. | `HostCatalogController.showHostEditor` only collects name/host/port/username/auth/group/tags. | Add a Password field, a `Remember password in OS credential store` checkbox, and a `Clear saved password` button. Confirmed semantics (1+3): a blank password keeps the existing saved password; the Clear button forgets it. Passwords go only to the OS Credential Manager, never SQLite. |
-| 2 | The first connection attempt fails with a `NullPointerException` dialog; retrying succeeds. | The `WorkbenchPanel` tab-change hook fired during window construction and referenced the not-yet-assigned `workbench`; the SFTP hook was guarded by the `initialized` flag (`90cfee0`) but needs a regression test. SFTP/monitor init must not be able to fail terminal attach. | Add a construction-time selection-hook regression test; isolate SFTP controller and monitor sampler initialization so a failure only disables that feature instead of surfacing as "Could not open terminal tab"; surface the full root-cause chain in the error dialog. |
-| 3 | After connecting to a Linux host, the monitor panel shows no data. | `MonitorCommands.sample()` joins commands with a raw form-feed character; the remote shell treats it as whitespace, so no section delimiter reaches the parser and the panel shows "Metrics unsupported on this host." | Emit `printf '\f'` between sections (with a leading `export LC_ALL=C LANG=C`) so the parser's `splitSample` sees real boundaries; also show the connected host IP in the monitor panel. |
-| 4 | There is no `+` button on the tab strip to open a new connection. | `createSessionWorkspace()` renders only a `JTabbedPane`. | Add a `+` button at the right end of the tab strip that behaves like the bottom `Connect...`; disable it when no connect action exists. Must not disturb the empty `Start` tab behavior. |
-| 5 | After typing `exit` in the terminal, pressing Enter cannot restore the connection. | An `EXITED` session only updates the status chip and preserves scrollback; there is no reconnect action. | On Enter when the selected session is `EXITED`, reconnect using the original host preset (reusing a saved password, or reopening the connection dialog). Proposed behavior: open a new tab and keep the old exited tab's scrollback. |
+| 1 | The Hosts add/edit dialog has no password-save field. | `HostCatalogController.showHostEditor` only collected name/host/port/username/auth/group/tags. | Added a Password field, a `Save password in OS credential store` checkbox, and a `Clear saved password` button. A blank password keeps the existing saved password; Clear marks it for removal on save. Credentials go only to the OS store, never SQLite. |
+| 2 | The first connection attempt fails with a `NullPointerException` dialog; retrying succeeds. | The real trigger was the `WorkbenchPanel` tab-change hook passing a null selected component into the non-null `sftpSelectionChanged` callback while the `Start` tab was being removed, so the first `attachTerminal` died inside `JTabbedPane.remove`. | Made the SFTP selection callback nullable, isolated monitor/SFTP initialization failures so they cannot abort terminal attachment, and surfaced the full cause chain in the error dialog. |
+| 3 | After connecting to a Linux host, the monitor panel shows no data. | `MonitorCommands.sample()` joined commands with a raw form-feed character, which the remote shell treats as whitespace. | Emitted `printf '\f'` between sections (with a leading `export LC_ALL=C LANG=C`) and added the connected host address to the monitor panel. |
+| 4 | There is no `+` button on the tab strip to open a new connection. | `createSessionWorkspace()` rendered only a `JTabbedPane`. | Added a `+` button via FlatLaf's `JTabbedPane.trailingComponent`; it mirrors `Connect...` and is disabled without a connect action or while connecting. |
+| 5 | After typing `exit` in the terminal, pressing Enter cannot restore the connection. | An `EXITED` session only updated the status chip and preserved scrollback; there was no reconnect action. | Enter inside an exited session reconnects with the original endpoint/authentication preset in a new tab, keeping the old scrollback; the Enter hook is installed once and removed after use or close. |
 
 Confirmed decisions for the host editor password handling:
 - Blank password keeps the existing saved password (no accidental overwrite).
@@ -348,6 +348,16 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
 - Remaining unverified scope: live GUI launch on this host, live monitoring and SFTP against a real Linux host, and the Windows-gated cases listed above.
+
+### Ubuntu host validation (2026-08-04 GUI review fixes)
+
+- Commands: `./scripts/gradlew-local.sh test --console=plain`; `./scripts/gradlew-local.sh check --console=plain`; targeted `MonitorCommandsTest`, `MonitorIntegrationTest`, `WorkbenchPanelTest`, `HostCatalogControllerTest`, and `SshConnectionControllerTest`; live GUI smoke via `./scripts/gradlew-local.sh run` plus `wmctrl -l`; `git diff --check`.
+- Executed at: 2026-10-23
+- Exit codes: 0 for test, check, and diff; the GUI was terminated manually after the smoke window appeared.
+- Result: Implemented the five GUI review fixes. Monitoring now emits `printf '\f'` delimiters and shows the connected address; the tab strip exposes a `+` button through FlatLaf's trailing component; the host editor stores/keeps/clears passwords through the OS credential store; monitor/SFTP initialization failures can no longer abort terminal attachment and error dialogs include the full cause chain; Enter in an exited session reconnects with the original preset in a new tab. The null-selection NPE that broke the first connection attempt was traced to the non-null `sftpSelectionChanged` callback and fixed. Full suite runs 137 tests: 137 executed, 0 failures, 0 errors, 5 skipped (the same opt-in/platform-gated set). `check` passed; the live GUI launched with a window titled `eyeShell`.
+- Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
+- Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
+- Remaining unverified scope: the host-editor password dialog and the Enter-reconnect flow were exercised through unit-level credential and key-dispatch tests, not by an automated GUI walkthrough; live monitoring and SFTP against a real Linux host are still unverified; Windows-gated cases remain unverified on this host.
 
 ## Known Issues
 

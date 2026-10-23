@@ -25,6 +25,24 @@ import org.junit.jupiter.api.Test
 
 class SshConnectionControllerTest {
     @Test
+    fun `describes the full cause chain`() {
+        val failure = IllegalStateException(
+            "Could not open terminal tab",
+            IOException("transport closed", IllegalArgumentException("channel window exhausted")),
+        )
+
+        assertEquals(
+            "Could not open terminal tab\nCaused by: transport closed\nCaused by: channel window exhausted",
+            describeFailure(failure),
+        )
+    }
+
+    @Test
+    fun `falls back to the failure type when no cause has a message`() {
+        assertEquals("RuntimeException", describeFailure(RuntimeException()))
+    }
+
+    @Test
     fun `saves a remembered password only after terminal opening succeeds`() {
         val profileId = UUID.fromString("00000000-0000-0000-0000-000000000051")
         val store = RecordingPasswordStore()
