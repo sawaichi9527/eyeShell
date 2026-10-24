@@ -375,14 +375,25 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 ### Ubuntu host validation (password persistence, tab strip, reconnect)
 
 - Commands: `./scripts/gradlew-local.sh test --tests "*SystemPasswordCredentialStoreTest" --tests "*SshConnectionControllerTest" --tests "*HostCatalogControllerTest" --tests "*WorkbenchPanelTest" --console=plain`; `./scripts/gradlew-local.sh test --rerun-tasks --console=plain`; `./scripts/gradlew-local.sh check --console=plain`; `timeout --signal=TERM 22s ./scripts/gradlew-local.sh run` + `wmctrl -l`; `git diff --check`.
-- Executed at: 2026-10-25T00:20+08:00
+- Executed at: 2026-10-24T23:12+08:00
 - Exit codes: 0 for the targeted tests, the full suite, `check`, and the diff check; the GUI smoke ended with the expected 124 and `wmctrl` reported the `eyeShell` window.
 - Result: (1) `LinuxSecretServicePasswordStore` unlocks a locked default collection before any operation via the new `SecretCollection.unlock()` (`unlockWithUserPermission`), so a locked login keyring now raises the desktop unlock prompt instead of forcing session-only passwords; an unlock refusal still throws and the UI reports the failure, and `Remember` stays enabled for the `LOCKED` state with updated hints. (2) The `+` button is wrapped in a transparent `BorderLayout` panel at the leading edge of the tab strip's trailing slot, so it renders immediately after the last tab. (3) `SshConnectionController.rememberForReconnect` caches the connect password (and jump-host password) when it was not persisted, keyed by the same profile id used by the reconnect preset, so `exit` + Enter reuses it. Full suite runs 197 tests: 197 executed, 0 failures, 0 errors, 12 skipped. New coverage: unlock-before-write, fail-closed when the unlock is refused, reconnect password caching (and no duplicate cache when the store save succeeded), and the trailing-wrapper arrangement of the `+` button.
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
 - Remaining unverified scope: the GNOME unlock prompt itself was not exercised interactively (that would pop a desktop dialog); the `+` position was verified structurally and with a FlatLaf layout probe rather than a screenshot; Windows credential storage was not re-run.
 
-### 2026-10-25 push
+### 2026-10-24 push
 
 - Commands: `git push origin main`.
-- Result: pushed `05309a1..28ae170` (4 commits: credential handling, monitor sidebar, new-tab placement, documentation) to `origin/main`; working tree clean and `main` in sync with `origin/main` afterwards.
+- Result: pushed `05309a1..28ae170` (4 commits: credential handling, monitor sidebar, new-tab placement, documentation) to `origin/main`, then `28ae170..b9c81ac` for the handoff baseline refresh; working tree clean and `main` in sync with `origin/main` afterwards at 2026-10-24T23:16+08:00.
 - Not re-run for the push: no code changed after the validated `197 tests / 0 failures / 12 skipped` run recorded above, except this documentation update.
+
+### 2026-10-24 Session close (credential handling, monitor sidebar, push)
+
+- Commands: `./scripts/gradlew-local.sh test --rerun-tasks --console=plain`; `./scripts/gradlew-local.sh check --console=plain`; `git diff --check`.
+- Executed at: 2026-10-24T23:18:41+08:00
+- Duration / exit codes: test 31s, exit 0; check 2s, exit 0; diff check exit 0.
+- Result: HEAD `b9c81ac`, working tree clean and `main` in sync with `origin/main`. Full suite runs 197 tests: 197 executed, 0 failures, 0 errors, 12 skipped (Windows clipboard, Windows OpenSSH agent, Windows data-path SQLite, live Windows Credential Manager, live Linux Secret Service, 2 `LiveLinuxHostValidationTest`, 2 `OpenSshInteroperabilityTest`, 2 env-gated `LiveJumpHostValidationTest`, and the env-gated heap probe). `check` passed with no task re-execution needed.
+- Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10, default 512 MiB test heap.
+- Artifacts: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`; logs at `/tmp/opencode/close-test.log`, `/tmp/opencode/close-check.log`, and `/tmp/opencode/close-diffcheck.log`.
+- Not re-run in this close-out: the opt-in live Linux/OpenSSH/Secret Service/jump-host cases, the interactive GNOME keyring unlock prompt, the manual GUI walkthrough, and all Windows-gated cases. The monitor panel was verified offscreen and by component-bounds dumps, not on a shown window.
+- Token usage: `tokenscope` was not available in this session, so no row was appended to Token Usage Tracking; the cumulative table therefore still stops at the 2026-08-06 session.
