@@ -4,9 +4,9 @@ Older milestone plans and superseded validation evidence are archived in `docs/H
 
 ## Current Status
 
-eyeShell has completed Phase 1 and the Phase 2 high-priority set except the items in Deferred / Backlog: SFTP, single-hop Jump Host, Linux agentless monitoring, Command Snippets, and the Saved Hosts folder tree are implemented, validated, and pushed (`ed5facf` on `origin/main`).
+eyeShell has completed Phase 1 and the Phase 2 high-priority set except the items in Deferred / Backlog: SFTP, single-hop Jump Host, Linux agentless monitoring, Command Snippets, and the Saved Hosts folder tree are implemented, validated, and pushed (`28ae170` on `origin/main`).
 
-Current validation baseline (Ubuntu 26.04, 2026-10-24): 169 tests, 0 failures, 0 errors, 12 skips (all opt-in or platform-gated), `check` passes, and the GUI launches. Multi-session resources are characterized: three simultaneous 100,000-line sessions retain 160 MiB inside the default 512 MiB test heap.
+Current validation baseline (Ubuntu 26.04, 2026-10-25): 197 tests, 0 failures, 0 errors, 12 skips (all opt-in or platform-gated), `check` passes, and the GUI launches. Multi-session resources are characterized: three simultaneous 100,000-line sessions retain 160 MiB inside the default 512 MiB test heap.
 
 No feature work is in progress. Remaining feature candidates are deferred at the owner's request (see Deferred / Backlog); current work is validation, quality debt, and documentation.
 
@@ -380,3 +380,9 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Result: (1) `LinuxSecretServicePasswordStore` unlocks a locked default collection before any operation via the new `SecretCollection.unlock()` (`unlockWithUserPermission`), so a locked login keyring now raises the desktop unlock prompt instead of forcing session-only passwords; an unlock refusal still throws and the UI reports the failure, and `Remember` stays enabled for the `LOCKED` state with updated hints. (2) The `+` button is wrapped in a transparent `BorderLayout` panel at the leading edge of the tab strip's trailing slot, so it renders immediately after the last tab. (3) `SshConnectionController.rememberForReconnect` caches the connect password (and jump-host password) when it was not persisted, keyed by the same profile id used by the reconnect preset, so `exit` + Enter reuses it. Full suite runs 197 tests: 197 executed, 0 failures, 0 errors, 12 skipped. New coverage: unlock-before-write, fail-closed when the unlock is refused, reconnect password caching (and no duplicate cache when the store save succeeded), and the trailing-wrapper arrangement of the `+` button.
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
 - Remaining unverified scope: the GNOME unlock prompt itself was not exercised interactively (that would pop a desktop dialog); the `+` position was verified structurally and with a FlatLaf layout probe rather than a screenshot; Windows credential storage was not re-run.
+
+### 2026-10-25 push
+
+- Commands: `git push origin main`.
+- Result: pushed `05309a1..28ae170` (4 commits: credential handling, monitor sidebar, new-tab placement, documentation) to `origin/main`; working tree clean and `main` in sync with `origin/main` afterwards.
+- Not re-run for the push: no code changed after the validated `197 tests / 0 failures / 12 skipped` run recorded above, except this documentation update.
