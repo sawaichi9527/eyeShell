@@ -311,6 +311,10 @@ class WorkbenchPanel(
         margin = Insets(0, 6, 0, 6)
         addActionListener { connectAction?.invoke() }
     }
+    private val sessionTabTrailing = JPanel(BorderLayout()).apply {
+        isOpaque = false
+        add(newSessionButton, BorderLayout.WEST)
+    }
     private val hostsButton = JButton("Hosts...").apply {
         name = "hostsButton"
         isEnabled = hostsAction != null
@@ -328,7 +332,7 @@ class WorkbenchPanel(
 
     init {
         name = "workbench"
-        sessionTabs.putClientProperty("JTabbedPane.trailingComponent", newSessionButton)
+        sessionTabs.putClientProperty("JTabbedPane.trailingComponent", sessionTabTrailing)
         sessionTabs.addChangeListener {
             updateSelectedSessionStatus()
             val selected = sessionTabs.selectedComponent

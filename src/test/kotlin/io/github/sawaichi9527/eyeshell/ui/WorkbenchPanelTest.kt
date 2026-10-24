@@ -7,6 +7,7 @@ import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
 import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
 import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputSnapshot
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
+import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Container
 import java.awt.Dimension
@@ -123,6 +124,21 @@ class WorkbenchPanelTest {
     }
 
     @Test
+    fun `the new session button sits right after the last tab`() {
+        SwingUtilities.invokeAndWait {
+            val panel = WorkbenchPanel(connectAction = {})
+            val tabs = panel.findByName("sessionTabs") as JTabbedPane
+            val trailing = tabs.getClientProperty("JTabbedPane.trailingComponent")
+
+            assertTrue(trailing is JPanel, "The trailing slot must be a wrapper so the button can lead it")
+            val wrapper = trailing as JPanel
+            val button = wrapper.components.single()
+            assertEquals("newSessionButton", button.name)
+            assertEquals("West", (wrapper.layout as BorderLayout).getConstraints(button))
+        }
+    }
+
+    @Test
     fun `connect action stays available after multiple terminal tabs attach`() {
         SwingUtilities.invokeAndWait {
             val connectCount = AtomicInteger()
@@ -174,7 +190,8 @@ class WorkbenchPanelTest {
             val connectCount = AtomicInteger()
             val panel = WorkbenchPanel(connectAction = connectCount::incrementAndGet)
             val tabs = panel.findByName("sessionTabs") as JTabbedPane
-            val plus = tabs.getClientProperty("JTabbedPane.trailingComponent") as? JButton
+            val trailing = tabs.getClientProperty("JTabbedPane.trailingComponent") as? JPanel
+            val plus = trailing?.components?.firstOrNull() as? JButton
 
             assertNotNull(plus)
             assertTrue(plus!!.isEnabled)
@@ -194,7 +211,8 @@ class WorkbenchPanelTest {
         SwingUtilities.invokeAndWait {
             val panel = WorkbenchPanel()
             val tabs = panel.findByName("sessionTabs") as JTabbedPane
-            val plus = tabs.getClientProperty("JTabbedPane.trailingComponent") as? JButton
+            val trailing = tabs.getClientProperty("JTabbedPane.trailingComponent") as? JPanel
+            val plus = trailing?.components?.firstOrNull() as? JButton
 
             assertNotNull(plus)
             assertFalse(plus!!.isEnabled)
