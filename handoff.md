@@ -473,3 +473,13 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Test environment: Ubuntu 26.04 x86_64, OpenSSH 10.2p1 Ubuntu-2ubuntu3.8, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
 - Remaining unverified scope: the Windows host, a GUI walkthrough of the jump selector and jump credential dialog, a bastion that restricts the target to a non-loopback interface, and jump-host keyboard-interactive/agent credentials against OpenSSH.
+
+### 2026-10-24 Session close (M2 Jump Host)
+
+- Commands: `./scripts/gradlew-local.sh test --rerun-tasks --console=plain`; `./scripts/gradlew-local.sh check --console=plain`; `git diff --check`.
+- Executed at: 2026-10-24T12:07:50+08:00
+- Duration / exit codes: test 35s, exit 0; check 2s, exit 0; diff check exit 0.
+- Result: 161 tests: 161 executed, 0 failures, 0 errors, 11 skipped. The 11 skips are opt-in or platform-gated: Windows clipboard, Windows OpenSSH agent, Windows data-path SQLite, live Windows Credential Manager, live Linux Secret Service, 2 `LiveLinuxHostValidationTest`, 2 `OpenSshInteroperabilityTest`, and the 2 env-gated `LiveJumpHostValidationTest` cases (which passed when run with `EYESHELL_TEST_OPENSSH_JUMP=1` earlier in this session). HEAD `00f18e3`; working tree clean at the start of this close-out.
+- Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
+- Artifacts: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`; command logs under `/tmp/opencode/session-close-jump-test.log` and `/tmp/opencode/session-close-jump-check.log`.
+- Not re-run in this session close: the opt-in live OpenSSH jump validation (passed earlier in this session and recorded above), the other opt-in live cases, GUI smoke, and all Windows-gated cases. No runtime behavior changed after `00f18e3`; this entry records the close-out verification only.
