@@ -16,6 +16,10 @@ Command Snippets (Phase 2) are implemented: SQLite schema v3 adds a `command_sni
 
 M2 Jump Host (transport provider) is implemented on this Ubuntu host. A `TransportProvider` boundary (`Direct` / `JumpHost`) lets one saved host profile act as a single-hop jump host; SQLite schema v4 adds `hosts.jump_host_uuid` with self-reference, dangling-reference, nested-chain, and delete protection; the host editor exposes a jump host selector; the connection dialog collects jump-host credentials only when the profile has no usable material (Password from the OS credential store, Public Key session-only, keyboard-interactive, or agent); and host-key confirmation shows a single combined screen for the target whenever the jump key is already trusted, with a one-time jump screen on first use. Known Hosts verification is pinned to the target `host:port` even though the target transport is dialed through an ephemeral loopback forward. Live validation against two real OpenSSH 10.2 servers (bastion + target) is recorded below (2026-10-24), including `direct-tcpip` bastion-log evidence and exact Known Hosts pinning. The suite is at 161 tests (2026-10-24).
 
+The Saved Hosts manager now renders a one-level folder tree (group folders with host leaves, ungrouped hosts at the tree root) instead of a flat list, matching the FinalShell connection-manager information architecture. Grouping, ordering, and label text live in a Swing-free `HostCatalogTree` boundary; no schema, catalog API, dependency, or credential change was introduced (2026-10-24).
+
+Investigation note for the spec's Workspace／Host Set item: FinalShell (official introduction and changelog) has no named workspace concept. Its equivalent is a folder tree in the connection manager, one tab per server, and a "send command to all sessions" mode. eyeShell should therefore treat the folder tree as the first slice and evaluate command broadcast before inventing a persisted workspace model.
+
 ### 2026-08-04 GUI review findings (fixed 2026-10-23)
 
 A manual GUI review on the Windows host reported five issues. All five are now implemented on the Ubuntu host; the root causes below are kept for traceability.
@@ -161,6 +165,10 @@ The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShell
 - Added a jump host selector to the saved host editor and jump-host credential inputs to the SSH connection dialog (OS credential store password, session-only public key/passphrase, keyboard-interactive, agent) without persisting new secrets.
 - Added `HostKeyReview`, which keeps the jump host key separate from the target key and produces a combined single target confirmation screen that restates the jump trust status; changed keys are still rejected for both hops.
 - Added deterministic coverage for jump transport routing, Known Hosts identity mapping, changed target keys through a jump host, jump reference validation and delete protection, preset/secret boundaries, and host-key review messaging.
+- Added a Swing-free `HostCatalogTree` boundary that groups saved hosts into folders, keeps ungrouped hosts at the tree root, orders groups and hosts case-insensitively with deterministic tie-breaks, and owns the group/host label text.
+- Replaced the flat Saved Hosts list with a `JTree` (group folders → host leaves) with a single-selection model, expand-state preservation across reloads, selection restoration after add/edit, and `Add...` pre-filling the selected folder into the Group field.
+- Kept `Edit`, `Delete`, and `Connect` limited to host rows; selecting a folder only enables `Add...`, so a folder can never be edited or connected as if it were a host.
+- Added deterministic coverage for grouping/ordering/labels plus a dialog-level test proving the tree shape, folder labels, and the host-only action enablement.
 
 ## In Progress
 
@@ -223,6 +231,7 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 
 - M1J, M1K, M1L, and M1M are implemented and validated on Ubuntu 26.04 and re-validated on the Windows host (97 tests, 7 skips, `check` passed); Windows-specific platform validation is complete except the MSI/ZIP installers (see below).
 - M2 monitoring and SFTP are implemented and Windows-validated (125 tests, 8 skips); both are now also validated live against this Linux host (2026-10-24). SFTP drag-and-drop upload and transfer progress percentages are implemented (2026-10-24). Command Snippets are implemented with SQLite persistence and session-bound Run (2026-10-24).
+- Saved Hosts tree (group folders, ungrouped hosts at the root) is implemented and validated (2026-10-24). Next candidates in this area: broadcast a command to all open sessions (FinalShell's core batch feature), and multi-select host connect. Host group CRUD (rename/delete/empty folders) is still intentionally out of scope.
 - Next M2 items after Jump Host: SOCKS5/HTTP CONNECT proxy (M2B) and persisted local/remote/dynamic port forwarding (M2C, schema v5, rules bound to saved hosts).
 - Re-validate the jump host transport on the Windows host and add a Windows live-run record.
 - Pre-release: validate the Windows MSI (requires the WiX toolset, which jpackage invokes on Windows) and ZIP installer branches of the packaging tasks; development-stage validation uses `gradlew-local.ps1 run` for GUI smoke checks and milestone `jpackageAppImage` bundles instead.
@@ -453,6 +462,8 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Jump Host supports exactly one hop. Nested jump hosts are rejected by catalog validation, and an ad-hoc (unsaved) jump host is intentionally unavailable: save it as a Saved Host first.
 - A replacement jump-host password typed in the connection dialog is session-only; save jump credentials through the Host editor so they land in the OS credential store.
 - Port forwarding rules are not implemented yet (M2C, schema v5 planned) and the SOCKS5/HTTP CONNECT proxy transport (M2B) is not implemented yet.
+- Saved Host folders are derived from the hosts that name them: there is no create/rename/delete UI yet, a folder disappears when its last host leaves it, and the Group field in the host editor remains the only way to move a host between folders.
+- A folder row in the Saved Hosts tree cannot be connected, edited, or deleted; only `Add...` is enabled there.
 
 ## Validation Evidence (M2 Jump Host)
 
@@ -483,3 +494,13 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
 - Artifacts: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`; command logs under `/tmp/opencode/session-close-jump-test.log` and `/tmp/opencode/session-close-jump-check.log`.
 - Not re-run in this session close: the opt-in live OpenSSH jump validation (passed earlier in this session and recorded above), the other opt-in live cases, GUI smoke, and all Windows-gated cases. No runtime behavior changed after `00f18e3`; this entry records the close-out verification only.
+
+### Ubuntu host validation (Saved Hosts folder tree)
+
+- Commands: `./scripts/gradlew-local.sh test --tests "*HostCatalogTreeTest" --tests "*HostCatalogControllerTest"`; `./scripts/gradlew-local.sh test --rerun-tasks`; `./scripts/gradlew-local.sh check`; `./scripts/gradlew-local.sh run` (GUI smoke) + `wmctrl -l`; `git diff --check`.
+- Executed at: 2026-10-24
+- Exit codes: 0 for the targeted tests, the full suite, `check`, and the diff check; the GUI smoke was bounded by `timeout --signal=TERM 25s` and ended with the expected 124.
+- Result: Replaced the flat Saved Hosts list with a one-level folder tree. `HostCatalogTree` (no Swing components) groups hosts by their catalog group, keeps ungrouped hosts at the tree root, orders group and host names case-insensitively with an exact tie-break so `Lab` and `lab` never collapse into one entry, and owns the `Group (n)` / `name  user@host:port [tags]` label text. The dialog uses a root-hidden `JTree` with single selection, preserves expanded folders across reloads, restores the previously selected host after add/edit, and pre-fills the selected folder into the Group field on `Add...`. `Edit`/`Delete`/`Connect` are enabled only for host rows. Full suite now runs 167 tests: 167 executed, 0 failures, 0 errors, 11 skipped (the existing opt-in/platform-gated set). New coverage: 5 `HostCatalogTreeTest` cases (ordering, tie-breaks, empty catalog, root layout, labels) and 1 `HostCatalogControllerTest` dialog case asserting the tree shape, folder labels, and host-only action enablement. `check` passed and the live GUI opened a window titled `eyeShell`. No schema, catalog API, dependency, or credential change was introduced.
+- Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
+- Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
+- Remaining unverified scope: the tree was not clicked through manually (the dialog-level test covers structure and enablement, and the GUI smoke only proves the app launches); folder create/rename/delete and drag-to-move are not implemented; Windows-gated cases were not re-run on this host.

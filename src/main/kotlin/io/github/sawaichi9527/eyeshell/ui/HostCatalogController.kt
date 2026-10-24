@@ -16,13 +16,13 @@ import java.awt.GridBagLayout
 import java.awt.Insets
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
+import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.DefaultListCellRenderer
-import javax.swing.DefaultListModel
 import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.JComboBox
@@ -35,9 +35,14 @@ import javax.swing.JPasswordField
 import javax.swing.JScrollPane
 import javax.swing.JSpinner
 import javax.swing.JTextField
-import javax.swing.ListSelectionModel
+import javax.swing.JTree
 import javax.swing.SpinnerNumberModel
 import javax.swing.SwingUtilities
+import javax.swing.tree.DefaultMutableTreeNode
+import javax.swing.tree.DefaultTreeCellRenderer
+import javax.swing.tree.DefaultTreeModel
+import javax.swing.tree.TreePath
+import javax.swing.tree.TreeSelectionModel
 
 internal class HostCatalogController(
     private val catalog: HostCatalog,
@@ -130,23 +135,26 @@ internal class HostCatalogController(
     )
 
     private fun createDialog(owner: EyeShellWindow): DialogState {
-        val model = DefaultListModel<SavedHost>()
-        val list = JList(model).apply {
-            name = "hostCatalogList"
-            selectionMode = ListSelectionModel.SINGLE_SELECTION
-            cellRenderer = object : DefaultListCellRenderer() {
-                override fun getListCellRendererComponent(
-                    list: JList<*>?,
+        val model = DefaultTreeModel(DefaultMutableTreeNode())
+        val tree = JTree(model).apply {
+            name = "hostCatalogTree"
+            getAccessibleContext().accessibleName = "Saved hosts grouped by folder"
+            isRootVisible = false
+            showsRootHandles = true
+            selectionModel.selectionMode = TreeSelectionModel.SINGLE_TREE_SELECTION
+            cellRenderer = object : DefaultTreeCellRenderer() {
+                override fun getTreeCellRendererComponent(
+                    tree: JTree?,
                     value: Any?,
-                    index: Int,
                     isSelected: Boolean,
-                    cellHasFocus: Boolean,
-                ): Component = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus).apply {
-                    if (value is SavedHost) {
-                        val group = value.draft.group?.let { "$it / " }.orEmpty()
-                        val tags = value.draft.tags.takeIf { it.isNotEmpty() }
-                            ?.joinToString(prefix = "  [", postfix = "]").orEmpty()
-                        (this as JLabel).text = "$group${value.draft.name}  ${value.draft.endpoint.displayName}$tags"
+                    expanded: Boolean,
+                    leaf: Boolean,
+                    row: Int,
+                    hasFocus: Boolean,
+                ): Component = super.getTreeCellRendererComponent(tree, value, isSelected, expanded, leaf, row, hasFocus).apply {
+                    when (val node = (value as? DefaultMutableTreeNode)?.userObject ?: value) {
+                        is HostGroupNode -> text = HostCatalogTree.groupLabel(node)
+                        is SavedHost -> text = HostCatalogTree.hostLabel(node)
                     }
                 }
             }
@@ -162,7 +170,7 @@ internal class HostCatalogController(
             defaultCloseOperation = JDialog.DISPOSE_ON_CLOSE
             contentPane = JPanel(BorderLayout(8, 8)).apply {
                 border = javax.swing.BorderFactory.createEmptyBorder(10, 10, 10, 10)
-                add(JScrollPane(list), BorderLayout.CENTER)
+                add(JScrollPane(tree), BorderLayout.CENTER)
                 add(status, BorderLayout.NORTH)
                 add(JPanel(FlowLayout(FlowLayout.TRAILING)).apply {
                     add(add)
@@ -175,16 +183,16 @@ internal class HostCatalogController(
             setSize(760, 420)
             setLocationRelativeTo(owner)
         }
-        val state = DialogState(dialog, model, list, status, listOf(add, edit, delete, connectButton))
+        val state = DialogState(dialog, tree, status, listOf(add, edit, delete, connectButton))
         fun updateSelectionActions() {
-            val selected = list.selectedValue != null && state.busy.not()
+            val selected = selectedHost(state) != null && state.busy.not()
             edit.isEnabled = selected
             delete.isEnabled = selected
             connectButton.isEnabled = selected
         }
-        list.addListSelectionListener { updateSelectionActions() }
+        tree.addTreeSelectionListener { updateSelectionActions() }
         add.addActionListener {
-            val editor = showHostEditor(dialog, null, currentHosts(state)) ?: return@addActionListener
+            val editor = showHostEditor(dialog, null, currentHosts(state), selectedGroup(state)) ?: return@addActionListener
             val warning = AtomicReference<String?>()
             mutate(
                 state,
@@ -201,7 +209,7 @@ internal class HostCatalogController(
             )
         }
         edit.addActionListener {
-            val selected = list.selectedValue ?: return@addActionListener
+            val selected = selectedHost(state) ?: return@addActionListener
             showHostEditor(dialog, selected, currentHosts(state))?.let { editor ->
                 val warning = AtomicReference<String?>()
                 mutate(
@@ -226,7 +234,7 @@ internal class HostCatalogController(
             }
         }
         delete.addActionListener {
-            val selected = list.selectedValue ?: return@addActionListener
+            val selected = selectedHost(state) ?: return@addActionListener
             if (JOptionPane.showConfirmDialog(
                     dialog,
                     "Delete '${selected.draft.name}'?",
@@ -241,7 +249,7 @@ internal class HostCatalogController(
             }
         }
         connectButton.addActionListener {
-            val selected = list.selectedValue ?: return@addActionListener
+            val selected = selectedHost(state) ?: return@addActionListener
             val hosts = currentHosts(state)
             val jumpProfileId = selected.draft.jumpHostProfileId
             val jumpHost = jumpProfileId?.let { profileId -> hosts.firstOrNull { it.profileId == profileId } }
@@ -281,8 +289,7 @@ internal class HostCatalogController(
             operation = catalog::listHosts,
             success = { hosts ->
                 if (!state.dialog.isDisplayable) return@submit
-                state.model.clear()
-                hosts.forEach(state.model::addElement)
+                rebuildTree(state, hosts)
                 setBusy(state, false, if (hosts.isEmpty()) "No saved hosts." else "${hosts.size} saved hosts")
             },
             failure = { showCatalogFailure(state, it) },
@@ -303,8 +310,7 @@ internal class HostCatalogController(
             },
             success = { hosts ->
                 if (!state.dialog.isDisplayable) return@submit
-                state.model.clear()
-                hosts.forEach(state.model::addElement)
+                rebuildTree(state, hosts)
                 setBusy(state, false, if (hosts.isEmpty()) "No saved hosts." else "${hosts.size} saved hosts")
                 afterSave?.invoke()
             },
@@ -347,7 +353,7 @@ internal class HostCatalogController(
         state.status.text = message
         state.buttons.forEach { it.isEnabled = !busy }
         if (!busy) {
-            val selected = state.list.selectedValue != null
+            val selected = selectedHost(state) != null
             state.buttons.drop(1).forEach { it.isEnabled = selected }
         }
     }
@@ -367,13 +373,69 @@ internal class HostCatalogController(
         )
     }
 
-    private fun currentHosts(state: DialogState): List<SavedHost> =
-        (0 until state.model.size).map(state.model::getElementAt)
+    private fun currentHosts(state: DialogState): List<SavedHost> = state.hosts
+
+    private fun selectedHost(state: DialogState): SavedHost? =
+        (state.tree.lastSelectedPathComponent as? DefaultMutableTreeNode)?.userObject as? SavedHost
+
+    private fun selectedGroup(state: DialogState): String? =
+        ((state.tree.lastSelectedPathComponent as? DefaultMutableTreeNode)?.userObject as? HostGroupNode)?.name
+
+    private fun rebuildTree(state: DialogState, hosts: List<SavedHost>) {
+        val expanded = captureExpandedGroups(state)
+        val selectedProfileId = selectedHost(state)?.profileId
+        val firstLoad = state.firstLoad
+        val model = state.tree.model as DefaultTreeModel
+        val root = HostCatalogTree.rootNode(hosts)
+        model.setRoot(root)
+        state.hosts = hosts
+        state.firstLoad = false
+        for (index in 0 until root.childCount) {
+            val groupNode = root.getChildAt(index) as DefaultMutableTreeNode
+            val group = groupNode.userObject as? HostGroupNode ?: continue
+            if (firstLoad || group.name in expanded) {
+                state.tree.expandPath(TreePath(arrayOf(root, groupNode)))
+            }
+        }
+        val target = selectedProfileId?.let { profileId -> findHostNode(root, profileId) }
+        if (target != null) {
+            val path = TreePath(target.path)
+            path.parentPath?.let(state.tree::expandPath)
+            state.tree.selectionPath = path
+        } else {
+            state.tree.clearSelection()
+        }
+        state.expandedGroups = captureExpandedGroups(state)
+    }
+
+    private fun captureExpandedGroups(state: DialogState): Set<String> {
+        val tree = state.tree
+        val groups = mutableSetOf<String>()
+        for (row in 0 until tree.rowCount) {
+            val path = tree.getPathForRow(row) ?: continue
+            val node = path.lastPathComponent as? DefaultMutableTreeNode ?: continue
+            val group = node.userObject as? HostGroupNode ?: continue
+            if (group.name != null && tree.isExpanded(path)) groups.add(group.name)
+        }
+        return groups
+    }
+
+    private fun findHostNode(root: DefaultMutableTreeNode, profileId: UUID): DefaultMutableTreeNode? {
+        val pending = ArrayDeque<DefaultMutableTreeNode>()
+        pending.add(root)
+        while (pending.isNotEmpty()) {
+            val node = pending.removeLast()
+            if ((node.userObject as? SavedHost)?.profileId == profileId) return node
+            for (index in 0 until node.childCount) pending.add(node.getChildAt(index) as DefaultMutableTreeNode)
+        }
+        return null
+    }
 
     private fun showHostEditor(
         owner: Component,
         existing: SavedHost?,
         availableHosts: List<SavedHost>,
+        defaultGroup: String? = null,
     ): HostEditorResult? {
         val name = JTextField(existing?.draft?.name.orEmpty(), 24)
         val host = JTextField(existing?.draft?.endpoint?.host.orEmpty(), 24)
@@ -409,7 +471,7 @@ internal class HostCatalogController(
                 }
             }
         }
-        val group = JTextField(existing?.draft?.group.orEmpty(), 24)
+        val group = JTextField(existing?.draft?.group ?: defaultGroup.orEmpty(), 24)
         val tags = JTextField(existing?.draft?.tags?.joinToString(", ").orEmpty(), 24)
         val storeAvailable = credentialStoreAvailable()
         val password = JPasswordField(24)
@@ -567,14 +629,17 @@ internal class HostCatalogController(
         }
     }
 
-    private data class DialogState(
+    private class DialogState(
         val dialog: JDialog,
-        val model: DefaultListModel<SavedHost>,
-        val list: JList<SavedHost>,
+        val tree: JTree,
         val status: JLabel,
         val buttons: List<JButton>,
-        var busy: Boolean = false,
-    )
+    ) {
+        var busy = false
+        var hosts: List<SavedHost> = emptyList()
+        var expandedGroups: Set<String> = emptySet()
+        var firstLoad = true
+    }
 
     companion object {
         private fun JPanel.addField(row: Int, label: String, field: Component) {

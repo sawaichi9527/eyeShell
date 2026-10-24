@@ -9,13 +9,27 @@ import io.github.sawaichi9527.eyeshell.storage.HostCatalog
 import io.github.sawaichi9527.eyeshell.storage.HostDraft
 import io.github.sawaichi9527.eyeshell.storage.SavedAuthenticationMethod
 import io.github.sawaichi9527.eyeshell.storage.SavedHost
+import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
+import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
+import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputSnapshot
+import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
+import io.github.sawaichi9527.eyeshell.terminal.TerminalView
+import java.awt.Component
+import java.awt.Container
+import java.awt.Window
 import java.util.concurrent.CountDownLatch
 import java.lang.reflect.Modifier
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.UUID
+import javax.swing.JButton
+import javax.swing.JDialog
+import javax.swing.JLabel
+import javax.swing.JPanel
+import javax.swing.JTree
 import javax.swing.SwingUtilities
+import javax.swing.tree.DefaultMutableTreeNode
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -267,6 +281,147 @@ class HostCatalogControllerTest {
         } finally {
             controller.close()
         }
+    }
+
+    @Test
+    fun `the saved hosts dialog groups hosts and enables host actions only for a host row`() {
+        val catalog = TestCatalog(
+            listOf(
+                host(1, "direct"),
+                host(2, "alpha", "Lab"),
+                host(3, "beta", "Lab"),
+                host(4, "solo", "Zeta"),
+            ),
+        )
+        val window = AtomicReference<EyeShellWindow>()
+        val controller = AtomicReference<HostCatalogController>()
+        try {
+            SwingUtilities.invokeAndWait {
+                val owner = EyeShellWindow(terminalViewFactory = { NoopTerminalView() })
+                val created = HostCatalogController(catalog, UnavailablePasswordCredentialStore()) { _, _ -> true }
+                window.set(owner)
+                controller.set(created)
+                created.open(owner)
+            }
+
+            val dialog = awaitCatalogDialog()
+            val tree = findComponent(dialog, "hostCatalogTree") as JTree
+
+            SwingUtilities.invokeAndWait {
+                val root = tree.model.root as DefaultMutableTreeNode
+                assertEquals(3, root.childCount)
+                val direct = root.getChildAt(0) as DefaultMutableTreeNode
+                assertTrue(direct.userObject is SavedHost)
+                assertEquals("direct", (direct.userObject as SavedHost).draft.name)
+
+                val labRow = rowOfGroup(tree, "Lab")
+                val zetaRow = rowOfGroup(tree, "Zeta")
+                assertEquals("Lab (2)", renderedLabel(tree, labRow))
+                assertEquals("Zeta (1)", renderedLabel(tree, zetaRow))
+
+                tree.setSelectionRow(labRow)
+                assertFalse(findButton(dialog, "Connect").isEnabled)
+                assertFalse(findButton(dialog, "Edit...").isEnabled)
+                assertFalse(findButton(dialog, "Delete").isEnabled)
+                assertTrue(findButton(dialog, "Add...").isEnabled)
+
+                tree.setSelectionRow(0)
+                assertTrue(findButton(dialog, "Connect").isEnabled)
+                assertTrue(findButton(dialog, "Edit...").isEnabled)
+                assertTrue(findButton(dialog, "Delete").isEnabled)
+            }
+        } finally {
+            SwingUtilities.invokeAndWait {
+                controller.get()?.close()
+                window.get()?.dispose()
+            }
+        }
+    }
+
+    private fun awaitCatalogDialog(): JDialog {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (System.nanoTime() < deadline) {
+            var dialog: JDialog? = null
+            SwingUtilities.invokeAndWait {
+                dialog = Window.getWindows()
+                    .filterIsInstance<JDialog>()
+                    .firstOrNull { window ->
+                        window.name == "hostCatalogDialog" &&
+                            (findComponent(window, "hostCatalogTree") as? JTree)?.rowCount?.let { it > 0 } == true
+                    }
+            }
+            dialog?.let { return it }
+            Thread.sleep(25)
+        }
+        error("The saved hosts dialog did not finish loading")
+    }
+
+    private fun findComponent(root: Container, name: String): Component? {
+        if (root.name == name) return root
+        for (child in root.components) {
+            if (child.name == name) return child
+            if (child is Container) findComponent(child, name)?.let { return it }
+        }
+        return null
+    }
+
+    private fun findButton(root: Container, text: String): JButton {
+        val found = mutableListOf<JButton>()
+        collectButtons(root, text, found)
+        return found.singleOrNull() ?: error("Expected exactly one '$text' button, found ${found.size}")
+    }
+
+    private fun collectButtons(root: Container, text: String, found: MutableList<JButton>) {
+        for (child in root.components) {
+            if (child is JButton && child.text == text) found += child
+            if (child is Container) collectButtons(child, text, found)
+        }
+    }
+
+    private fun rowOfGroup(tree: JTree, name: String): Int {
+        for (row in 0 until tree.rowCount) {
+            val node = tree.getPathForRow(row).lastPathComponent as? DefaultMutableTreeNode ?: continue
+            if ((node.userObject as? HostGroupNode)?.name == name) return row
+        }
+        error("Group '$name' is not visible in the tree")
+    }
+
+    private fun renderedLabel(tree: JTree, row: Int): String {
+        val path = tree.getPathForRow(row)
+        val renderer = tree.cellRenderer.getTreeCellRendererComponent(
+            tree,
+            path.lastPathComponent,
+            false,
+            tree.isExpanded(path),
+            tree.model.isLeaf(path.lastPathComponent),
+            row,
+            false,
+        ) as JLabel
+        return renderer.text
+    }
+
+    private fun host(id: Long, name: String, group: String? = null) = SavedHost(
+        id,
+        UUID(id, 0),
+        HostDraft(
+            name = name,
+            endpoint = SshEndpoint("host$id.test", 22, "operator"),
+            authenticationMethod = SavedAuthenticationMethod.PASSWORD,
+            group = group,
+        ),
+    )
+
+    private class NoopTerminalView : TerminalView {
+        override val component = JPanel()
+        override fun attach(session: TerminalSession) {}
+        override fun captureAllOutput() = TerminalOutputSnapshot { }
+        override fun setContextActions(actions: TerminalContextActions) {}
+        override fun selectVisible() {}
+        override fun selectAllOutput() {}
+        override fun showSearch() {}
+        override fun setHighlightRules(rules: List<TerminalHighlightRule>) {}
+        override fun clearScrollback() {}
+        override fun close() {}
     }
 
     private fun editor(host: SavedHost, password: CharArray?, clear: Boolean) =
