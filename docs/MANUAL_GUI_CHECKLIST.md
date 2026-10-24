@@ -19,7 +19,7 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 ## 1. Launch and layout
 
 - The window titled `eyeShell` opens with the Monitor panel on the left, session tabs on the right, and the bottom dock collapsed.
-- `+` on the tab strip behaves exactly like `Connect...` and is disabled while a connection is in progress.
+- `+` on the tab strip behaves exactly like `Connect...`, is disabled while a connection is in progress, and sits immediately after the last tab.
 - Closing the last tab restores the `Start` tab.
 
 ## 2. Saved hosts and folders
@@ -29,6 +29,9 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 - Selecting a host enables `Edit...`, `Delete`, and `Connect`.
 - Expanding/collapsing folders survives an add or edit; the edited host stays selected (its folder expands if the host moved).
 - Saving a password works, `Clear saved password` removes it, and leaving the field blank keeps the previous password.
+- With the OS keyring locked, saving a password shows the desktop unlock prompt; after unlocking, the password is stored and is retrieved on the next launch without retyping.
+- With the OS keyring locked, the Password field is still editable, the hint says the keyring is locked, and the entered password is used by the next `Connect` without retyping (it is kept only in memory).
+- `Connect after saving` on a new host saves it and starts the connection confirmation for that host.
 - A folder with no remaining hosts disappears after its last host moves away or is deleted.
 
 ## 3. Connection flows
@@ -47,7 +50,7 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 ## 5. Session lifecycle
 
 - Typing `exit` marks the tab `Exited` and keeps the scrollback visible.
-- Pressing Enter in the exited session opens a new tab with the original endpoint/authentication and preserves the old tab.
+- Pressing Enter in the exited session opens a new tab with the original endpoint/authentication, preserves the old tab, and reuses the password typed for that session without asking again.
 - Connection failures show the full cause chain, and monitor/SFTP failures never abort terminal attachment.
 
 ## 6. Terminal behaviour
@@ -67,7 +70,13 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 
 ## 8. Monitoring
 
+- Before connecting, the left panel shows the metric skeleton (Host, Address, OS, Kernel, Uptime, Load, CPU, Memory, Swap, Network, Filesystems, Processes) with `—` values, a `Not connected` status, and the Java/OS footer; no fabricated numbers appear.
+- `OS` shows the distribution from `/etc/os-release` (for example `Ubuntu 26.04.1 LTS`) and `Kernel` shows the kernel release on its own row.
 - The panel shows connected address, CPU, memory, swap, load, network rates, filesystems, and top processes.
+- Clicking the `Host`, `Address`, `OS`, or `Uptime` label (or its value) copies that value to the clipboard and briefly tints it green; there is no separate copy button.
+- Shrinking the window height makes the left panel scroll vertically with a thin scrollbar instead of clipping the Processes section.
+- The network section per-interface selector defaults to the interface that owns the connected address; switching it re-renders the Down/Up rates for that interface.
+- `Load` shows the 1/5/15-minute averages above CPU; hovering explains it, and it turns amber when the 1-minute value exceeds the CPU core count.
 - Switching tabs retargets monitoring; closing a tab stops it and resets the panel.
 - A host without `/proc` (or a non-Linux host) degrades gracefully with a clear message.
 

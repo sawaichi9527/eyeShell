@@ -711,8 +711,10 @@ M1F Current Session baseline：
 /proc/diskstats
 /proc/<pid>/stat
 df -P
+ip -o -4 addr show
 ss -H
 uname
+/etc/os-release
 ```
 
 遠端命令固定：
