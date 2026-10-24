@@ -130,8 +130,12 @@ class MonitorIntegrationTest {
             val text = renderText(panel)
             assertTrue(text.contains("lab-server"))
             assertTrue(text.contains("127.0.0.1"))
+            assertTrue(text.contains("Ubuntu 26.04.1 LTS"))
+            assertTrue(text.contains("6.8.0-45-generic"))
             assertTrue(text.contains("CPU"))
             assertTrue(text.contains("Memory"))
+            val selector = findByName(panel, "monitorInterfaceSelector") as javax.swing.JComboBox<*>
+            assertEquals("eth0", selector.selectedItem, "The interface owning the connected address must be selected")
             val processRows = renderTable(panel)
             assertTrue(processRows.contains("some-daemon"))
         } finally {
@@ -162,6 +166,14 @@ class MonitorIntegrationTest {
             if (component is java.awt.Container) builder.append(renderTable(component))
         }
         return builder.toString()
+    }
+
+    private fun findByName(container: java.awt.Container, name: String): java.awt.Component? {
+        container.components.forEach { component ->
+            if (component.name == name) return component
+            if (component is java.awt.Container) findByName(component, name)?.let { return it }
+        }
+        return null
     }
 
     private class ScriptedMonitorCommandFactory : CommandFactory {
@@ -211,7 +223,13 @@ class MonitorIntegrationTest {
 
     companion object {
         private const val USERNAME = "test-user"
-        private val SYSTEM_INFO = "Linux lab-server 6.8.0-45-generic #1 SMP x86_64 GNU/Linux\n1000 2000\n"
+        private val SYSTEM_INFO = """
+            Linux lab-server 6.8.0-45-generic #1 SMP x86_64 GNU/Linux
+            1000 2000
+            PRETTY_NAME="Ubuntu 26.04.1 LTS"
+            NAME="Ubuntu"
+            VERSION="26.04.1 LTS (Resolute Raccoon)"
+        """.trimIndent() + "\n"
         private val SAMPLE = """
             cpu  100 0 100 800 50 0 0 0 0 0
             cpu0 50 0 50 400 25 0 0 0 0 0
@@ -231,6 +249,8 @@ class MonitorIntegrationTest {
             /dev/sdb1       1000000000  800000000 200000000      80% /data
             ${"\u000C"}1234 204800  12.5 some-daemon
             5678  51200   3.2 sshd
+            ${"\u000C"}2: eth0    inet 127.0.0.1/8 scope host eth0\       valid_lft forever preferred_lft forever
+            3: eth1    inet 10.0.0.9/24 scope global eth1\       valid_lft forever preferred_lft forever
         """.trimIndent()
     }
 }

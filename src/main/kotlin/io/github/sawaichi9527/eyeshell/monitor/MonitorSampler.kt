@@ -63,6 +63,9 @@ class MonitorSampler(
         val load = sections.getOrNull(2)?.let(MonitorParsers::parseLoad)
         val filesystems = sections.getOrNull(4)?.let(MonitorParsers::parseFilesystems).orEmpty()
         val processes = sections.getOrNull(5)?.let(MonitorParsers::parseProcesses).orEmpty()
+        val interfaceAddresses = sections.getOrNull(6)
+            ?.let(MonitorParsers::parseInterfaceAddresses)
+            .orEmpty()
         if (cpu == null && memory == null && load == null && network == null) {
             return MonitorSnapshot(endpoint = hostSession.endpoint.host, unsupported = true)
         }
@@ -74,7 +77,7 @@ class MonitorSampler(
             memory = memory,
             swap = swap,
             load = load,
-            network = network,
+            network = network?.copy(interfaceAddresses = interfaceAddresses),
             filesystems = filesystems.take(processLimit),
             processes = processes.take(processLimit),
         )

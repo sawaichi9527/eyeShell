@@ -1,167 +1,680 @@
 package io.github.sawaichi9527.eyeshell.ui
 
+import io.github.sawaichi9527.eyeshell.monitor.FilesystemUsage
 import io.github.sawaichi9527.eyeshell.monitor.MonitorSnapshot
+import io.github.sawaichi9527.eyeshell.monitor.NetworkInterfaceUsage
 import io.github.sawaichi9527.eyeshell.monitor.NetworkUsage
+import io.github.sawaichi9527.eyeshell.monitor.ProcessUsage
 import java.awt.BorderLayout
+import java.awt.Color
+import java.awt.Component
+import java.awt.Cursor
 import java.awt.Dimension
-import java.awt.FlowLayout
 import java.awt.Font
+import java.awt.GridBagConstraints
+import java.awt.GridBagLayout
+import java.awt.Insets
+import java.awt.Rectangle
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import java.text.DecimalFormat
+import javax.swing.BorderFactory
 import javax.swing.Box
-import javax.swing.BoxLayout
+import javax.swing.JComboBox
+import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.JProgressBar
+import javax.swing.JScrollPane
 import javax.swing.JTable
+import javax.swing.ScrollPaneConstants
+import javax.swing.Scrollable
+import javax.swing.SwingConstants
+import javax.swing.SwingUtilities
+import javax.swing.Timer
+import javax.swing.UIManager
+import javax.swing.table.DefaultTableCellRenderer
 import javax.swing.table.DefaultTableModel
 
+/**
+ * Left-hand live monitor sidebar.
+ *
+ * Layout follows the FinalShell reference: a compact two-column metric grid, coloured meters with
+ * the percentage inside the bar, a muted detail line for absolute values, then network,
+ * filesystem, and process sections. Every update rebuilds the grid so no stale value can survive
+ * a snapshot that no longer carries that metric.
+ */
 class MonitorPanel : JPanel(BorderLayout()) {
-    private val content = JPanel().apply {
-        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+    private val content = ScrollableContent()
+    private val contentScroll = JScrollPane(content).apply {
+        name = "monitorScroll"
+        border = BorderFactory.createEmptyBorder()
+        isOpaque = false
+        viewport.isOpaque = false
+        horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+        verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_AS_NEEDED
+        verticalScrollBar.apply {
+            putClientProperty("JScrollBar.showButtons", false)
+            preferredSize = Dimension(THIN_SCROLLBAR_WIDTH, 0)
+            unitIncrement = 16
+        }
     }
-    private val hostname = sectionLabel()
-    private val address = sectionLabel()
-    private val system = sectionLabel()
-    private val uptime = sectionLabel()
-    private val load = sectionLabel()
-    private val cpuValue = sectionLabel()
-    private val cpuBar = bar()
-    private val memoryValue = sectionLabel()
-    private val memoryBar = bar()
-    private val swapValue = sectionLabel()
-    private val swapBar = bar()
-    private val networkValue = sectionLabel()
-    private val processTable = JTable(DefaultTableModel(arrayOf("Name", "Mem", "CPU"), 0))
+    private var selectedInterface: String? = null
+    private var lastSnapshot: MonitorSnapshot? = null
+    private val processModel = ReadOnlyTableModel(arrayOf("Name", "Mem", "CPU"))
+    private val processTable = JTable(processModel).apply {
+        name = "monitorProcessTable"
+        autoResizeMode = JTable.AUTO_RESIZE_ALL_COLUMNS
+        tableHeader.reorderingAllowed = false
+        rowSelectionAllowed = false
+        cellSelectionEnabled = false
+        setShowGrid(false)
+        intercellSpacing = Dimension(0, 2)
+        rowHeight = 19
+        isFocusable = false
+        columnModel.getColumn(0).apply {
+            preferredWidth = 108
+            cellRenderer = alignedCellRenderer(SwingConstants.LEFT)
+            headerRenderer = alignedHeaderRenderer(SwingConstants.LEFT)
+        }
+        columnModel.getColumn(1).apply {
+            preferredWidth = 74
+            cellRenderer = alignedCellRenderer(SwingConstants.RIGHT)
+            headerRenderer = alignedHeaderRenderer(SwingConstants.RIGHT)
+        }
+        columnModel.getColumn(2).apply {
+            preferredWidth = 48
+            cellRenderer = alignedCellRenderer(SwingConstants.RIGHT)
+            headerRenderer = alignedHeaderRenderer(SwingConstants.RIGHT)
+        }
+    }
 
     init {
         name = "monitorPanel"
         getAccessibleContext().accessibleName = "Monitor"
         minimumSize = Dimension(190, 0)
         preferredSize = Dimension(230, 0)
-        content.border = javax.swing.BorderFactory.createEmptyBorder(12, 12, 12, 12)
-        add(content, BorderLayout.CENTER)
+        content.border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
+        add(contentScroll, BorderLayout.CENTER)
         resetToIdle()
+    }
+
+    override fun addNotify() {
+        super.addNotify()
+        // The LAF finalises fonts when the window is installed, so rebuild the idle skeleton once
+        // the panel is displayable to keep the type scale identical to the connected state.
+        if (lastSnapshot == null) resetToIdle()
     }
 
     fun resetToIdle() {
         content.removeAll()
-        content.add(sectionTitle("Monitor"))
-        content.add(Box.createVerticalStrut(6))
-        content.add(sectionLabel("No active session."))
-        content.add(Box.createVerticalStrut(4))
-        content.add(sectionLabel("Connect to a host to view live metrics."))
-        content.add(Box.createVerticalGlue())
+        selectedInterface = null
+        lastSnapshot = null
+        var row = addTopSpacer(0)
+        row = addTitle(row)
+        row = addSeparator(row)
+        row = addDetail(row, "Host", EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, "Address", EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, "OS", EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, "Kernel", EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, "Uptime", EMPTY_VALUE, tooltip = null)
+        row = addSeparator(row)
+        row = addDetail(row, "Load", EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, "CPU", EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, "Memory", EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, "Swap", EMPTY_VALUE, tooltip = null)
+        row = addSeparator(row)
+        row = addHeading(row, "Network")
+        row = addDetail(row, "Down", EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, "Up", EMPTY_VALUE, tooltip = null)
+        row = addSeparator(row)
+        row = addHeading(row, "Filesystems")
+        row = addSpanning(row, mutedLabel(EMPTY_VALUE), top = 0, bottom = 2)
+        row = addSeparator(row)
+        row = addHeading(row, "Processes")
+        row = addSpanning(row, mutedLabel(EMPTY_VALUE), top = 0, bottom = 2)
+        row = addSeparator(row)
+        row = addSpanning(
+            row,
+            JLabel("●  ${UiText.IDLE_STATUS}").apply { foreground = mutedForeground() },
+            top = 2,
+            bottom = 1,
+        )
+        row = addSpanning(row, mutedLabel(UiText.IDLE_HINT), top = 0, bottom = 2)
+        row = addSpanning(row, mutedLabel(runtimeSummary()), top = 2, bottom = 2)
+        addVerticalFiller(row)
         revalidate()
         repaint()
+    }
+
+    private fun runtimeSummary(): String = buildString {
+        append("Java ").append(System.getProperty("java.version", "?"))
+        append("  ·  ").append(System.getProperty("os.name", "?"))
+        append(' ').append(System.getProperty("os.arch", "?"))
     }
 
     fun update(snapshot: MonitorSnapshot) {
         content.removeAll()
-        content.add(sectionTitle("Monitor"))
-        content.add(Box.createVerticalStrut(8))
+        lastSnapshot = snapshot
+        var row = addTopSpacer(0)
+        row = addTitle(row)
+        row = addSeparator(row)
 
+        row = addDetail(row, "Host", snapshot.system?.hostname?.takeIf(String::isNotEmpty) ?: "-", copyable = true)
+        snapshot.endpoint?.let { endpoint ->
+            row = addDetail(row, "Address", displayAddress(endpoint), copyable = true)
+        }
         snapshot.system?.let { systemInfo ->
-            hostname.text = systemInfo.hostname
-            system.text = "${systemInfo.operatingSystem} ${systemInfo.kernel}"
-            uptime.text = "Uptime: ${formatUptime(systemInfo.uptimeSeconds)}"
+            row = addDetail(
+                row,
+                "OS",
+                systemInfo.distribution.ifBlank { systemInfo.operatingSystem },
+                copyable = true,
+            )
+            row = addDetail(row, "Kernel", systemInfo.kernel, copyable = true)
+            row = addDetail(row, "Uptime", formatUptime(systemInfo.uptimeSeconds), copyable = true)
         }
-        address.text = snapshot.endpoint.orEmpty()
-        content.add(field("Host", hostname))
-        if (snapshot.endpoint != null) content.add(field("Address", address))
-        content.add(field("OS", system))
-        content.add(field("Uptime", uptime))
-        content.add(Box.createVerticalStrut(6))
 
+        if (snapshot.cpu != null || snapshot.memory != null || snapshot.swapPresent || snapshot.load != null) {
+            row = addSeparator(row)
+        }
+        snapshot.load?.let { load ->
+            val cores = snapshot.cpu?.cores ?: 0
+            row = addDetail(
+                row = row,
+                label = "Load",
+                value = String.format("%.2f %.2f %.2f", load.oneMinute, load.fiveMinute, load.fifteenMinute),
+                tooltip = UiText.LOAD_TOOLTIP,
+                warning = cores > 0 && load.oneMinute > cores,
+            )
+        }
         snapshot.cpu?.let { cpu ->
-            cpuValue.text = "CPU ${formatPercent(cpu.percent)}"
-            cpuBar.value = cpu.percent.toInt()
+            row = addMeter(
+                row = row,
+                label = "CPU",
+                percent = cpu.percent,
+                color = CPU_COLOR,
+                detail = cpu.cores.takeIf { it > 0 }?.let { cores -> if (cores == 1) "1 core" else "$cores cores" },
+            )
         }
-        content.add(field("CPU", cpuValue))
-        content.add(cpuBar)
-        content.add(Box.createVerticalStrut(6))
-
         snapshot.memory?.let { memory ->
-            memoryValue.text = "${formatBytes(memory.usedBytes)} / ${formatBytes(memory.totalBytes)} (${formatPercent(memory.percent)})"
-            memoryBar.value = memory.percent.toInt()
+            row = addMeter(
+                row = row,
+                label = "Memory",
+                percent = memory.percent,
+                color = MEMORY_COLOR,
+                detail = "${formatSize(memory.usedBytes)} / ${formatSize(memory.totalBytes)}",
+            )
         }
-        content.add(field("Memory", memoryValue))
-        content.add(memoryBar)
-        content.add(Box.createVerticalStrut(6))
-
         if (snapshot.swapPresent) {
             snapshot.swap?.let { swap ->
-                swapValue.text = "${formatBytes(swap.usedBytes)} / ${formatBytes(swap.totalBytes)} (${formatPercent(swap.percent)})"
-                swapBar.value = swap.percent.toInt()
+                row = addMeter(
+                    row = row,
+                    label = "Swap",
+                    percent = swap.percent,
+                    color = SWAP_COLOR,
+                    detail = "${formatSize(swap.usedBytes)} / ${formatSize(swap.totalBytes)}",
+                )
             }
-            content.add(field("Swap", swapValue))
-            content.add(swapBar)
-            content.add(Box.createVerticalStrut(6))
         }
 
-        snapshot.load?.let { load ->
-            this.load.text = String.format("%.2f %.2f %.2f", load.oneMinute, load.fiveMinute, load.fifteenMinute)
-            content.add(field("Load", this.load))
-            content.add(Box.createVerticalStrut(6))
+        snapshot.network?.let { network ->
+            row = addSeparator(row)
+            row = renderNetwork(row, network, snapshot.endpoint)
         }
 
-        snapshot.network?.let(::renderNetwork)
+        if (snapshot.filesystems.isNotEmpty()) {
+            row = addSeparator(row)
+            row = addHeading(row, "Filesystems")
+            row = renderFilesystems(row, snapshot.filesystems)
+        }
+
         if (snapshot.processes.isNotEmpty()) {
-            content.add(Box.createVerticalStrut(6))
-            renderProcesses(snapshot.processes.take(MAX_PROCESS_ROWS))
+            row = addSeparator(row)
+            row = addHeading(row, "Processes")
+            row = renderProcesses(row, snapshot.processes)
         }
 
         if (snapshot.unsupported) {
-            content.add(Box.createVerticalStrut(8))
-            content.add(sectionLabel("Metrics unsupported on this host."))
+            row = addSeparator(row)
+            row = addSpanning(row, mutedLabel("Metrics unsupported on this host."), top = 2, bottom = 2)
         }
-        content.add(Box.createVerticalGlue())
+        addVerticalFiller(row)
         revalidate()
         repaint()
     }
 
-    private fun renderNetwork(network: NetworkUsage) {
-        networkValue.text = "↓ ${formatBytes(network.receiveBytesPerSecond)}/s  ↑ ${formatBytes(network.transmitBytesPerSecond)}/s"
-        content.add(field("Network", networkValue))
+    private fun renderNetwork(row: Int, network: NetworkUsage, endpoint: String?): Int {
+        val interfaces = network.interfaces.sortedBy { it.name }
+        if (interfaces.isEmpty()) {
+            var current = addDetail(row, "Down", formatRate(network.receiveBytesPerSecond))
+            current = addDetail(current, "Up", formatRate(network.transmitBytesPerSecond))
+            return current
+        }
+        val known = interfaces.firstOrNull { it.name == selectedInterface }
+        val active = known ?: defaultInterface(network, interfaces, endpoint)
+        if (known == null) selectedInterface = active?.name
+
+        var current = addHeadingWithControl(row, "Network", interfaceSelector(network, interfaces, active))
+        current = addDetail(current, "Down", formatRate(active?.receiveBytesPerSecond ?: network.receiveBytesPerSecond))
+        current = addDetail(current, "Up", formatRate(active?.transmitBytesPerSecond ?: network.transmitBytesPerSecond))
+        return current
     }
 
-    private fun renderProcesses(processes: List<io.github.sawaichi9527.eyeshell.monitor.ProcessUsage>) {
-        content.add(sectionLabel("Processes"))
-        val model = processTable.model as DefaultTableModel
-        model.setRowCount(0)
-        processes.forEach { process ->
-            model.addRow(arrayOf<Any>(
+    private fun interfaceSelector(
+        network: NetworkUsage,
+        interfaces: List<NetworkInterfaceUsage>,
+        active: NetworkInterfaceUsage?,
+    ): JComboBox<String> = JComboBox(interfaces.map { it.name }.toTypedArray()).apply {
+        name = "monitorInterfaceSelector"
+        selectedItem = active?.name
+        isFocusable = false
+        font = baseFont()
+        preferredSize = Dimension(96, 22)
+        toolTipText = active?.let { iface ->
+            network.interfaceAddresses[iface.name]?.joinToString(", ")?.takeIf(String::isNotEmpty)
+                ?: "Show this interface's rates"
+        } ?: "Show this interface's rates"
+        addActionListener {
+            val name = selectedItem as? String ?: return@addActionListener
+            if (name == selectedInterface) return@addActionListener
+            selectedInterface = name
+            val snapshot = lastSnapshot ?: return@addActionListener
+            SwingUtilities.invokeLater { update(snapshot) }
+        }
+    }
+
+    private fun defaultInterface(
+        network: NetworkUsage,
+        interfaces: List<NetworkInterfaceUsage>,
+        endpoint: String?,
+    ): NetworkInterfaceUsage? {
+        val candidates = interfaces.filter { it.name != LOOPBACK_INTERFACE }.ifEmpty { interfaces }
+        if (candidates.isEmpty()) return null
+        val target = endpoint?.let(::displayAddress)
+        if (!target.isNullOrEmpty()) {
+            candidates.firstOrNull { iface ->
+                network.interfaceAddresses[iface.name]?.contains(target) == true
+            }?.let { return it }
+        }
+        return candidates.maxByOrNull { it.receiveBytesPerSecond + it.transmitBytesPerSecond }
+    }
+
+    private fun copyToClipboard(text: String): Boolean = try {
+        Toolkit.getDefaultToolkit().systemClipboard.setContents(StringSelection(text), null)
+        true
+    } catch (_: Exception) {
+        false
+    }
+
+    private fun displayAddress(endpoint: String): String {
+        val trimmed = endpoint.trim()
+        if (trimmed.startsWith("[") && trimmed.contains(']')) {
+            return trimmed.substring(1, trimmed.indexOf(']'))
+        }
+        val colon = trimmed.lastIndexOf(':')
+        val looksLikePort = colon > 0 &&
+            trimmed.count { it == ':' } == 1 &&
+            trimmed.substring(colon + 1).isNotEmpty() &&
+            trimmed.substring(colon + 1).all(Char::isDigit)
+        return if (looksLikePort) trimmed.substring(0, colon) else trimmed
+    }
+
+    private fun renderFilesystems(row: Int, filesystems: List<FilesystemUsage>): Int {
+        val grid = JPanel(GridBagLayout())
+        var fileRow = 0
+        filesystems.take(MAX_FILESYSTEM_ROWS).forEach { filesystem ->
+            val mount = elide(filesystem.mountPoint, MAX_MOUNT_CHARS).let { text ->
+                JLabel(text).apply { toolTipText = filesystem.mountPoint }
+            }
+            grid.add(mount, tableConstraints(0, fileRow, weightx = 1.0, anchor = GridBagConstraints.WEST))
+            grid.add(
+                JLabel(formatSize(filesystem.usedBytes)).apply { horizontalAlignment = SwingConstants.RIGHT },
+                tableConstraints(1, fileRow, weightx = 0.0, anchor = GridBagConstraints.EAST),
+            )
+            grid.add(
+                JLabel(formatPercent(filesystem.percent)).apply {
+                    horizontalAlignment = SwingConstants.RIGHT
+                    foreground = mutedForeground()
+                },
+                tableConstraints(2, fileRow, weightx = 0.0, anchor = GridBagConstraints.EAST),
+            )
+            fileRow++
+        }
+        val placed = addSpanning(row, grid, top = 0, bottom = 4)
+        if (filesystems.size > MAX_FILESYSTEM_ROWS) {
+            return addSpanning(
+                placed,
+                mutedLabel("and ${filesystems.size - MAX_FILESYSTEM_ROWS} more"),
+                top = 0,
+                bottom = 2,
+            )
+        }
+        return placed
+    }
+
+    private fun renderProcesses(row: Int, processes: List<ProcessUsage>): Int {
+        processModel.setRowCount(0)
+        processes.take(MAX_PROCESS_ROWS).forEach { process ->
+            processModel.addRow(arrayOf<Any>(
                 process.name,
-                formatBytes(process.memoryBytes),
+                formatSize(process.memoryBytes),
                 formatPercent(process.cpuPercent),
             ))
         }
-        processTable.setRowHeight(18)
-        content.add(processTable)
+        val headerHeight = processTable.tableHeader.preferredSize.height
+        val scrollPane = JScrollPane(processTable).apply {
+            border = BorderFactory.createEmptyBorder()
+            isOpaque = false
+            viewport.isOpaque = false
+            horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+            verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER
+            preferredSize = Dimension(0, processTable.rowHeight * processModel.rowCount + headerHeight + 2)
+        }.apply {
+            minimumSize = preferredSize
+        }
+        return addSpanning(row, scrollPane, top = 0, bottom = 2)
     }
 
-    private fun sectionTitle(text: String): JLabel = JLabel(text).apply {
-        alignmentX = 0f
-        font = font.deriveFont(Font.BOLD, 14f)
+    private fun addTopSpacer(row: Int): Int {
+        content.add(
+            Box.createVerticalStrut(TOP_SPACER_HEIGHT),
+            constraints(gridx = 0, gridy = row, gridwidth = 2, weightx = 1.0, fill = GridBagConstraints.HORIZONTAL),
+        )
+        return row + 1
     }
 
-    private fun sectionLabel(text: String = ""): JLabel = JLabel(text).apply {
-        alignmentX = 0f
+    private fun addTitle(row: Int): Int {
+        content.add(
+            JLabel("Monitor").apply {
+                font = titleFont()
+            },
+            constraints(gridx = 0, gridy = row, gridwidth = 2, weightx = 1.0, fill = GridBagConstraints.HORIZONTAL),
+        )
+        return row + 1
     }
 
-    private fun field(label: String, value: JLabel): JPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
-        isOpaque = false
-        alignmentX = 0f
-        add(JLabel("$label: "))
-        add(value)
+    private fun addSeparator(row: Int): Int {
+        content.add(
+            JPanel().apply {
+                isOpaque = false
+                border = BorderFactory.createMatteBorder(1, 0, 0, 0, dividerColor())
+                preferredSize = Dimension(0, 1)
+            },
+            constraints(
+                gridx = 0,
+                gridy = row,
+                gridwidth = 2,
+                weightx = 1.0,
+                fill = GridBagConstraints.HORIZONTAL,
+                insets = Insets(10, 0, 8, 0),
+            ),
+        )
+        return row + 1
     }
 
-    private fun bar(): JProgressBar = JProgressBar(0, 100).apply {
-        alignmentX = 0f
-        maximumSize = Dimension(Int.MAX_VALUE, 14)
-        isStringPainted = true
+    private fun addHeading(row: Int, text: String): Int {
+        content.add(
+            JLabel(text).apply {
+                font = headingFont()
+                foreground = mutedForeground()
+            },
+            constraints(
+                gridx = 0,
+                gridy = row,
+                gridwidth = 2,
+                weightx = 1.0,
+                fill = GridBagConstraints.HORIZONTAL,
+                insets = Insets(2, 0, 4, 0),
+            ),
+        )
+        return row + 1
     }
 
-    private fun formatBytes(bytes: Long): String = BYTES_FORMAT.format(bytes.toDouble() / 1024.0 / 1024.0) + " MB"
+    private fun addHeadingWithControl(row: Int, text: String, control: Component): Int {
+        content.add(
+            JLabel(text).apply {
+                font = headingFont()
+                foreground = mutedForeground()
+            },
+            constraints(gridx = 0, gridy = row, weightx = 0.0, insets = Insets(2, 0, 4, 6)),
+        )
+        content.add(
+            control,
+            constraints(
+                gridx = 1,
+                gridy = row,
+                weightx = 1.0,
+                fill = GridBagConstraints.NONE,
+                anchor = GridBagConstraints.EAST,
+                insets = Insets(0, 0, 2, 0),
+            ),
+        )
+        return row + 1
+    }
+
+    private fun addDetail(
+        row: Int,
+        label: String,
+        value: String,
+        top: Int = 3,
+        bottom: Int = 3,
+        tooltip: String? = value,
+        warning: Boolean = false,
+        copyable: Boolean = false,
+    ): Int {
+        val labelComponent = rowLabel(label)
+        val valueComponent = JLabel(value).apply {
+            toolTipText = tooltip
+            if (warning) foreground = WARNING_COLOR
+        }
+        if (copyable) {
+            makeCopyable(labelComponent, value, valueComponent)
+            makeCopyable(valueComponent, value, valueComponent)
+        }
+        content.add(
+            labelComponent,
+            constraints(gridx = 0, gridy = row, weightx = 0.0, insets = Insets(top, 0, bottom, 8)),
+        )
+        content.add(
+            valueComponent,
+            constraints(
+                gridx = 1,
+                gridy = row,
+                weightx = 1.0,
+                fill = GridBagConstraints.HORIZONTAL,
+                insets = Insets(top, 0, bottom, 0),
+            ),
+        )
+        return row + 1
+    }
+
+    /**
+     * Turns a label into a copy target: a left click puts [value] on the clipboard and briefly
+     * tints [feedback] so the user sees that the copy happened.
+     */
+    private fun makeCopyable(component: JComponent, value: String, feedback: JLabel) {
+        val restingForeground = feedback.foreground
+        component.cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        component.toolTipText = "${UiText.CLICK_TO_COPY}: $value"
+        component.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(event: MouseEvent) {
+                if (!SwingUtilities.isLeftMouseButton(event)) return
+                if (!copyToClipboard(value)) return
+                feedback.foreground = COPIED_COLOR
+                Timer(COPY_FEEDBACK_MILLIS) { feedback.foreground = restingForeground }
+                    .apply { isRepeats = false }
+                    .start()
+            }
+        })
+    }
+
+    private fun addMeter(row: Int, label: String, percent: Double, color: Color, detail: String?): Int {
+        var current = row
+        content.add(
+            rowLabel(label),
+            constraints(gridx = 0, gridy = current, weightx = 0.0, insets = Insets(5, 0, 0, 8)),
+        )
+        content.add(
+            JProgressBar(0, 100).apply {
+                value = percent.coerceIn(0.0, 100.0).toInt()
+                isStringPainted = true
+                string = formatPercent(percent)
+                foreground = color
+                preferredSize = Dimension(0, 16)
+            },
+            constraints(
+                gridx = 1,
+                gridy = current,
+                weightx = 1.0,
+                fill = GridBagConstraints.HORIZONTAL,
+                insets = Insets(5, 0, 0, 0),
+            ),
+        )
+        current++
+        if (detail != null) {
+            content.add(
+                mutedLabel(detail),
+                constraints(
+                    gridx = 1,
+                    gridy = current,
+                    weightx = 1.0,
+                    fill = GridBagConstraints.HORIZONTAL,
+                    insets = Insets(2, 0, 4, 0),
+                ),
+            )
+            current++
+        }
+        return current
+    }
+
+    private fun addSpanning(row: Int, component: Component, top: Int, bottom: Int): Int {
+        content.add(
+            component,
+            constraints(
+                gridx = 0,
+                gridy = row,
+                gridwidth = 2,
+                weightx = 1.0,
+                fill = GridBagConstraints.HORIZONTAL,
+                insets = Insets(top, 0, bottom, 0),
+            ),
+        )
+        return row + 1
+    }
+
+    private fun addVerticalFiller(row: Int) {
+        content.add(
+            JPanel().apply { isOpaque = false },
+            constraints(gridx = 0, gridy = row, gridwidth = 2, weightx = 1.0, weighty = 1.0, fill = GridBagConstraints.BOTH),
+        )
+    }
+
+    private fun rowLabel(text: String): JLabel = JLabel(text).apply {
+        foreground = mutedForeground()
+        font = baseFont()
+        val width = getFontMetrics(font).stringWidth("Memory") + 10
+        val height = preferredSize.height
+        preferredSize = Dimension(width, height)
+        minimumSize = Dimension(width, height)
+    }
+
+    private fun mutedLabel(text: String): JLabel = JLabel(text).apply {
+        foreground = mutedForeground()
+        font = baseFont()
+    }
+
+    /**
+     * One type scale for the whole sidebar: the title is the only size above the UI base font, and
+     * secondary text is separated by colour instead of a size step so nothing looks mismatched.
+     */
+    private fun baseFont(): Font = UIManager.getFont("Label.font") ?: font
+
+    private fun titleFont(): Font = baseFont().let { base -> base.deriveFont(Font.BOLD, base.size2D + 2f) }
+
+    private fun headingFont(): Font = baseFont().deriveFont(Font.BOLD)
+
+    private fun mutedForeground(): Color =
+        UIManager.getColor("Label.disabledForeground") ?: Color(0x9E9E9E)
+
+    private fun dividerColor(): Color =
+        UIManager.getColor("Component.borderColor") ?: Color(0x4A4D4F)
+
+    private fun constraints(
+        gridx: Int,
+        gridy: Int,
+        gridwidth: Int = 1,
+        weightx: Double = 0.0,
+        weighty: Double = 0.0,
+        fill: Int = GridBagConstraints.NONE,
+        anchor: Int = GridBagConstraints.WEST,
+        insets: Insets = Insets(0, 0, 0, 0),
+    ): GridBagConstraints = GridBagConstraints().apply {
+        this.gridx = gridx
+        this.gridy = gridy
+        this.gridwidth = gridwidth
+        this.weightx = weightx
+        this.weighty = weighty
+        this.fill = fill
+        this.anchor = anchor
+        this.insets = insets
+    }
+
+    private fun tableConstraints(
+        gridx: Int,
+        gridy: Int,
+        weightx: Double,
+        anchor: Int,
+    ): GridBagConstraints = constraints(
+        gridx = gridx,
+        gridy = gridy,
+        weightx = weightx,
+        fill = GridBagConstraints.HORIZONTAL,
+        anchor = anchor,
+        insets = Insets(1, 0, 1, 8),
+    )
+
+    private fun alignedCellRenderer(alignment: Int): DefaultTableCellRenderer = object : DefaultTableCellRenderer() {
+        override fun getTableCellRendererComponent(
+            table: JTable?,
+            value: Any?,
+            isSelected: Boolean,
+            hasFocus: Boolean,
+            row: Int,
+            column: Int,
+        ): Component = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column).apply {
+            horizontalAlignment = alignment
+        }
+    }
+
+    private fun alignedHeaderRenderer(alignment: Int): DefaultTableCellRenderer = object : DefaultTableCellRenderer() {
+        override fun getTableCellRendererComponent(
+            table: JTable?,
+            value: Any?,
+            isSelected: Boolean,
+            hasFocus: Boolean,
+            row: Int,
+            column: Int,
+        ): Component = super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column).apply {
+            horizontalAlignment = alignment
+            font = headingFont()
+            foreground = mutedForeground()
+        }
+    }
+
+    private fun formatSize(bytes: Long): String {
+        val gigabytes = bytes.toDouble() / GIB
+        if (gigabytes >= 1.0) return "${SIZE_FORMAT.format(gigabytes)} GB"
+        val megabytes = bytes.toDouble() / MIB
+        if (megabytes >= 1.0) return "${SIZE_FORMAT.format(megabytes)} MB"
+        val kilobytes = bytes.toDouble() / KIB
+        if (kilobytes >= 1.0) return "${SIZE_FORMAT.format(kilobytes)} KB"
+        return "$bytes B"
+    }
+
+    private fun formatRate(bytesPerSecond: Long): String = formatSize(bytesPerSecond) + "/s"
 
     private fun formatPercent(percent: Double): String = PERCENT_FORMAT.format(percent) + "%"
 
@@ -172,9 +685,48 @@ class MonitorPanel : JPanel(BorderLayout()) {
         return if (days > 0) "${days}d ${hours}h ${minutes}m" else "${hours}h ${minutes}m"
     }
 
-    companion object {
-        private val BYTES_FORMAT = DecimalFormat("#,##0.0")
-        private val PERCENT_FORMAT = DecimalFormat("0.0")
-        private const val MAX_PROCESS_ROWS = 6
+    private fun elide(text: String, limit: Int): String =
+        if (text.length <= limit) text else text.take(limit - 1) + "…"
+
+    private class ReadOnlyTableModel(columns: Array<String>) : DefaultTableModel(columns, 0) {
+        override fun isCellEditable(row: Int, column: Int): Boolean = false
     }
+
+    companion object {
+        private val SIZE_FORMAT = DecimalFormat("#,##0.0")
+        private val PERCENT_FORMAT = DecimalFormat("0.0")
+        private const val GIB = 1024.0 * 1024.0 * 1024.0
+        private const val MIB = 1024.0 * 1024.0
+        private const val KIB = 1024.0
+        private const val MAX_PROCESS_ROWS = 6
+        private const val MAX_FILESYSTEM_ROWS = 4
+        private const val MAX_MOUNT_CHARS = 14
+        private const val LOOPBACK_INTERFACE = "lo"
+        private const val THIN_SCROLLBAR_WIDTH = 9
+        private const val COPY_FEEDBACK_MILLIS = 1200
+        private const val EMPTY_VALUE = "—"
+        private const val TOP_SPACER_HEIGHT = 6
+        private val CPU_COLOR = Color(0x4C9AFF)
+        private val MEMORY_COLOR = Color(0xB08CFF)
+        private val SWAP_COLOR = Color(0xE0A458)
+        private val WARNING_COLOR = Color(0xE0A458)
+        private val COPIED_COLOR = Color(0x66BB6A)
+    }
+}
+
+/**
+ * Grid content that follows the viewport width but keeps its own height so a short window can
+ * scroll the sidebar instead of clipping the lower sections.
+ */
+private class ScrollableContent : JPanel(GridBagLayout()), Scrollable {
+    override fun getPreferredScrollableViewportSize(): Dimension = preferredSize
+
+    override fun getScrollableUnitIncrement(visibleRect: Rectangle, orientation: Int, direction: Int): Int = 16
+
+    override fun getScrollableBlockIncrement(visibleRect: Rectangle, orientation: Int, direction: Int): Int =
+        (if (orientation == SwingConstants.VERTICAL) visibleRect.height else visibleRect.width) - 16
+
+    override fun getScrollableTracksViewportWidth(): Boolean = true
+
+    override fun getScrollableTracksViewportHeight(): Boolean = false
 }

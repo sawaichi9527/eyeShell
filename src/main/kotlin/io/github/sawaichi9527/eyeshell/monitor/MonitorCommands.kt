@@ -12,9 +12,10 @@ object MonitorCommands {
         "cat /proc/net/dev",
         "df -P",
         "ps -eo pid=,rss=,pcpu=,comm= --sort=-rss",
+        "ip -o -4 addr show 2>/dev/null",
     )
 
-    fun systemInfo(): String = "$ENV_PREFIX; uname -a; echo; cat /proc/uptime"
+    fun systemInfo(): String = "$ENV_PREFIX; uname -a; echo; cat /proc/uptime; echo; cat /etc/os-release 2>/dev/null"
 
     fun sample(): String = buildString {
         append(ENV_PREFIX)

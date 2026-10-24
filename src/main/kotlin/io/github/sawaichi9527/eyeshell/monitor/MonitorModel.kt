@@ -25,6 +25,7 @@ data class SystemInfo(
     val kernel: String,
     val operatingSystem: String,
     val uptimeSeconds: Long,
+    val distribution: String = "",
 )
 
 data class CpuUsage(
@@ -54,6 +55,7 @@ data class NetworkUsage(
     val receiveBytesPerSecond: Long,
     val transmitBytesPerSecond: Long,
     val interfaces: List<NetworkInterfaceUsage>,
+    val interfaceAddresses: Map<String, List<String>> = emptyMap(),
 )
 
 data class NetworkInterfaceUsage(

@@ -6,21 +6,47 @@ object MonitorParsers {
     fun parseSystemInfo(output: String): SystemInfo? {
         val lines = output.lines()
         val unameLine = lines.firstOrNull { it.trim().isNotEmpty() } ?: return null
-        val uptimeLine = lines.dropWhile { it.trim().isEmpty() }
-            .drop(1)
-            .firstOrNull { it.trim().isNotEmpty() } ?: return null
+        val afterUname = lines.dropWhile { it.trim().isEmpty() }.drop(1)
+        val uptimeLine = afterUname.firstOrNull { it.trim().isNotEmpty() } ?: return null
         val uptimeSeconds = uptimeLine.trim().split(Regex("\\s+")).firstOrNull()?.toDoubleOrNull()
             ?: return null
         val fields = unameLine.trim().split(Regex("\\s+"))
         val kernel = fields.getOrNull(2) ?: return null
         val hostname = fields.getOrNull(1) ?: return null
         val operatingSystem = fields.getOrNull(0) ?: return null
+        val distribution = parseDistribution(
+            afterUname.dropWhile { it.trim().isEmpty() }.drop(1),
+        )
         return SystemInfo(
             hostname = hostname,
             kernel = kernel,
             operatingSystem = operatingSystem,
             uptimeSeconds = uptimeSeconds.roundToLong(),
+            distribution = distribution,
         )
+    }
+
+    /**
+     * Reads the human-readable distribution name from `/etc/os-release` output.
+     *
+     * Returns an empty string when the file is unavailable so the panel can fall back to the
+     * `uname` operating-system field.
+     */
+    private fun parseDistribution(lines: List<String>): String {
+        val values = lines.mapNotNull { line ->
+            val trimmed = line.trim()
+            val separator = trimmed.indexOf('=')
+            if (separator <= 0) return@mapNotNull null
+            trimmed.substring(0, separator) to trimmed.substring(separator + 1).trim().removeSurrounding("\"")
+        }.toMap()
+        values["PRETTY_NAME"]?.takeIf(String::isNotBlank)?.let { return it }
+        val name = values["NAME"].orEmpty()
+        val version = values["VERSION"].orEmpty()
+        return when {
+            name.isBlank() -> ""
+            version.isBlank() -> name
+            else -> "$name $version"
+        }
     }
 
     fun parseCpu(rawOutput: String, current: CpuRaw, previous: CpuRaw?): CpuUsage? {
@@ -116,6 +142,17 @@ object MonitorParsers {
         )
     }
 
+    /**
+     * Parses `ip -o -4 addr show` into interface name to IPv4 address lists.
+     *
+     * Missing output (for example when `ip` is not installed) yields an empty map so the monitor
+     * panel can fall back to a traffic-based default interface.
+     */
+    fun parseInterfaceAddresses(output: String): Map<String, List<String>> = output.lines()
+        .map(String::trim)
+        .mapNotNull { line -> INTERFACE_ADDRESS.matchEntire(line)?.let { it.groupValues[1] to it.groupValues[2] } }
+        .groupBy({ it.first }, { it.second })
+
     fun parseFilesystems(output: String): List<FilesystemUsage> = output.lines()
         .map(String::trim)
         .filter { it.startsWith("/dev/") }
@@ -157,6 +194,8 @@ object MonitorParsers {
         .filter(String::isNotEmpty)
 
     private val SECTION_DELIMITER_REGEX = Regex(Regex.escape(MonitorCommands.SECTION_DELIMITER))
+
+    private val INTERFACE_ADDRESS = Regex("""^\d+:\s+(\S+)\s+inet\s+(\d{1,3}(?:\.\d{1,3}){3})/\d+.*$""")
 
     data class CpuRaw(val total: Long, val idle: Long)
 

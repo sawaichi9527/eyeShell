@@ -8,11 +8,16 @@ import org.junit.jupiter.api.Test
 
 class MonitorParsersTest {
     @Test
-    fun `parses system info from uname and uptime`() {
+    fun `parses system info from uname, uptime, and os-release`() {
         val output = """
             Linux lab-server 6.8.0-45-generic #45-Ubuntu SMP PREEMPT_DYNAMIC x86_64 GNU/Linux
-            
+
             12345.67 23456.78
+
+            PRETTY_NAME="Ubuntu 26.04.1 LTS"
+            NAME="Ubuntu"
+            VERSION="26.04.1 LTS (Resolute Raccoon)"
+            ID=ubuntu
         """.trimIndent()
 
         val info = MonitorParsers.parseSystemInfo(output)
@@ -21,7 +26,23 @@ class MonitorParsersTest {
         assertEquals("lab-server", info!!.hostname)
         assertEquals("6.8.0-45-generic", info.kernel)
         assertEquals("Linux", info.operatingSystem)
+        assertEquals("Ubuntu 26.04.1 LTS", info.distribution)
         assertEquals(12346L, info.uptimeSeconds)
+    }
+
+    @Test
+    fun `system info falls back when os-release is unavailable`() {
+        val output = """
+            Linux lab-server 6.8.0-45-generic #45-Ubuntu SMP x86_64 GNU/Linux
+
+            12345.67 23456.78
+        """.trimIndent()
+
+        val info = MonitorParsers.parseSystemInfo(output)
+
+        assertNotNull(info)
+        assertEquals("", info!!.distribution)
+        assertEquals("Linux", info.operatingSystem)
     }
 
     @Test
@@ -107,6 +128,29 @@ class MonitorParsersTest {
         assertEquals(3000L, usage.transmitBytesPerSecond)
         assertEquals(2, usage.interfaces.size)
         assertEquals("eth0", usage.interfaces.first { it.name == "eth0" }.name)
+    }
+
+    @Test
+    fun `parses interface addresses from ip output`() {
+        val output = """
+            1: lo    inet 127.0.0.1/8 scope host lo\       valid_lft forever preferred_lft forever
+            2: enp975    inet 192.168.35.207/24 brd 192.168.35.255 scope global dynamic noprefixroute enp975\       valid_lft 5925sec preferred_lft 5925sec
+            3: docker0    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0\       valid_lft forever preferred_lft forever
+            sh: 1: ip: not found
+        """.trimIndent()
+
+        val addresses = MonitorParsers.parseInterfaceAddresses(output)
+
+        assertEquals(listOf("127.0.0.1"), addresses["lo"])
+        assertEquals(listOf("192.168.35.207"), addresses["enp975"])
+        assertEquals(listOf("172.17.0.1"), addresses["docker0"])
+        assertEquals(3, addresses.size)
+    }
+
+    @Test
+    fun `missing interface address output yields an empty map`() {
+        assertTrue(MonitorParsers.parseInterfaceAddresses("").isEmpty())
+        assertTrue(MonitorParsers.parseInterfaceAddresses("sh: 1: ip: not found").isEmpty())
     }
 
     @Test
