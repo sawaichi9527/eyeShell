@@ -411,6 +411,16 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
 - Remaining unverified scope: the add/edit dialogs were not exercised by an automated GUI walkthrough, snippets are global rather than per-host, and multi-line snippets are sent verbatim.
 
+### 2026-10-24 Session close re-validation
+
+- Commands: `./scripts/gradlew-local.sh test --rerun-tasks --console=plain`; `./scripts/gradlew-local.sh check --console=plain`; `git diff --check`.
+- Executed at: 2026-10-24T09:59:33+08:00
+- Duration / exit codes: test 92s, exit 0; check 1s, exit 0; diff check exit 0.
+- Result: 149 tests: 149 executed, 0 failures, 0 errors, 9 skipped. Skipped cases: Windows clipboard, Windows OpenSSH agent, Windows data-path SQLite, Windows Credential Manager, live Linux Secret Service, 2 `LiveLinuxHostValidationTest` cases, and 2 `OpenSshInteroperabilityTest` cases (all opt-in or platform-gated). HEAD `85ac245`; working tree clean before this documentation update.
+- Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
+- Artifacts: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`; command logs under `/tmp/opencode/session-close-test.log` and `/tmp/opencode/session-close-check.log`.
+- Not re-run in this session close: the opt-in live Linux/OpenSSH/Secret Service cases and GUI smoke (previously validated on 2026-10-24), Windows-gated cases, and packaging branches. No runtime behavior changed after `85ac245`; this entry records the close-out verification only.
+
 ## Known Issues
 
 - The Windows environment has been set up and validated, covering: JDK 21 bootstrap, Gradle 9.5.0 dependency verification, code validation, and cross-platform test hardening. Working tree: clean.
