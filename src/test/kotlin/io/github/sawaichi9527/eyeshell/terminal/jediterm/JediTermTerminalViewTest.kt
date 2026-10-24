@@ -24,6 +24,7 @@ import javax.swing.JTextField
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 
 class JediTermTerminalViewTest {
     @Test
@@ -230,6 +231,115 @@ class JediTermTerminalViewTest {
             }
         } finally {
             onEdt { view.close() }
+        }
+    }
+
+    @Test
+    fun `three concurrent sessions keep the EDT responsive and their buffers separate`() {
+        val sessions = List(3) { StreamingTerminalSession() }
+        val keepProducing = AtomicBoolean(true)
+        val views = onEdt {
+            sessions.map { session ->
+                JediTermTerminalView(columns = 40, rows = 4).also {
+                    it.attach(session)
+                    it.setHighlightRules(listOf(errorRule()))
+                }
+            }
+        }
+        val producers = sessions.mapIndexed { index, session ->
+            Thread.ofVirtual().name("multi-session-producer-$index").start {
+                var line = 0
+                try {
+                    while (keepProducing.get()) {
+                        session.emit("session $index line $line ${if (line % 100 == 0) "ERROR" else "ok"}\r\n")
+                        line++
+                    }
+                } catch (_: IOException) {
+                    // Closing the terminal intentionally interrupts the synthetic stream.
+                }
+            }
+        }
+
+        try {
+            await(Duration.ofSeconds(10)) { sessions.all { it.charactersRead.get() >= 10_000 } }
+            repeat(5) {
+                val edtServiced = CountDownLatch(1)
+                SwingUtilities.invokeLater(edtServiced::countDown)
+                assertTrue(edtServiced.await(2, TimeUnit.SECONDS), "Three concurrent sessions blocked the Swing EDT")
+            }
+
+            val scrollback = views.map { it.historyLineCount }
+            assertTrue(scrollback.all { it > 0 }, "Every concurrent session must retain scrollback")
+            keepProducing.set(false)
+            producers.forEach { it.join(Duration.ofSeconds(5)) }
+            await(Duration.ofSeconds(10)) { views.all { !it.isSessionRunning } }
+
+            val exported = views.map { view -> StringWriter().also { writer -> view.writeAllOutput(writer) }.toString() }
+            assertEquals(3, exported.distinct().size, "Concurrent sessions must not share a buffer")
+            exported.forEachIndexed { index, output ->
+                assertTrue(output.contains("session $index line "), "View $index does not hold its own session output")
+            }
+        } finally {
+            keepProducing.set(false)
+            producers.forEach { it.join(Duration.ofSeconds(5)) }
+            sessions.forEach { it.close() }
+            onEdt { views.forEach { it.close() } }
+        }
+    }
+
+    @Test
+    @EnabledIfEnvironmentVariable(named = "EYESHELL_TEST_HEAP_PROBE", matches = "1")
+    fun `heap probe reports retained memory for three hundred thousand line sessions`() {
+        val viewCount = 3
+        val lineCount = EyeShellTerminalSettings.MAX_SCROLLBACK_LINES
+        val runtime = Runtime.getRuntime()
+        fun retainedBytes(): Long {
+            repeat(3) {
+                System.gc()
+                Thread.sleep(100)
+            }
+            return runtime.totalMemory() - runtime.freeMemory()
+        }
+
+        val baseline = retainedBytes()
+        val views = mutableListOf<JediTermTerminalView>()
+        try {
+            onEdt {
+                repeat(viewCount) { sessionIndex ->
+                    val script = buildString {
+                        repeat(lineCount + 10) { line ->
+                            append("s")
+                            append(sessionIndex)
+                            append(" line ")
+                            append(line.toString().padStart(6, '0'))
+                            append(if (line % 10_000 == 0) " ERROR\r\n" else " ok\r\n")
+                        }
+                        append("FINAL ERROR")
+                    }
+                    views += JediTermTerminalView(columns = 40, rows = 4).also {
+                        it.attach(SyntheticTerminalSession.fromText(script))
+                    }
+                }
+            }
+            await(Duration.ofSeconds(120)) {
+                views.all { !it.isSessionRunning && it.historyLineCount == lineCount }
+            }
+            assertEquals(viewCount, views.size)
+            views.forEach { assertEquals(lineCount, it.historyLineCount) }
+
+            val retained = retainedBytes() - baseline
+            val mebibyte = 1024L * 1024L
+            println(
+                "heap probe: ${viewCount * lineCount} retained lines used " +
+                    "${retained / mebibyte} MiB (${retained / mebibyte / viewCount} MiB per session), " +
+                    "JVM max ${runtime.maxMemory() / mebibyte} MiB",
+            )
+            assertTrue(
+                retained / viewCount < 128 * mebibyte,
+                "A 100,000-line session retained ${retained / mebibyte / viewCount} MiB, above the 128 MiB probe ceiling",
+            )
+        } finally {
+            onEdt { views.forEach { it.close() } }
         }
     }
 
