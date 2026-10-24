@@ -21,17 +21,20 @@ import org.apache.sshd.client.channel.ClientChannelEvent
 import org.apache.sshd.client.future.AuthFuture
 import org.apache.sshd.client.config.hosts.HostConfigEntryResolver
 import org.apache.sshd.client.session.ClientSession
+import org.apache.sshd.client.session.forward.PortForwardingTracker
 import org.apache.sshd.common.channel.StreamingChannel
 import org.apache.sshd.common.config.keys.FilePasswordProvider
 import org.apache.sshd.common.config.keys.KeyUtils
 import org.apache.sshd.common.keyprovider.KeyIdentityProvider
 import org.apache.sshd.common.util.io.resource.PathResource
+import org.apache.sshd.common.util.net.SshdSocketAddress
 import org.apache.sshd.common.util.security.SecurityUtils
 
 class MinaSshConnection private constructor(
     private val client: SshClient,
     private val clientSession: ClientSession,
     override val endpoint: SshEndpoint,
+    private val upstream: Upstream? = null,
 ) : HostSession {
     private val closed = AtomicBoolean()
 
@@ -83,8 +86,43 @@ class MinaSshConnection private constructor(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
-        clientSession.close(true)
-        client.close(true)
+        var failure: Throwable? = null
+        try {
+            clientSession.close(true)
+        } catch (error: Throwable) {
+            failure = error
+        }
+        try {
+            client.close(true)
+        } catch (error: Throwable) {
+            failure = accumulateFailure(failure, error)
+        }
+        try {
+            upstream?.close()
+        } catch (error: Throwable) {
+            failure = accumulateFailure(failure, error)
+        }
+        failure?.let { throw it }
+    }
+
+    private class Upstream(
+        private val jumpConnection: OpenedConnection,
+        private val tracker: PortForwardingTracker,
+    ) : AutoCloseable {
+        override fun close() {
+            var failure: Throwable? = null
+            try {
+                tracker.close()
+            } catch (error: Throwable) {
+                failure = error
+            }
+            try {
+                jumpConnection.close()
+            } catch (error: Throwable) {
+                failure = accumulateFailure(failure, error)
+            }
+            failure?.let { throw it }
+        }
     }
 
     companion object {
@@ -99,7 +137,73 @@ class MinaSshConnection private constructor(
             knownHostsStore: KnownHostsStore,
             unknownHostVerifier: HostKeyVerifier,
             changedHostKeyHandler: ChangedHostKeyHandler = ChangedHostKeyHandler {},
+            transport: TransportProvider = TransportProvider.Direct,
         ): MinaSshConnection {
+            val jump = transport as? TransportProvider.JumpHost
+            if (jump != null) {
+                require(!(jump.endpoint.host == endpoint.host && jump.endpoint.port == endpoint.port)) {
+                    "A host cannot use itself as its jump host"
+                }
+            }
+            val jumpConnection = jump?.let {
+                connectDirect(
+                    endpoint = it.endpoint,
+                    authentication = it.authentication,
+                    knownHostsStore = knownHostsStore,
+                    unknownHostVerifier = it.unknownHostVerifier,
+                    changedHostKeyHandler = it.changedHostKeyHandler,
+                )
+            }
+            var tracker: PortForwardingTracker? = null
+            try {
+                val route = if (jumpConnection != null) {
+                    val forwarding = jumpConnection.session.createLocalPortForwardingTracker(
+                        SshdSocketAddress(SshdSocketAddress.LOCALHOST_NAME, 0),
+                        SshdSocketAddress(endpoint.host, endpoint.port),
+                    )
+                    tracker = forwarding
+                    check(forwarding.boundAddress.port > 0) { "Jump host forwarding was not bound" }
+                    forwarding.boundAddress
+                } else {
+                    null
+                }
+                val opened = connectDirect(
+                    endpoint = endpoint,
+                    authentication = authentication,
+                    knownHostsStore = knownHostsStore,
+                    unknownHostVerifier = unknownHostVerifier,
+                    changedHostKeyHandler = changedHostKeyHandler,
+                    route = route,
+                )
+                return MinaSshConnection(
+                    opened.client,
+                    opened.session,
+                    endpoint,
+                    upstream = jumpConnection?.let { Upstream(it, checkNotNull(tracker)) },
+                )
+            } catch (failure: Throwable) {
+                try {
+                    tracker?.close()
+                } catch (closeFailure: Throwable) {
+                    failure.addSuppressed(closeFailure)
+                }
+                try {
+                    jumpConnection?.close()
+                } catch (closeFailure: Throwable) {
+                    failure.addSuppressed(closeFailure)
+                }
+                throw failure
+            }
+        }
+
+        private fun connectDirect(
+            endpoint: SshEndpoint,
+            authentication: SshAuthentication,
+            knownHostsStore: KnownHostsStore,
+            unknownHostVerifier: HostKeyVerifier,
+            changedHostKeyHandler: ChangedHostKeyHandler,
+            route: SshdSocketAddress? = null,
+        ): OpenedConnection {
             val keyboardInteraction = (authentication as? SshAuthentication.KeyboardInteractive)
                 ?.let(::KeyboardUserInteraction)
             val publicKeys = if (authentication is SshAuthentication.PublicKey) {
@@ -126,13 +230,18 @@ class MinaSshConnection private constructor(
                 serverKeyVerifier = knownHostsStore.createServerKeyVerifier(
                     unknownHostVerifier,
                     changedHostKeyHandler,
+                    verificationAddress = SshdSocketAddress(endpoint.host, endpoint.port),
                 )
             }
             client.start()
 
             var session: ClientSession? = null
             try {
-                val connectedSession = client.connect(endpoint.username, endpoint.host, endpoint.port)
+                val connectedSession = client.connect(
+                    endpoint.username,
+                    route?.hostName ?: endpoint.host,
+                    route?.port ?: endpoint.port,
+                )
                     .verify(CONNECT_TIMEOUT)
                     .session
                 session = connectedSession
@@ -164,8 +273,8 @@ class MinaSshConnection private constructor(
                     passwordIdentity?.let(connectedSession::removePasswordIdentity)
                     publicKeys.forEach(connectedSession::removePublicKeyIdentity)
                 }
-                return MinaSshConnection(client, connectedSession, endpoint)
-            } catch (failure: Exception) {
+                return OpenedConnection(client, connectedSession)
+            } catch (failure: Throwable) {
                 session?.close(true)
                 client.close(true)
                 throw failure
@@ -250,6 +359,32 @@ private class KeyboardUserInteraction(
     override fun getUpdatedPassword(session: ClientSession, prompt: String, lang: String): String? = null
 
     fun cancel() = authentication.cancel()
+}
+
+private class OpenedConnection(
+    val client: SshClient,
+    val session: ClientSession,
+) {
+    fun close() {
+        var failure: Throwable? = null
+        try {
+            session.close(true)
+        } catch (error: Throwable) {
+            failure = error
+        }
+        try {
+            client.close(true)
+        } catch (error: Throwable) {
+            failure = accumulateFailure(failure, error)
+        }
+        failure?.let { throw it }
+    }
+}
+
+private fun accumulateFailure(current: Throwable?, next: Throwable): Throwable {
+    if (current == null) return next
+    if (current !== next) current.addSuppressed(next)
+    return current
 }
 
 private class MinaSshTerminalSession(

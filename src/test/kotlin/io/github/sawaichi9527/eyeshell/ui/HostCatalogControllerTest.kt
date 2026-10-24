@@ -81,8 +81,33 @@ class HostCatalogControllerTest {
         assertEquals(savedHost().profileId, preset.profileId)
         assertEquals(ConnectionAuthenticationMethod.PUBLIC_KEY, preset.authenticationMethod)
         assertEquals(
-            setOf("profileId", "endpoint", "authenticationMethod"),
+            setOf("profileId", "endpoint", "authenticationMethod", "jumpHost"),
             HostConnectionPreset::class.java.declaredFields
+                .filterNot { Modifier.isStatic(it.modifiers) }
+                .map { it.name }
+                .toSet(),
+        )
+    }
+
+    @Test
+    fun `saved host preset carries the jump host profile without a secret`() {
+        val jump = savedHost().copy(
+            id = 2,
+            profileId = java.util.UUID.fromString("00000000-0000-0000-0000-0000000000a1"),
+            draft = savedHost().draft.copy(name = "Bastion", authenticationMethod = SavedAuthenticationMethod.SSH_AGENT),
+        )
+        val target = savedHost().copy(
+            draft = savedHost().draft.copy(jumpHostProfileId = jump.profileId),
+        )
+
+        val preset = target.toPreset(jump)
+
+        assertEquals(jump.profileId, preset.jumpHost?.profileId)
+        assertEquals(jump.draft.endpoint, preset.jumpHost?.endpoint)
+        assertEquals(ConnectionAuthenticationMethod.SSH_AGENT, preset.jumpHost?.authenticationMethod)
+        assertEquals(
+            setOf("profileId", "endpoint", "authenticationMethod"),
+            JumpHostPreset::class.java.declaredFields
                 .filterNot { Modifier.isStatic(it.modifiers) }
                 .map { it.name }
                 .toSet(),

@@ -6,6 +6,7 @@ import java.nio.file.Path
 import java.nio.file.attribute.PosixFilePermission
 import java.sql.DriverManager
 import java.util.Collections
+import java.util.UUID
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -39,8 +40,8 @@ class SqliteHostCatalogTest {
             assertEquals("Lab '主機'; DROP TABLE hosts;", created.draft.name)
             assertEquals("測試員", created.draft.endpoint.username)
             assertEquals(listOf("nightly", "中文"), created.draft.tags)
-            assertEquals(3, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
-            assertEquals(3, queryInt(database, "SELECT COUNT(*) FROM schema_versions"))
+            assertEquals(4, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
+            assertEquals(4, queryInt(database, "SELECT COUNT(*) FROM schema_versions"))
             assertEquals(6, queryInt(database, "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table'"))
         } finally {
             reopened.close()
@@ -64,7 +65,7 @@ class SqliteHostCatalogTest {
         assertEquals(first.profileId, reopened.profileId)
         assertEquals("Legacy group", first.draft.group)
         assertEquals(listOf("legacy-tag"), first.draft.tags)
-        assertEquals(3, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
+        assertEquals(4, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
     }
 
     @Test
@@ -137,7 +138,7 @@ class SqliteHostCatalogTest {
                 statement.executeQuery("SELECT name FROM pragma_table_info('hosts')").use { results ->
                     while (results.next()) columns += results.getString(1)
                 }
-                statement.execute("INSERT INTO schema_versions(version, description) VALUES (4, 'future')")
+                statement.execute("INSERT INTO schema_versions(version, description) VALUES (5, 'future')")
             }
         }
 
@@ -224,6 +225,65 @@ class SqliteHostCatalogTest {
     @Test
     fun `requires an absolute database path`() {
         assertThrows(IllegalArgumentException::class.java) { SqliteHostCatalog(Path.of("relative.db")) }
+    }
+
+    @Test
+    fun `persists jump host references across reopen`() {
+        val database = temporaryDirectory.resolve("jump.db")
+        val bastion = SqliteHostCatalog(database).use { catalog ->
+            catalog.createHost(draft("Bastion", "bastion.example"))
+        }
+        val target = SqliteHostCatalog(database).use { catalog ->
+            catalog.createHost(draft("Target", "target.example").copy(jumpHostProfileId = bastion.profileId))
+        }
+
+        SqliteHostCatalog(database).use { catalog ->
+            val reloaded = catalog.listHosts().single { it.profileId == target.profileId }
+            assertEquals(bastion.profileId, reloaded.draft.jumpHostProfileId)
+            assertEquals(4, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
+        }
+    }
+
+    @Test
+    fun `rejects self, dangling, and nested jump host references`() {
+        val database = temporaryDirectory.resolve("jump-validation.db")
+        SqliteHostCatalog(database).use { catalog ->
+            val first = catalog.createHost(draft("First", "first.example"))
+            val second = catalog.createHost(draft("Second", "second.example"))
+
+            assertThrows(IllegalArgumentException::class.java) {
+                catalog.updateHost(first.id, first.draft.copy(jumpHostProfileId = first.profileId))
+            }
+            assertThrows(IllegalArgumentException::class.java) {
+                catalog.updateHost(first.id, first.draft.copy(jumpHostProfileId = UUID.randomUUID()))
+            }
+
+            val linked = catalog.updateHost(second.id, second.draft.copy(jumpHostProfileId = first.profileId))
+            assertEquals(first.profileId, linked.draft.jumpHostProfileId)
+
+            assertThrows(IllegalArgumentException::class.java) {
+                catalog.updateHost(first.id, first.draft.copy(jumpHostProfileId = second.profileId))
+            }
+            assertThrows(IllegalArgumentException::class.java) {
+                catalog.createHost(draft("Third", "third.example").copy(jumpHostProfileId = second.profileId))
+            }
+        }
+    }
+
+    @Test
+    fun `refuses to delete a host that is used as a jump host`() {
+        val database = temporaryDirectory.resolve("jump-delete.db")
+        SqliteHostCatalog(database).use { catalog ->
+            val bastion = catalog.createHost(draft("Bastion", "bastion.example"))
+            val target = catalog.createHost(draft("Target", "target.example").copy(jumpHostProfileId = bastion.profileId))
+
+            val failure = assertThrows(IllegalArgumentException::class.java) { catalog.deleteHost(bastion.id) }
+            assertTrue(failure.message.orEmpty().contains("Target"))
+
+            catalog.updateHost(target.id, target.draft.copy(jumpHostProfileId = null))
+            catalog.deleteHost(bastion.id)
+            assertEquals(listOf("Target"), catalog.listHosts().map { it.draft.name })
+        }
     }
 
     @Test

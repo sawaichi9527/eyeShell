@@ -12,6 +12,7 @@ import org.apache.sshd.client.keyverifier.KnownHostsServerKeyVerifier
 import org.apache.sshd.client.keyverifier.ServerKeyVerifier
 import org.apache.sshd.client.session.ClientSession
 import org.apache.sshd.common.config.keys.KeyUtils
+import org.apache.sshd.common.util.net.SshdSocketAddress
 
 data class ChangedHostKey(
     val remoteAddress: String,
@@ -31,15 +32,33 @@ class KnownHostsStore(
         require(file.isAbsolute) { "Known Hosts file must use an absolute path" }
     }
 
+    /**
+     * Creates a strict Known Hosts verifier.
+     *
+     * When [verificationAddress] is set, Known Hosts lookups, accepted-key writes, and
+     * change reports all use that address instead of the socket address the transport
+     * actually connected to. Jump Host connections need this because the target SSH
+     * transport is dialed through an ephemeral loopback forwarding port while the
+     * trusted identity is still the target host and port.
+     */
     internal fun createServerKeyVerifier(
         unknownHostVerifier: HostKeyVerifier,
         changedHostKeyHandler: ChangedHostKeyHandler,
+        verificationAddress: SshdSocketAddress? = null,
     ): ServerKeyVerifier {
         prepareFile()
         val unknownDelegate = ServerKeyVerifier { _, remoteAddress, serverKey ->
             unknownHostVerifier.verify(serverKey.presentedAt(remoteAddress))
         }
-        return object : DefaultKnownHostsServerKeyVerifier(unknownDelegate, true, file) {
+        val verifier = object : DefaultKnownHostsServerKeyVerifier(unknownDelegate, true, file) {
+            // Only the trusted identity is used for lookups and accepted-key writes. The default
+            // implementation also adds the socket address that was dialed, which for a jump host
+            // connection is an ephemeral loopback forwarding port.
+            override fun resolveHostNetworkIdentities(
+                clientSession: ClientSession,
+                remoteAddress: SocketAddress,
+            ): Collection<SshdSocketAddress> = listOf(SshdSocketAddress.toSshdSocketAddress(remoteAddress))
+
             override fun acceptIncompleteHostKeys(
                 clientSession: ClientSession,
                 remoteAddress: SocketAddress,
@@ -70,6 +89,10 @@ class KnownHostsStore(
                 )
                 false
             }
+        }
+        if (verificationAddress == null) return verifier
+        return ServerKeyVerifier { clientSession, _, serverKey ->
+            verifier.verifyServerKey(clientSession, verificationAddress, serverKey)
         }
     }
 

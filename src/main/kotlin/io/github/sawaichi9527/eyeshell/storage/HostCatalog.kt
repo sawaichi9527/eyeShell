@@ -16,6 +16,7 @@ data class HostDraft(
     val authenticationMethod: SavedAuthenticationMethod,
     val group: String? = null,
     val tags: List<String> = emptyList(),
+    val jumpHostProfileId: UUID? = null,
 ) {
     init {
         require(name.isNotBlank()) { "Host profile name must not be blank" }

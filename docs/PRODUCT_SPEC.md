@@ -453,6 +453,18 @@ TransportProvider
 
 Cloud Relay Transport 不列入首版。
 
+### 8.5 Jump Host（M2A）
+
+第一版 Jump Host 採單一跳板，並共用既有 Saved Host profile：
+
+- 跳板以 Saved Host profile UUID 參照保存（SQLite schema v4 `hosts.jump_host_uuid`），不儲存任何 Secret
+- 不支援多段跳板鏈；跳板 profile 本身若已設定 Jump Host，或其他 Host 正引用該 profile 作為跳板，皆拒絕變更
+- 被引用為跳板的 Host profile 不可刪除，除非先清除引用
+- 跳板認證沿用 Password（OS Credential Store）、Public Key、Keyboard-interactive 與 `ssh-agent`；Private Key File 與 Passphrase 仍為 session-only
+- 目標 SSH Transport 經跳板建立 ephemeral loopback 轉送；Known Hosts 的比對、寫入與 Changed Host Key 回報一律使用目標 `host:port`，不記錄 loopback 轉送位址
+- 跳板 Host Key 必須在送出跳板憑證前由使用者確認；跳板 key 已信任時，目標 key 僅需單一確認畫面並同時顯示跳板信任狀態；任一 Changed Host Key 一律拒絕
+- 不支援 agent forwarding；ad-hoc 連線的跳板需先保存為 Saved Host
+
 ---
 
 ## 9. Terminal 解決方案

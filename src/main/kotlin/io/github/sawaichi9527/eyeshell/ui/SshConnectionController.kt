@@ -9,9 +9,9 @@ import io.github.sawaichi9527.eyeshell.ssh.KnownHostsStore
 import io.github.sawaichi9527.eyeshell.ssh.KeyboardInteractiveChallenge
 import io.github.sawaichi9527.eyeshell.ssh.KeyboardInteractiveResponder
 import io.github.sawaichi9527.eyeshell.ssh.MinaSshConnection
-import io.github.sawaichi9527.eyeshell.ssh.PresentedHostKey
 import io.github.sawaichi9527.eyeshell.ssh.SshAuthentication
 import io.github.sawaichi9527.eyeshell.ssh.SshEndpoint
+import io.github.sawaichi9527.eyeshell.ssh.TransportProvider
 import io.github.sawaichi9527.eyeshell.secrets.CredentialStoreStatus
 import io.github.sawaichi9527.eyeshell.secrets.PasswordCredentialStore
 import io.github.sawaichi9527.eyeshell.secrets.ProfileCredentialGuard
@@ -28,6 +28,7 @@ import java.util.concurrent.Future
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.UUID
+import javax.swing.BorderFactory
 import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JDialog
@@ -72,15 +73,21 @@ internal class SshConnectionController(
         val storeStatus = loadedPassword.first
         var storedPassword = loadedPassword.second
         var credentialRevision = loadedPassword.third
+        val loadedJumpPassword = preset?.jumpHost?.let { loadStoredPassword(it.toPreset()) }
+        var storedJumpPassword = loadedJumpPassword?.second
+        val jumpStoreStatus = loadedJumpPassword?.first ?: CredentialStoreStatus.UNAVAILABLE
         try {
             while (!closed.get()) {
                 val password = storedPassword?.copyValue()
+                val jumpPassword = storedJumpPassword?.copyValue()
                 val decision = try {
                     showConnectionDialogOnEdt(
                         owner, preset, password, storeStatus, storedPassword != null, credentialRevision,
+                        jumpPassword, jumpStoreStatus,
                     )
                 } finally {
                     password?.fill('\u0000')
+                    jumpPassword?.fill('\u0000')
                 }
                 when (decision) {
                     ConnectionDialogDecision.Cancel -> {
@@ -106,6 +113,7 @@ internal class SshConnectionController(
             }
         } finally {
             storedPassword?.close()
+            storedJumpPassword?.close()
         }
     }
 
@@ -132,11 +140,28 @@ internal class SshConnectionController(
         request.use {
             publishConnectionState(owner, "Connecting to ${request.endpoint.displayName}...", connecting = true)
             val changedHostKey = AtomicReference<ChangedHostKey>()
+            val changedJumpHostKey = AtomicReference<ChangedHostKey>()
+            val review = HostKeyReview(request.endpoint, request.jumpHost?.endpoint)
+            val transport = request.jumpHost?.let { jump ->
+                TransportProvider.JumpHost(
+                    endpoint = jump.endpoint,
+                    authentication = checkNotNull(request.jumpAuthentication) {
+                        "Jump host authentication is missing"
+                    },
+                    unknownHostVerifier = HostKeyVerifier { presented ->
+                        confirmHostKey(owner, review.jumpPrompt(presented)).also { accepted ->
+                            if (accepted) review.acceptJumpKey(presented)
+                        }
+                    },
+                    changedHostKeyHandler = ChangedHostKeyHandler(changedJumpHostKey::set),
+                )
+            } ?: TransportProvider.Direct
             try {
                 val opened = openTerminal(
                     request,
-                    HostKeyVerifier { confirmHostKey(owner, it) },
+                    HostKeyVerifier { confirmHostKey(owner, review.targetPrompt(it)) },
                     ChangedHostKeyHandler(changedHostKey::set),
+                    transport,
                 )
                 SwingUtilities.invokeLater {
                     if (owner.isDisplayable && !closed.get()) {
@@ -145,6 +170,7 @@ internal class SshConnectionController(
                                 profileId = request.passwordProfileId ?: UUID.randomUUID(),
                                 endpoint = request.endpoint,
                                 authenticationMethod = request.authentication.toConnectionMethod(),
+                                jumpHost = request.jumpHost,
                             )
                             owner.attachTerminal(opened.hostSession) { connect(owner, reconnectPreset) }
                             if (opened.passwordSaveFailed) {
@@ -168,7 +194,7 @@ internal class SshConnectionController(
                 SwingUtilities.invokeLater {
                     if (owner.isDisplayable && !closed.get()) {
                         owner.setConnectionState("Connection failed", false)
-                        val changedKey = changedHostKey.get()
+                        val changedKey = changedJumpHostKey.get() ?: changedHostKey.get()
                         JOptionPane.showMessageDialog(
                             owner,
                             changedKey?.let(::changedHostKeyMessage)
@@ -186,6 +212,7 @@ internal class SshConnectionController(
         request: ConnectionRequest,
         unknownHostVerifier: HostKeyVerifier,
         changedHostKeyHandler: ChangedHostKeyHandler,
+        transport: TransportProvider = TransportProvider.Direct,
     ): OpenedTerminal {
         val hostSession = terminalConnector.open(
             endpoint = request.endpoint,
@@ -193,6 +220,7 @@ internal class SshConnectionController(
             knownHostsStore = knownHostsStore,
             unknownHostVerifier = unknownHostVerifier,
             changedHostKeyHandler = changedHostKeyHandler,
+            transport = transport,
         )
         val terminal = try {
             hostSession.openTerminal()
@@ -219,23 +247,27 @@ internal class SshConnectionController(
         return OpenedTerminal(hostSession, terminal, saveFailed)
     }
 
-    private fun confirmHostKey(owner: EyeShellWindow, hostKey: PresentedHostKey): Boolean {
+    private fun confirmHostKey(owner: EyeShellWindow, prompt: HostKeyPrompt): Boolean {
+        val context = prompt.contextLines.takeIf(List<String>::isNotEmpty)
+            ?.joinToString(separator = "\n", postfix = "\n")
+            .orEmpty()
+        val message = """
+            ${prompt.subject.replaceFirstChar(Char::uppercase)} host key
+
+            ${context}Address: ${prompt.address}
+            Algorithm: ${prompt.key.algorithm}
+            Fingerprint: ${prompt.key.fingerprint}
+
+            Accept and save this key to:
+            ${knownHostsStore.file}
+        """.trimIndent()
         var accepted = false
         SwingUtilities.invokeAndWait {
             if (!owner.isDisplayable || closed.get()) return@invokeAndWait
             accepted = JOptionPane.showConfirmDialog(
                 owner,
-                """
-                Verify the SSH server host key before connecting.
-
-                Address: ${hostKey.remoteAddress}
-                Algorithm: ${hostKey.algorithm}
-                Fingerprint: ${hostKey.fingerprint}
-
-                Accept and save this key to:
-                ${knownHostsStore.file}
-                """.trimIndent(),
-                "Verify SSH host key",
+                message,
+                prompt.title,
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE,
             ) == JOptionPane.YES_OPTION
@@ -258,6 +290,8 @@ internal class SshConnectionController(
         storeStatus: CredentialStoreStatus,
         canForgetPassword: Boolean,
         credentialRevision: Long?,
+        storedJumpPassword: CharArray?,
+        jumpStoreStatus: CredentialStoreStatus,
     ): ConnectionDialogDecision {
         val decision = AtomicReference<ConnectionDialogDecision>(ConnectionDialogDecision.Cancel)
         SwingUtilities.invokeAndWait {
@@ -265,6 +299,7 @@ internal class SshConnectionController(
             decision.set(
                 showConnectionDialog(
                     owner, preset, storedPassword, storeStatus, canForgetPassword, credentialRevision,
+                    storedJumpPassword, jumpStoreStatus,
                 ),
             )
         }
@@ -278,6 +313,8 @@ internal class SshConnectionController(
         storeStatus: CredentialStoreStatus,
         canForgetPassword: Boolean,
         credentialRevision: Long?,
+        storedJumpPassword: CharArray?,
+        jumpStoreStatus: CredentialStoreStatus,
     ): ConnectionDialogDecision {
         val hostField = JTextField(preset?.endpoint?.host.orEmpty(), 24)
         val portSpinner = JSpinner(SpinnerNumberModel(preset?.endpoint?.port ?: 22, 1, 65535, 1))
@@ -294,6 +331,11 @@ internal class SshConnectionController(
             add(keyFileButton, java.awt.BorderLayout.EAST)
         }
         val passphraseField = JPasswordField(24)
+        val jump = preset?.jumpHost
+        val jumpPasswordField = JPasswordField(24)
+        val jumpKeyFileField = JTextField(24)
+        val jumpKeyFileButton = JButton("Browse...")
+        val jumpPassphraseField = JPasswordField(24)
         val panel = JPanel(GridBagLayout())
         addField(panel, 0, "Host", hostField)
         addField(panel, 1, "Port", portSpinner)
@@ -309,6 +351,26 @@ internal class SshConnectionController(
             addField(panel, 8, "", JLabel("OS credential store unavailable; password remains session-only."))
         } else if (storedPassword != null) {
             addField(panel, 8, "", JLabel("Saved password will be used unless a replacement is entered."))
+        }
+        if (jump != null) {
+            addField(panel, 9, "Jump host", buildJumpCredentialPanel(
+                jump = jump,
+                storedJumpPassword = storedJumpPassword,
+                jumpStoreStatus = jumpStoreStatus,
+                passwordField = jumpPasswordField,
+                keyFileField = jumpKeyFileField,
+                keyFileButton = jumpKeyFileButton,
+                passphraseField = jumpPassphraseField,
+            ))
+            jumpKeyFileButton.addActionListener {
+                JFileChooser().apply {
+                    fileSelectionMode = JFileChooser.FILES_ONLY
+                    dialogTitle = "Select jump host SSH private key"
+                    if (showOpenDialog(owner) == JFileChooser.APPROVE_OPTION) {
+                        jumpKeyFileField.text = selectedFile.toPath().toString()
+                    }
+                }
+            }
         }
 
         fun updateAuthenticationFields() {
@@ -358,14 +420,19 @@ internal class SshConnectionController(
         if (selected != 0) {
             Arrays.fill(passwordField.password, '\u0000')
             Arrays.fill(passphraseField.password, '\u0000')
+            Arrays.fill(jumpPasswordField.password, '\u0000')
+            Arrays.fill(jumpPassphraseField.password, '\u0000')
             passwordField.text = ""
             passphraseField.text = ""
+            jumpPasswordField.text = ""
+            jumpPassphraseField.text = ""
             return ConnectionDialogDecision.Cancel
         }
 
         val enteredPassword = passwordField.password
         val passphrase = passphraseField.password
         var password = enteredPassword
+        var jumpAuthentication: SshAuthentication? = null
         return try {
             val endpoint = SshEndpoint(
                 host = hostField.text.trim(),
@@ -387,6 +454,16 @@ internal class SshConnectionController(
                 )
                 ConnectionAuthenticationMethod.SSH_AGENT -> SshAuthentication.Agent.system()
             }
+            jumpAuthentication = jump?.let { gateway ->
+                buildJumpAuthentication(
+                    owner = owner,
+                    jump = gateway,
+                    storedPassword = storedJumpPassword,
+                    passwordField = jumpPasswordField,
+                    keyFileField = jumpKeyFileField,
+                    passphraseField = jumpPassphraseField,
+                )
+            }
             ConnectionDialogDecision.Connect(ConnectionRequest(
                 endpoint,
                 authentication,
@@ -395,17 +472,103 @@ internal class SshConnectionController(
                 },
                 rememberPassword = rememberPassword.isSelected,
                 credentialRevision = credentialRevision,
-            ))
+                jumpHost = jump,
+                jumpAuthentication = jumpAuthentication,
+            )).also { jumpAuthentication = null }
         } catch (failure: IllegalArgumentException) {
+            jumpAuthentication?.close()
             JOptionPane.showMessageDialog(owner, failure.message, "Invalid SSH connection", JOptionPane.ERROR_MESSAGE)
             ConnectionDialogDecision.Cancel
         } finally {
             Arrays.fill(password, '\u0000')
             if (enteredPassword !== password) Arrays.fill(enteredPassword, '\u0000')
             Arrays.fill(passphrase, '\u0000')
+            jumpAuthentication?.close()
+            Arrays.fill(jumpPasswordField.password, '\u0000')
+            Arrays.fill(jumpPassphraseField.password, '\u0000')
             passwordField.text = ""
             passphraseField.text = ""
+            jumpPasswordField.text = ""
+            jumpPassphraseField.text = ""
         }
+    }
+
+    private fun buildJumpAuthentication(
+        owner: EyeShellWindow,
+        jump: JumpHostPreset,
+        storedPassword: CharArray?,
+        passwordField: JPasswordField,
+        keyFileField: JTextField,
+        passphraseField: JPasswordField,
+    ): SshAuthentication = when (jump.authenticationMethod) {
+        ConnectionAuthenticationMethod.PASSWORD -> {
+            val entered = passwordField.password
+            val value = if (entered.isEmpty() && storedPassword != null) {
+                Arrays.fill(entered, '\u0000')
+                storedPassword.copyOf()
+            } else {
+                entered
+            }
+            try {
+                require(value.isNotEmpty()) { "Jump host password must not be empty" }
+                SshAuthentication.Password(value)
+            } finally {
+                Arrays.fill(value, '\u0000')
+            }
+        }
+        ConnectionAuthenticationMethod.PUBLIC_KEY -> {
+            require(keyFileField.text.isNotBlank()) { "Jump host private key file must not be blank" }
+            val passphrase = passphraseField.password
+            try {
+                SshAuthentication.PublicKey(Path.of(keyFileField.text.trim()), passphrase)
+            } finally {
+                Arrays.fill(passphrase, '\u0000')
+            }
+        }
+        ConnectionAuthenticationMethod.KEYBOARD_INTERACTIVE -> SshAuthentication.KeyboardInteractive(
+            responder = KeyboardInteractiveResponder { respondToKeyboardInteractive(owner, it) },
+            cancel = ::dismissKeyboardInteractiveDialog,
+        )
+        ConnectionAuthenticationMethod.SSH_AGENT -> SshAuthentication.Agent.system()
+    }
+
+    private fun buildJumpCredentialPanel(
+        jump: JumpHostPreset,
+        storedJumpPassword: CharArray?,
+        jumpStoreStatus: CredentialStoreStatus,
+        passwordField: JPasswordField,
+        keyFileField: JTextField,
+        keyFileButton: JButton,
+        passphraseField: JPasswordField,
+    ): JPanel {
+        val inner = JPanel(GridBagLayout())
+        inner.border = BorderFactory.createTitledBorder(jump.endpoint.displayName)
+        var row = 0
+        addField(inner, row++, "Authentication", JLabel(jump.authenticationMethod.toString()))
+        when (jump.authenticationMethod) {
+            ConnectionAuthenticationMethod.PASSWORD -> {
+                val hint = when {
+                    jumpStoreStatus != CredentialStoreStatus.AVAILABLE ->
+                        "OS credential store unavailable; the jump password stays session-only."
+                    storedJumpPassword != null -> "Saved jump password will be used unless a replacement is entered."
+                    else -> "Enter the jump host password for this connection."
+                }
+                addField(inner, row++, "", JLabel(hint))
+                addField(inner, row++, "Password", passwordField)
+            }
+            ConnectionAuthenticationMethod.PUBLIC_KEY -> {
+                addField(inner, row++, "Private key", JPanel(java.awt.BorderLayout(6, 0)).apply {
+                    add(keyFileField, java.awt.BorderLayout.CENTER)
+                    add(keyFileButton, java.awt.BorderLayout.EAST)
+                })
+                addField(inner, row++, "Passphrase", passphraseField)
+            }
+            ConnectionAuthenticationMethod.KEYBOARD_INTERACTIVE ->
+                addField(inner, row, "", JLabel("The jump host prompts during authentication."))
+            ConnectionAuthenticationMethod.SSH_AGENT ->
+                addField(inner, row, "", JLabel("The jump host uses the running SSH agent."))
+        }
+        return inner
     }
 
     private fun addField(panel: JPanel, row: Int, label: String, field: java.awt.Component) {
@@ -430,9 +593,12 @@ internal class SshConnectionController(
         val passwordProfileId: UUID?,
         val rememberPassword: Boolean,
         val credentialRevision: Long?,
+        val jumpHost: JumpHostPreset? = null,
+        val jumpAuthentication: SshAuthentication? = null,
     ) : AutoCloseable {
         override fun close() {
             authentication.close()
+            jumpAuthentication?.close()
         }
     }
 
@@ -563,6 +729,19 @@ internal data class HostConnectionPreset(
     val profileId: UUID,
     val endpoint: SshEndpoint,
     val authenticationMethod: ConnectionAuthenticationMethod,
+    val jumpHost: JumpHostPreset? = null,
+)
+
+internal data class JumpHostPreset(
+    val profileId: UUID,
+    val endpoint: SshEndpoint,
+    val authenticationMethod: ConnectionAuthenticationMethod,
+)
+
+internal fun JumpHostPreset.toPreset(): HostConnectionPreset = HostConnectionPreset(
+    profileId = profileId,
+    endpoint = endpoint,
+    authenticationMethod = authenticationMethod,
 )
 
 internal data class OpenedTerminal(
@@ -578,6 +757,7 @@ internal fun interface SshTerminalConnector {
         knownHostsStore: KnownHostsStore,
         unknownHostVerifier: HostKeyVerifier,
         changedHostKeyHandler: ChangedHostKeyHandler,
+        transport: TransportProvider,
     ): HostSession
 }
 
@@ -588,12 +768,14 @@ private object MinaTerminalConnector : SshTerminalConnector {
         knownHostsStore: KnownHostsStore,
         unknownHostVerifier: HostKeyVerifier,
         changedHostKeyHandler: ChangedHostKeyHandler,
+        transport: TransportProvider,
     ): HostSession = MinaSshConnection.connect(
         endpoint = endpoint,
         authentication = authentication,
         knownHostsStore = knownHostsStore,
         unknownHostVerifier = unknownHostVerifier,
         changedHostKeyHandler = changedHostKeyHandler,
+        transport = transport,
     )
 }
 

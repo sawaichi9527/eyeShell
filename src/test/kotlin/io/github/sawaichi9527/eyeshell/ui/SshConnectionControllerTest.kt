@@ -47,7 +47,7 @@ class SshConnectionControllerTest {
         val profileId = UUID.fromString("00000000-0000-0000-0000-000000000051")
         val store = RecordingPasswordStore()
         val terminal = FakeTerminalSession()
-        val connector = SshTerminalConnector { _, _, _, _, _ ->
+        val connector = SshTerminalConnector { _, _, _, _, _, _ ->
             assertTrue(store.saved.isEmpty(), "Password was saved before the terminal opened")
             FakeHostSession(terminal)
         }
@@ -71,7 +71,7 @@ class SshConnectionControllerTest {
     @Test
     fun `does not save a password when terminal opening fails`() {
         val store = RecordingPasswordStore()
-        val controller = SshConnectionController(store, SshTerminalConnector { _, _, _, _, _ ->
+        val controller = SshConnectionController(store, SshTerminalConnector { _, _, _, _, _, _ ->
             throw IOException("terminal failed")
         })
         val request = passwordRequest(UUID.randomUUID(), remember = true)
@@ -91,7 +91,7 @@ class SshConnectionControllerTest {
     fun `keeps an opened terminal when credential persistence fails`() {
         val store = RecordingPasswordStore(failSave = true)
         val terminal = FakeTerminalSession()
-        val controller = SshConnectionController(store, SshTerminalConnector { _, _, _, _, _ -> FakeHostSession(terminal) })
+        val controller = SshConnectionController(store, SshTerminalConnector { _, _, _, _, _, _ -> FakeHostSession(terminal) })
         val request = passwordRequest(UUID.randomUUID(), remember = true)
 
         try {
@@ -113,7 +113,7 @@ class SshConnectionControllerTest {
         val guard = ProfileCredentialGuard()
         val controller = SshConnectionController(
             store,
-            SshTerminalConnector { _, _, _, _, _ -> FakeHostSession(FakeTerminalSession()) },
+            SshTerminalConnector { _, _, _, _, _, _ -> FakeHostSession(FakeTerminalSession()) },
             guard,
         )
         val request = passwordRequest(profileId, remember = true)

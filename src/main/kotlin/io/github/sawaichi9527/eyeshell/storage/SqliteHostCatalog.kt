@@ -47,6 +47,7 @@ class SqliteHostCatalog(
         val normalized = host.normalized()
         val profileId = UUID.randomUUID()
         val groupId = normalized.group?.let { resolveNameId(connection, "host_groups", it) }
+        val jumpHostUuid = resolveJumpHostReference(connection, normalized.jumpHostProfileId, profileId)
         val id = connection.prepareStatement(CREATE_HOST).use { statement ->
             statement.setString(1, profileId.toString())
             statement.setObject(2, groupId)
@@ -55,6 +56,7 @@ class SqliteHostCatalog(
             statement.setInt(5, normalized.endpoint.port)
             statement.setString(6, normalized.endpoint.username)
             statement.setString(7, normalized.authenticationMethod.name)
+            statement.setString(8, jumpHostUuid)
             statement.executeQuery().use { results ->
                 check(results.next()) { "Host insert did not return an identifier" }
                 results.getLong(1)
@@ -69,6 +71,14 @@ class SqliteHostCatalog(
         require(id > 0) { "Host identifier must be positive" }
         val normalized = host.normalized()
         val groupId = normalized.group?.let { resolveNameId(connection, "host_groups", it) }
+        val profileId = connection.prepareStatement("SELECT profile_uuid FROM hosts WHERE id = ?").use { statement ->
+            statement.setLong(1, id)
+            statement.executeQuery().use { results ->
+                require(results.next()) { "Unknown host profile: $id" }
+                UUID.fromString(results.getString(1))
+            }
+        }
+        val jumpHostUuid = resolveJumpHostReference(connection, normalized.jumpHostProfileId, profileId)
         val updated = connection.prepareStatement(UPDATE_HOST).use { statement ->
             statement.setObject(1, groupId)
             statement.setString(2, normalized.name)
@@ -76,18 +86,12 @@ class SqliteHostCatalog(
             statement.setInt(4, normalized.endpoint.port)
             statement.setString(5, normalized.endpoint.username)
             statement.setString(6, normalized.authenticationMethod.name)
-            statement.setLong(7, id)
+            statement.setString(7, jumpHostUuid)
+            statement.setLong(8, id)
             statement.executeUpdate()
         }
         require(updated == 1) { "Unknown host profile: $id" }
         replaceTags(connection, id, normalized.tags)
-        val profileId = connection.prepareStatement("SELECT profile_uuid FROM hosts WHERE id = ?").use { statement ->
-            statement.setLong(1, id)
-            statement.executeQuery().use { results ->
-                check(results.next()) { "Updated host profile disappeared: $id" }
-                UUID.fromString(results.getString(1))
-            }
-        }
         SavedHost(id, profileId, normalized)
     }
 
@@ -95,11 +99,64 @@ class SqliteHostCatalog(
     override fun deleteHost(id: Long) {
         require(id > 0) { "Host identifier must be positive" }
         writeTransaction { connection ->
+            val profileId = connection.prepareStatement("SELECT profile_uuid FROM hosts WHERE id = ?").use { statement ->
+                statement.setLong(1, id)
+                statement.executeQuery().use { results -> results.takeIf { it.next() }?.getString(1) }
+            }
+            if (profileId != null) {
+                val dependants = connection.prepareStatement(
+                    "SELECT name FROM hosts WHERE jump_host_uuid = ? ORDER BY name, id",
+                ).use { statement ->
+                    statement.setString(1, profileId)
+                    statement.executeQuery().use { results ->
+                        buildList { while (results.next()) add(results.getString("name")) }
+                    }
+                }
+                require(dependants.isEmpty()) {
+                    "Host is used as a jump host by: ${dependants.joinToString(", ")}"
+                }
+            }
             connection.prepareStatement("DELETE FROM hosts WHERE id = ?").use { statement ->
                 statement.setLong(1, id)
                 statement.executeUpdate()
             }
         }
+    }
+
+    private fun resolveJumpHostReference(
+        connection: Connection,
+        jumpHostProfileId: UUID?,
+        selfProfileId: UUID?,
+    ): String? {
+        if (jumpHostProfileId == null) return null
+        require(jumpHostProfileId != selfProfileId) { "A saved host cannot use itself as a jump host" }
+        val jumpHostJumpUuid = connection.prepareStatement(
+            "SELECT jump_host_uuid FROM hosts WHERE profile_uuid = ?",
+        ).use { statement ->
+            statement.setString(1, jumpHostProfileId.toString())
+            statement.executeQuery().use { results ->
+                require(results.next()) { "Jump host profile does not exist: $jumpHostProfileId" }
+                results.getString(1)
+            }
+        }
+        require(jumpHostJumpUuid == null) {
+            "Nested jump hosts are not supported; clear the jump host on $jumpHostProfileId first"
+        }
+        if (selfProfileId != null) {
+            val dependants = connection.prepareStatement(
+                "SELECT COUNT(*) FROM hosts WHERE jump_host_uuid = ?",
+            ).use { statement ->
+                statement.setString(1, selfProfileId.toString())
+                statement.executeQuery().use { results ->
+                    results.next()
+                    results.getInt(1)
+                }
+            }
+            require(dependants == 0) {
+                "Host is used as a jump host by $dependants saved host(s); nested jump hosts are not supported"
+            }
+        }
+        return jumpHostProfileId.toString()
     }
 
     @Synchronized
@@ -231,6 +288,14 @@ class SqliteHostCatalog(
             if (version == 2) {
                 connection.createStatement().use { it.execute(CREATE_COMMAND_SNIPPETS) }
                 recordSchemaVersion(connection, 3, "saved command snippets")
+                version = 3
+            }
+            if (version == 3) {
+                connection.createStatement().use { statement ->
+                    statement.execute(ADD_JUMP_HOST_COLUMN)
+                    statement.execute(CREATE_JUMP_HOST_INDEX)
+                }
+                recordSchemaVersion(connection, 4, "jump host references")
             }
             connection.commit()
         } catch (failure: Throwable) {
@@ -401,6 +466,7 @@ class SqliteHostCatalog(
             name = getString("name"),
             endpoint = SshEndpoint(getString("host"), getInt("port"), getString("username")),
             authenticationMethod = SavedAuthenticationMethod.valueOf(getString("authentication_method")),
+            jumpHostProfileId = getString("jump_host_uuid")?.let(UUID::fromString),
             group = getString("group_name"),
         )
     } catch (failure: IllegalArgumentException) {
@@ -425,13 +491,14 @@ class SqliteHostCatalog(
         val name: String,
         val endpoint: SshEndpoint,
         val authenticationMethod: SavedAuthenticationMethod,
+        val jumpHostProfileId: UUID?,
         val group: String?,
         val tags: MutableList<String> = mutableListOf(),
     ) {
         fun savedHost(): SavedHost = SavedHost(
             id,
             profileId,
-            HostDraft(name, endpoint, authenticationMethod, group, tags.toList()).normalized(),
+            HostDraft(name, endpoint, authenticationMethod, group, tags.toList(), jumpHostProfileId).normalized(),
         )
     }
 
@@ -441,7 +508,7 @@ class SqliteHostCatalog(
     )
 
     companion object {
-        private const val CURRENT_SCHEMA_VERSION = 3
+        private const val CURRENT_SCHEMA_VERSION = 4
         private const val BUSY_TIMEOUT_MILLIS = 5_000
         private val DIRECTORY_PERMISSIONS = setOf(
             PosixFilePermission.OWNER_READ,
@@ -513,6 +580,13 @@ class SqliteHostCatalog(
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             ) STRICT
         """
+        private const val ADD_JUMP_HOST_COLUMN = """
+            ALTER TABLE hosts ADD COLUMN jump_host_uuid TEXT
+                CHECK (jump_host_uuid IS NULL OR length(jump_host_uuid) = 36)
+        """
+        private const val CREATE_JUMP_HOST_INDEX = """
+            CREATE INDEX hosts_jump_host_uuid_idx ON hosts(jump_host_uuid)
+        """
         private const val LIST_COMMAND_SNIPPETS = """
             SELECT id, name, command FROM command_snippets ORDER BY name, id
         """
@@ -523,7 +597,7 @@ class SqliteHostCatalog(
             UPDATE command_snippets SET name = ?, command = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
         """
         private const val LIST_HOSTS = """            SELECT h.id, h.profile_uuid, h.name, h.host, h.port, h.username, h.authentication_method,
-                   g.name AS group_name, t.name AS tag_name
+                   h.jump_host_uuid, g.name AS group_name, t.name AS tag_name
             FROM hosts h
             LEFT JOIN host_groups g ON g.id = h.group_id
             LEFT JOIN host_tags ht ON ht.host_id = h.id
@@ -531,14 +605,14 @@ class SqliteHostCatalog(
             ORDER BY h.name, h.id, t.name
         """
         private const val CREATE_HOST = """
-            INSERT INTO hosts(profile_uuid, group_id, name, host, port, username, authentication_method)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO hosts(profile_uuid, group_id, name, host, port, username, authentication_method, jump_host_uuid)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
         """
         private const val UPDATE_HOST = """
             UPDATE hosts
             SET group_id = ?, name = ?, host = ?, port = ?, username = ?, authentication_method = ?,
-                updated_at = CURRENT_TIMESTAMP
+                jump_host_uuid = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """
         private val PROFILE_ID_MIGRATION_PREFIX = listOf(

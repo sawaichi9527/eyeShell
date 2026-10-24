@@ -184,7 +184,7 @@ internal class HostCatalogController(
         }
         list.addListSelectionListener { updateSelectionActions() }
         add.addActionListener {
-            val editor = showHostEditor(dialog, null) ?: return@addActionListener
+            val editor = showHostEditor(dialog, null, currentHosts(state)) ?: return@addActionListener
             val warning = AtomicReference<String?>()
             mutate(
                 state,
@@ -202,7 +202,7 @@ internal class HostCatalogController(
         }
         edit.addActionListener {
             val selected = list.selectedValue ?: return@addActionListener
-            showHostEditor(dialog, selected)?.let { editor ->
+            showHostEditor(dialog, selected, currentHosts(state))?.let { editor ->
                 val warning = AtomicReference<String?>()
                 mutate(
                     state,
@@ -242,7 +242,19 @@ internal class HostCatalogController(
         }
         connectButton.addActionListener {
             val selected = list.selectedValue ?: return@addActionListener
-            if (connect(owner, selected.toPreset())) {
+            val hosts = currentHosts(state)
+            val jumpProfileId = selected.draft.jumpHostProfileId
+            val jumpHost = jumpProfileId?.let { profileId -> hosts.firstOrNull { it.profileId == profileId } }
+            if (jumpProfileId != null && jumpHost == null) {
+                JOptionPane.showMessageDialog(
+                    dialog,
+                    "The selected jump host no longer exists. Edit '${selected.draft.name}' to choose another jump host.",
+                    "Jump host unavailable",
+                    JOptionPane.ERROR_MESSAGE,
+                )
+                return@addActionListener
+            }
+            if (connect(owner, selected.toPreset(jumpHost))) {
                 dialog.dispose()
             } else {
                 JOptionPane.showMessageDialog(
@@ -343,16 +355,26 @@ internal class HostCatalogController(
     private fun showCatalogFailure(state: DialogState, failure: Throwable) {
         if (!state.dialog.isDisplayable) return
         setBusy(state, false, "Host catalog unavailable")
+        val message = when (failure) {
+            is CredentialRollbackException, is IllegalArgumentException -> failure.message
+            else -> "Could not access the local host catalog."
+        }
         JOptionPane.showMessageDialog(
             state.dialog,
-            failure.message.takeIf { failure is CredentialRollbackException }
-                ?: "Could not access the local host catalog.",
+            message,
             "Host catalog error",
             JOptionPane.ERROR_MESSAGE,
         )
     }
 
-    private fun showHostEditor(owner: Component, existing: SavedHost?): HostEditorResult? {
+    private fun currentHosts(state: DialogState): List<SavedHost> =
+        (0 until state.model.size).map(state.model::getElementAt)
+
+    private fun showHostEditor(
+        owner: Component,
+        existing: SavedHost?,
+        availableHosts: List<SavedHost>,
+    ): HostEditorResult? {
         val name = JTextField(existing?.draft?.name.orEmpty(), 24)
         val host = JTextField(existing?.draft?.endpoint?.host.orEmpty(), 24)
         val port = JSpinner(SpinnerNumberModel(existing?.draft?.endpoint?.port ?: 22, 1, 65535, 1))
@@ -360,6 +382,32 @@ internal class HostCatalogController(
         val authentication = JComboBox(ConnectionAuthenticationMethod.entries.toTypedArray()).apply {
             selectedItem = existing?.draft?.authenticationMethod?.toConnectionMethod()
                 ?: ConnectionAuthenticationMethod.PASSWORD
+        }
+        val jumpCandidates = availableHosts.filter { candidate ->
+            candidate.profileId != existing?.profileId && candidate.draft.jumpHostProfileId == null
+        }
+        val jumpHost = JComboBox<SavedHost?>().apply {
+            this.name = "jumpHostField"
+            addItem(null)
+            jumpCandidates.forEach(::addItem)
+            selectedItem = jumpCandidates.firstOrNull {
+                it.profileId == existing?.draft?.jumpHostProfileId
+            }
+            renderer = object : DefaultListCellRenderer() {
+                override fun getListCellRendererComponent(
+                    list: JList<*>?,
+                    value: Any?,
+                    index: Int,
+                    isSelected: Boolean,
+                    cellHasFocus: Boolean,
+                ): Component = super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus).apply {
+                    (this as JLabel).text = when (value) {
+                        null -> "(none)"
+                        is SavedHost -> "${value.draft.name}  ${value.draft.endpoint.displayName}"
+                        else -> value.toString()
+                    }
+                }
+            }
         }
         val group = JTextField(existing?.draft?.group.orEmpty(), 24)
         val tags = JTextField(existing?.draft?.tags?.joinToString(", ").orEmpty(), 24)
@@ -400,9 +448,10 @@ internal class HostCatalogController(
             addField(5, "Password", password)
             addField(6, "Remember", rememberPassword)
             addField(7, "", clearPassword)
-            addField(8, "Group", group)
-            addField(9, "Tags", tags)
-            addField(10, "", credentialHint)
+            addField(8, "Jump host", jumpHost)
+            addField(9, "Group", group)
+            addField(10, "Tags", tags)
+            addField(11, "", credentialHint)
         }
         try {
             while (JOptionPane.showConfirmDialog(
@@ -420,6 +469,7 @@ internal class HostCatalogController(
                         authenticationMethod = (authentication.selectedItem as ConnectionAuthenticationMethod).toSavedMethod(),
                         group = group.text.trim().takeIf(String::isNotEmpty),
                         tags = tags.text.split(',').map(String::trim).filter(String::isNotEmpty),
+                        jumpHostProfileId = (jumpHost.selectedItem as SavedHost?)?.profileId,
                     ).normalized()
                     val entered = password.password
                     val savePassword = password.isEnabled && rememberPassword.isSelected && entered.isNotEmpty()
@@ -547,10 +597,17 @@ internal class HostCatalogController(
 
 internal enum class CredentialAction { NONE, SAVED, CLEARED }
 
-internal fun SavedHost.toPreset(): HostConnectionPreset = HostConnectionPreset(
+internal fun SavedHost.toPreset(jumpHost: SavedHost? = null): HostConnectionPreset = HostConnectionPreset(
     profileId = profileId,
     endpoint = draft.endpoint,
     authenticationMethod = draft.authenticationMethod.toConnectionMethod(),
+    jumpHost = jumpHost?.let { gateway ->
+        JumpHostPreset(
+            profileId = gateway.profileId,
+            endpoint = gateway.draft.endpoint,
+            authenticationMethod = gateway.draft.authenticationMethod.toConnectionMethod(),
+        )
+    },
 )
 
 private fun SavedAuthenticationMethod.toConnectionMethod(): ConnectionAuthenticationMethod =

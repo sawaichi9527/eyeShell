@@ -14,6 +14,8 @@ SFTP (Phase 2 high-priority item) is implemented on the Windows host: `sshd-sftp
 
 Command Snippets (Phase 2) are implemented: SQLite schema v3 adds a `command_snippets` table, the Commands tool tab lists, adds, edits, and deletes saved commands, and Run sends the selected command to the active session. Validation is recorded below (2026-10-24); the suite is at 149 tests.
 
+M2 Jump Host (transport provider) is implemented on this Ubuntu host. A `TransportProvider` boundary (`Direct` / `JumpHost`) lets one saved host profile act as a single-hop jump host; SQLite schema v4 adds `hosts.jump_host_uuid` with self-reference, dangling-reference, nested-chain, and delete protection; the host editor exposes a jump host selector; the connection dialog collects jump-host credentials only when the profile has no usable material (Password from the OS credential store, Public Key session-only, keyboard-interactive, or agent); and host-key confirmation shows a single combined screen for the target whenever the jump key is already trusted, with a one-time jump screen on first use. Known Hosts verification is pinned to the target `host:port` even though the target transport is dialed through an ephemeral loopback forward. The suite is at 159 tests (2026-10-24).
+
 ### 2026-08-04 GUI review findings (fixed 2026-10-23)
 
 A manual GUI review on the Windows host reported five issues. All five are now implemented on the Ubuntu host; the root causes below are kept for traceability.
@@ -153,12 +155,19 @@ The M1I baseline worktree is clean (`333b6cc`). An initial uncommitted `EyeShell
 - Added `jpackage`-based packaging tasks in `build.gradle.kts`: `preparePackageInput` (assembles the runtime classpath plus the application jar), `jpackageAppImage` (bundled-runtime app image), `jpackageInstaller` (Linux DEB / Windows MSI), and `jpackagePortable` (Linux `tar.gz` / Windows ZIP), all invoked with the project-local JDK's `jpackage`/`jlink`.
 - Added a `PackageArtifacts` boundary (`platform/PackageArtifacts.kt`) that owns the app/package names, main class, package version (snapshot stripped), and platform archive file names shared by the build.
 - Added deterministic M1M coverage: snapshot-stripped package version, Linux/Windows portable archive names, and Linux/Windows installer names.
+- Added a `TransportProvider` boundary (`Direct`, `JumpHost`) and routed `MinaSshConnection` through it; a jump host transport is opened first, an ephemeral loopback `direct-tcpip` forwarding tracker is created on it, and the returned `HostSession` owns and releases the target session, the tracker, and the jump connection.
+- Pinned Known Hosts verification to the trusted target `host:port`: the verifier accepts an explicit verification address and no longer adds the dialed socket address as an alternate host identity, so jump-host connections never record or match an ephemeral loopback port.
+- Added SQLite schema v4 with `hosts.jump_host_uuid`, jump-reference validation (self, dangling, nested chain), and delete protection for profiles used as jump hosts.
+- Added a jump host selector to the saved host editor and jump-host credential inputs to the SSH connection dialog (OS credential store password, session-only public key/passphrase, keyboard-interactive, agent) without persisting new secrets.
+- Added `HostKeyReview`, which keeps the jump host key separate from the target key and produces a combined single target confirmation screen that restates the jump trust status; changed keys are still rejected for both hops.
+- Added deterministic coverage for jump transport routing, Known Hosts identity mapping, changed target keys through a jump host, jump reference validation and delete protection, preset/secret boundaries, and host-key review messaging.
 
 ## In Progress
 
 - M2 Linux Agentless Monitoring: shared-transport refactor, monitor parsers/sampler, and the selected-tab monitor panel are committed and Windows-validated (116 tests, 8 skips), including an embedded-SSH end-to-end test that confirms sampled output renders in the panel. Live validation against this real Linux host is recorded under Validation Evidence (2026-10-24).
 - SFTP: shared-transport SFTP client, controller with a background transfer queue, and the dock SFTP panel are committed and Windows-validated (125 tests, 8 skips). Live SFTP validation against this host's real filesystem is recorded under Validation Evidence (2026-10-24). Drag-and-drop upload and per-transfer progress percentages are implemented and validated (2026-10-24).
 - Five GUI review findings from 2026-08-04 are fixed (see "2026-08-04 GUI review findings" under Current Status); validation is recorded under Validation Evidence (2026-10-23).
+- M2 Jump Host is implemented and validated on Ubuntu with in-process bastion/target servers (2026-10-24). Live validation against a real OpenSSH bastion and re-validation on the Windows host are pending.
 
 ## Token Usage Tracking
 
@@ -214,6 +223,7 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 
 - M1J, M1K, M1L, and M1M are implemented and validated on Ubuntu 26.04 and re-validated on the Windows host (97 tests, 7 skips, `check` passed); Windows-specific platform validation is complete except the MSI/ZIP installers (see below).
 - M2 monitoring and SFTP are implemented and Windows-validated (125 tests, 8 skips); both are now also validated live against this Linux host (2026-10-24). SFTP drag-and-drop upload and transfer progress percentages are implemented (2026-10-24). Command Snippets are implemented with SQLite persistence and session-bound Run (2026-10-24).
+- Next M2 items after Jump Host: SOCKS5/HTTP CONNECT proxy (M2B) and persisted local/remote/dynamic port forwarding (M2C, schema v5, rules bound to saved hosts).
 - Pre-release: validate the Windows MSI (requires the WiX toolset, which jpackage invokes on Windows) and ZIP installer branches of the packaging tasks; development-stage validation uses `gradlew-local.ps1 run` for GUI smoke checks and milestone `jpackageAppImage` bundles instead.
 - Validate the native Wayland path on a WLToolkit-capable JBR 25 runtime (Ubuntu 24.04/26.04 Wayland session) and confirm the X toolkit still launches under XWayland and full X11.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
@@ -439,3 +449,16 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - M1G stores authentication method but intentionally does not store Private Key File paths or any authentication secret.
 - M1I supports multiple established terminal tabs but intentionally serializes connection dialogs/attempts. M1J adds natural-exit tab status (`Exited`) but maps any unexpected stop to `Exited`; `Failed`/`Closing` status transitions are not yet produced.
 - The M1M packaging tasks' Windows branches (MSI/ZIP) are wired but unverified until run on a Windows host; MSI generation requires the WiX toolset that `jpackage` invokes on Windows.
+- Jump Host supports exactly one hop. Nested jump hosts are rejected by catalog validation, and an ad-hoc (unsaved) jump host is intentionally unavailable: save it as a Saved Host first.
+- A replacement jump-host password typed in the connection dialog is session-only; save jump credentials through the Host editor so they land in the OS credential store.
+- Port forwarding rules are not implemented yet (M2C, schema v5 planned) and the SOCKS5/HTTP CONNECT proxy transport (M2B) is not implemented yet.
+
+## Validation Evidence (M2 Jump Host)
+
+- Commands: `./scripts/gradlew-local.sh test --tests "*MinaSshConnectionTest" --tests "*HostKeyReviewTest" --tests "*SqliteHostCatalogTest" --tests "*HostCatalogControllerTest" --tests "*SshConnectionControllerTest"`; `./scripts/gradlew-local.sh test`; `./scripts/gradlew-local.sh check`; `git diff --check`.
+- Executed at: 2026-10-24T10:34+08:00
+- Exit codes: 0 for the targeted tests, the full suite, `check`, and the diff check.
+- Result: Added the single-hop jump-host transport provider, SQLite schema v4 jump references, the saved-host jump selector, jump credentials in the connection dialog, and the combined target host-key review. The full suite runs 159 tests: 159 executed, 0 failures, 0 errors, 9 skipped (the existing opt-in/platform-gated set). New coverage: a terminal opened through an in-process bastion to a target server; both presented host keys reported at their real `host:port`; exactly two Known Hosts entries with no ephemeral loopback alias; no re-prompt once both keys are trusted; a changed target key rejected through the jump host; jump reference validation (self, dangling, nested) and delete protection; preset boundaries without secrets; and the host-key review messages.
+- Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
+- Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
+- Remaining unverified scope: live jump host against a real OpenSSH server, Windows host re-validation, a GUI walkthrough of the jump selector and jump credential dialog, and SFTP/monitoring through a jump host (they reuse the target transport but have no jump-specific assertion yet).

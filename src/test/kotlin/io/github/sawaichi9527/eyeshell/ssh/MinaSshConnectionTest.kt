@@ -419,6 +419,163 @@ class MinaSshConnectionTest {
         }
     }
 
+    @Test
+    fun `routes the terminal through an explicit jump host and verifies both host keys`() {
+        val bastion = org.apache.sshd.server.SshServer.setUpDefaultServer().apply {
+            host = "127.0.0.1"
+            port = 0
+            keyPairProvider = SimpleGeneratorHostKeyProvider(temporaryDirectory.resolve("host-key-bastion.ser")).apply {
+                algorithm = "RSA"
+                keySize = 2048
+            }
+            passwordAuthenticator = org.apache.sshd.server.auth.password.PasswordAuthenticator { username, candidate, _ ->
+                username == USERNAME && password.contentEquals(candidate.toCharArray())
+            }
+            forwardingFilter = org.apache.sshd.server.forward.AcceptAllForwardingFilter.INSTANCE
+            shellFactory = ShellFactory { EchoShellCommand() }
+            start()
+        }
+        try {
+            val jumpKey = AtomicReference<PresentedHostKey>()
+            val targetKey = AtomicReference<PresentedHostKey>()
+            val knownHosts = knownHostsStore()
+            val endpoint = SshEndpoint("127.0.0.1", server.port, USERNAME)
+            val connection = openThroughJump(
+                endpoint = endpoint,
+                bastionPort = bastion.port,
+                knownHosts = knownHosts,
+                jumpVerifier = HostKeyVerifier { presented ->
+                    jumpKey.set(presented)
+                    true
+                },
+                targetVerifier = HostKeyVerifier { presented ->
+                    targetKey.set(presented)
+                    true
+                },
+            )
+            try {
+                val terminal = connection.openTerminal()
+                try {
+                    assertTrue(readUntil(terminal, "ready\r\n").contains("ready\r\n"))
+                } finally {
+                    terminal.close()
+                }
+                assertEquals("127.0.0.1:${bastion.port}", jumpKey.get().remoteAddress)
+                assertEquals("127.0.0.1:${server.port}", targetKey.get().remoteAddress)
+                val recordedHosts = knownHosts.file.toFile().readLines()
+                    .filter(String::isNotBlank)
+                    .map { it.substringBefore(' ') }
+                    .toSet()
+                assertEquals(
+                    setOf("[127.0.0.1]:${bastion.port}", "[127.0.0.1]:${server.port}"),
+                    recordedHosts,
+                )
+                assertTrue(connection.isOpen())
+            } finally {
+                connection.close()
+            }
+            assertFalse(connection.isOpen())
+
+            val repeatedPrompts = AtomicInteger()
+            openThroughJump(
+                endpoint = endpoint,
+                bastionPort = bastion.port,
+                knownHosts = knownHosts,
+                jumpVerifier = HostKeyVerifier {
+                    repeatedPrompts.incrementAndGet()
+                    true
+                },
+                targetVerifier = HostKeyVerifier {
+                    repeatedPrompts.incrementAndGet()
+                    true
+                },
+            ).close()
+            assertEquals(0, repeatedPrompts.get())
+        } finally {
+            bastion.stop(true)
+        }
+    }
+
+    @Test
+    fun `rejects a changed target key while the jump host key stays trusted`() {
+        val bastion = org.apache.sshd.server.SshServer.setUpDefaultServer().apply {
+            host = "127.0.0.1"
+            port = 0
+            keyPairProvider = SimpleGeneratorHostKeyProvider(temporaryDirectory.resolve("host-key-bastion-change.ser")).apply {
+                algorithm = "RSA"
+                keySize = 2048
+            }
+            passwordAuthenticator = org.apache.sshd.server.auth.password.PasswordAuthenticator { username, candidate, _ ->
+                username == USERNAME && password.contentEquals(candidate.toCharArray())
+            }
+            forwardingFilter = org.apache.sshd.server.forward.AcceptAllForwardingFilter.INSTANCE
+            shellFactory = ShellFactory { EchoShellCommand() }
+            start()
+        }
+        try {
+            val endpoint = SshEndpoint("127.0.0.1", server.port, USERNAME)
+            val knownHosts = knownHostsStore()
+            openThroughJump(
+                endpoint,
+                bastion.port,
+                knownHosts,
+                HostKeyVerifier { true },
+                HostKeyVerifier { true },
+            ).close()
+
+            val port = server.port
+            server.stop(true)
+            server = createServer(port, temporaryDirectory.resolve("changed-target-key.ser"))
+
+            val changed = AtomicReference<ChangedHostKey>()
+            assertThrows(Exception::class.java) {
+                SshAuthentication.Password(password).use { authentication ->
+                    SshAuthentication.Password(password).use { jumpAuthentication ->
+                        MinaSshConnection.connect(
+                            endpoint = endpoint,
+                            authentication = authentication,
+                            knownHostsStore = knownHosts,
+                            unknownHostVerifier = HostKeyVerifier { true },
+                            changedHostKeyHandler = ChangedHostKeyHandler(changed::set),
+                            transport = TransportProvider.JumpHost(
+                                endpoint = SshEndpoint("127.0.0.1", bastion.port, USERNAME),
+                                authentication = jumpAuthentication,
+                                unknownHostVerifier = HostKeyVerifier { true },
+                            ),
+                        )
+                    }
+                }
+            }
+
+            assertEquals("127.0.0.1:$port", changed.get().remoteAddress)
+            assertFalse(changed.get().expectedFingerprint == changed.get().actualFingerprint)
+        } finally {
+            bastion.stop(true)
+        }
+    }
+
+    private fun openThroughJump(
+        endpoint: SshEndpoint,
+        bastionPort: Int,
+        knownHosts: KnownHostsStore,
+        jumpVerifier: HostKeyVerifier,
+        targetVerifier: HostKeyVerifier,
+    ): MinaSshConnection = SshAuthentication.Password(password).use { authentication ->
+        SshAuthentication.Password(password).use { jumpAuthentication ->
+            MinaSshConnection.connect(
+                endpoint = endpoint,
+                authentication = authentication,
+                knownHostsStore = knownHosts,
+                unknownHostVerifier = targetVerifier,
+                transport = TransportProvider.JumpHost(
+                    endpoint = SshEndpoint("127.0.0.1", bastionPort, USERNAME),
+                    authentication = jumpAuthentication,
+                    unknownHostVerifier = jumpVerifier,
+                ),
+            )
+        }
+    }
+
     private fun connectWithPassword(
         endpoint: SshEndpoint,
         knownHosts: KnownHostsStore,
