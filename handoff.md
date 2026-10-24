@@ -261,3 +261,13 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10, default test heap (512 MiB).
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`; the probe figure is printed to the test's `system-out`.
 - Remaining unverified scope: the probe covers three sessions with three highlight rules, not a larger rule set, more tabs, or search/selection running concurrently; heap figures are GC-dependent and JVM-specific; Windows was not re-measured; no GUI gesture automation exists.
+
+### 2026-10-24 Session close (Saved Hosts tree, multi-session stress, handoff split)
+
+- Commands: `./scripts/gradlew-local.sh test --rerun-tasks --console=plain`; `./scripts/gradlew-local.sh check --console=plain`; `EYESHELL_TEST_HEAP_PROBE=1 ./scripts/gradlew-local.sh test --tests "*JediTermTerminalViewTest" --rerun-tasks`; `git diff --check`.
+- Executed at: 2026-10-24T14:52:33+08:00
+- Duration / exit codes: full test 32s, exit 0; check 1s, exit 0; heap probe 26s, exit 0; diff check exit 0.
+- Result: Full suite at HEAD `73b476f` runs 169 tests: 169 executed, 0 failures, 0 errors, 12 skipped (Windows clipboard, Windows OpenSSH agent, Windows data-path SQLite, live Windows Credential Manager, live Linux Secret Service, 2 `LiveLinuxHostValidationTest`, 2 `OpenSshInteroperabilityTest`, 2 env-gated `LiveJumpHostValidationTest`, and the env-gated heap probe). `check` passed. The heap probe passed and reported 151 MiB retained for 300,000 lines (50 MiB per session) inside the 512 MiB test heap; the same probe reported 160 MiB (53 MiB per session) earlier in this session, which is normal GC variance and stays far below the 128 MiB-per-session ceiling.
+- Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10, default 512 MiB test heap.
+- Artifacts: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`; logs under `/tmp/opencode/session-close-tree-test.log`, `/tmp/opencode/session-close-tree-check.log`, and `/tmp/opencode/session-close-tree-heap.log`.
+- Not re-run in this close-out: the opt-in live Linux/OpenSSH/Secret Service/jump-host cases, GUI smoke, and all Windows-gated cases. The manual GUI walkthrough in `docs/MANUAL_GUI_CHECKLIST.md` has not been performed by a human; the tree's visual appearance and dialog gestures remain unverified beyond the automated dialog test.
