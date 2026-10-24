@@ -15,6 +15,7 @@ import io.github.sawaichi9527.eyeshell.ssh.TransportProvider
 import io.github.sawaichi9527.eyeshell.secrets.CredentialStoreStatus
 import io.github.sawaichi9527.eyeshell.secrets.PasswordCredentialStore
 import io.github.sawaichi9527.eyeshell.secrets.ProfileCredentialGuard
+import io.github.sawaichi9527.eyeshell.secrets.SessionPasswordCache
 import io.github.sawaichi9527.eyeshell.secrets.StoredPassword
 import io.github.sawaichi9527.eyeshell.secrets.UnavailablePasswordCredentialStore
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
@@ -48,6 +49,7 @@ internal class SshConnectionController(
     private val passwordStore: PasswordCredentialStore = UnavailablePasswordCredentialStore(),
     private val terminalConnector: SshTerminalConnector = MinaTerminalConnector,
     private val credentialGuard: ProfileCredentialGuard = ProfileCredentialGuard(),
+    private val sessionPasswords: SessionPasswordCache = SessionPasswordCache(),
 ) : AutoCloseable {
     private val executor = Executors.newVirtualThreadPerTaskExecutor()
     private val closed = AtomicBoolean()
@@ -69,22 +71,15 @@ internal class SshConnectionController(
     }
 
     private fun connectInBackground(owner: EyeShellWindow, preset: HostConnectionPreset?) {
-        val loadedPassword = loadStoredPassword(preset)
-        val storeStatus = loadedPassword.first
-        var storedPassword = loadedPassword.second
-        var credentialRevision = loadedPassword.third
-        val loadedJumpPassword = preset?.jumpHost?.let { loadStoredPassword(it.toPreset()) }
-        var storedJumpPassword = loadedJumpPassword?.second
-        val jumpStoreStatus = loadedJumpPassword?.first ?: CredentialStoreStatus.UNAVAILABLE
+        var credential = loadStoredPassword(preset)
+        var jumpCredential = preset?.jumpHost?.let { loadStoredPassword(it.toPreset()) }
+            ?: LoadedCredential(CredentialStoreStatus.UNAVAILABLE, null, null, CredentialSource.NONE)
         try {
             while (!closed.get()) {
-                val password = storedPassword?.copyValue()
-                val jumpPassword = storedJumpPassword?.copyValue()
+                val password = credential.password?.copyValue()
+                val jumpPassword = jumpCredential.password?.copyValue()
                 val decision = try {
-                    showConnectionDialogOnEdt(
-                        owner, preset, password, storeStatus, storedPassword != null, credentialRevision,
-                        jumpPassword, jumpStoreStatus,
-                    )
+                    showConnectionDialogOnEdt(owner, preset, credential, password, jumpCredential, jumpPassword)
                 } finally {
                     password?.fill('\u0000')
                     jumpPassword?.fill('\u0000')
@@ -98,9 +93,11 @@ internal class SshConnectionController(
                         try {
                             checkNotNull(preset)
                             credentialGuard.mutate(preset.profileId) { passwordStore.forget(preset.profileId) }
-                            credentialRevision = credentialGuard.snapshot(preset.profileId) { Unit }.revision
-                            storedPassword?.close()
-                            storedPassword = null
+                            credential.close()
+                            credential = loadStoredPassword(preset)
+                            jumpCredential.close()
+                            jumpCredential = preset.jumpHost?.let { loadStoredPassword(it.toPreset()) }
+                                ?: LoadedCredential(CredentialStoreStatus.UNAVAILABLE, null, null, CredentialSource.NONE)
                         } catch (_: Exception) {
                             showCredentialWarning(owner, "Could not forget the saved password.")
                         }
@@ -112,28 +109,44 @@ internal class SshConnectionController(
                 }
             }
         } finally {
-            storedPassword?.close()
-            storedJumpPassword?.close()
+            credential.close()
+            jumpCredential.close()
         }
     }
 
     internal fun loadStoredPassword(
         preset: HostConnectionPreset?,
-    ): Triple<CredentialStoreStatus, StoredPassword?, Long?> {
+    ): LoadedCredential {
         if (preset?.authenticationMethod != ConnectionAuthenticationMethod.PASSWORD) {
-            return Triple(CredentialStoreStatus.UNAVAILABLE, null, null)
+            return LoadedCredential(CredentialStoreStatus.UNAVAILABLE, null, null, CredentialSource.NONE)
         }
         val storeStatus = safeStoreStatus()
-        if (storeStatus != CredentialStoreStatus.AVAILABLE) return Triple(storeStatus, null, null)
+        val sessionPassword = sessionPasswords.copyOf(preset.profileId)
+        if (sessionPassword != null) {
+            try {
+                return LoadedCredential(
+                    storeStatus = storeStatus,
+                    password = StoredPassword(sessionPassword),
+                    credentialRevision = null,
+                    source = CredentialSource.SESSION,
+                )
+            } finally {
+                java.util.Arrays.fill(sessionPassword, '\u0000')
+            }
+        }
+        if (storeStatus != CredentialStoreStatus.AVAILABLE && storeStatus != CredentialStoreStatus.LOCKED) {
+            return LoadedCredential(storeStatus, null, null, CredentialSource.NONE)
+        }
         val snapshot = try {
             credentialGuard.snapshot(preset.profileId) { active ->
                 if (active) passwordStore.retrieve(preset.profileId) else null
             }
         } catch (_: Exception) {
-            return Triple(CredentialStoreStatus.UNAVAILABLE, null, null)
+            return LoadedCredential(storeStatus, null, null, CredentialSource.NONE)
         }
-        if (!snapshot.active) return Triple(CredentialStoreStatus.UNAVAILABLE, null, null)
-        return Triple(storeStatus, snapshot.value, snapshot.revision)
+        if (!snapshot.active) return LoadedCredential(CredentialStoreStatus.UNAVAILABLE, null, null, CredentialSource.NONE)
+        val stored = snapshot.value ?: return LoadedCredential(storeStatus, null, null, CredentialSource.NONE)
+        return LoadedCredential(safeStoreStatus(), stored, snapshot.revision, CredentialSource.OS_STORE)
     }
 
     private fun connectRequest(owner: EyeShellWindow, request: ConnectionRequest) {
@@ -163,11 +176,13 @@ internal class SshConnectionController(
                     ChangedHostKeyHandler(changedHostKey::set),
                     transport,
                 )
+                val reconnectProfileId = request.passwordProfileId ?: UUID.randomUUID()
+                rememberForReconnect(request, opened, reconnectProfileId)
                 SwingUtilities.invokeLater {
                     if (owner.isDisplayable && !closed.get()) {
                         try {
                             val reconnectPreset = HostConnectionPreset(
-                                profileId = request.passwordProfileId ?: UUID.randomUUID(),
+                                profileId = reconnectProfileId,
                                 endpoint = request.endpoint,
                                 authenticationMethod = request.authentication.toConnectionMethod(),
                                 jumpHost = request.jumpHost,
@@ -208,6 +223,33 @@ internal class SshConnectionController(
         }
     }
 
+    internal fun rememberForReconnect(request: ConnectionRequest, opened: OpenedTerminal, profileId: UUID) {
+        val targetPassword = (request.authentication as? SshAuthentication.Password)?.copyValue()
+        try {
+            if (targetPassword != null && targetPassword.isNotEmpty() &&
+                !(request.rememberPassword && !opened.passwordSaveFailed)
+            ) {
+                sessionPasswords.put(profileId, targetPassword)
+            }
+        } catch (_: IllegalStateException) {
+            // The cache is closed during shutdown.
+        } finally {
+            targetPassword?.fill('\u0000')
+        }
+
+        val jumpPassword = (request.jumpAuthentication as? SshAuthentication.Password)?.copyValue()
+        val jumpProfileId = request.jumpHost?.profileId
+        try {
+            if (jumpPassword != null && jumpPassword.isNotEmpty() && jumpProfileId != null) {
+                sessionPasswords.put(jumpProfileId, jumpPassword)
+            }
+        } catch (_: IllegalStateException) {
+            // The cache is closed during shutdown.
+        } finally {
+            jumpPassword?.fill('\u0000')
+        }
+    }
+
     internal fun openTerminal(
         request: ConnectionRequest,
         unknownHostVerifier: HostKeyVerifier,
@@ -234,9 +276,11 @@ internal class SshConnectionController(
                 if (password == null || request.credentialRevision == null) {
                     true
                 } else {
-                    !credentialGuard.saveIfCurrent(profileId, request.credentialRevision) {
+                    val saved = credentialGuard.saveIfCurrent(profileId, request.credentialRevision) {
                         passwordStore.save(profileId, password)
                     }
+                    if (saved) sessionPasswords.invalidate(profileId)
+                    !saved
                 }
             } catch (_: Exception) {
                 true
@@ -281,25 +325,23 @@ internal class SshConnectionController(
         dismissKeyboardInteractiveDialog()
         connectionTask?.cancel(true)
         executor.shutdownNow()
+        sessionPasswords.close()
     }
 
     private fun showConnectionDialogOnEdt(
         owner: EyeShellWindow,
         preset: HostConnectionPreset?,
+        credential: LoadedCredential,
         storedPassword: CharArray?,
-        storeStatus: CredentialStoreStatus,
-        canForgetPassword: Boolean,
-        credentialRevision: Long?,
+        jumpCredential: LoadedCredential,
         storedJumpPassword: CharArray?,
-        jumpStoreStatus: CredentialStoreStatus,
     ): ConnectionDialogDecision {
         val decision = AtomicReference<ConnectionDialogDecision>(ConnectionDialogDecision.Cancel)
         SwingUtilities.invokeAndWait {
             if (!owner.isDisplayable || closed.get()) return@invokeAndWait
             decision.set(
                 showConnectionDialog(
-                    owner, preset, storedPassword, storeStatus, canForgetPassword, credentialRevision,
-                    storedJumpPassword, jumpStoreStatus,
+                    owner, preset, credential, storedPassword, jumpCredential, storedJumpPassword,
                 ),
             )
         }
@@ -309,13 +351,16 @@ internal class SshConnectionController(
     private fun showConnectionDialog(
         owner: EyeShellWindow,
         preset: HostConnectionPreset?,
+        credential: LoadedCredential,
         storedPassword: CharArray?,
-        storeStatus: CredentialStoreStatus,
-        canForgetPassword: Boolean,
-        credentialRevision: Long?,
+        jumpCredential: LoadedCredential,
         storedJumpPassword: CharArray?,
-        jumpStoreStatus: CredentialStoreStatus,
     ): ConnectionDialogDecision {
+        val storeStatus = credential.storeStatus
+        val credentialRevision = credential.credentialRevision
+        val canForgetPassword = credential.source == CredentialSource.OS_STORE
+        val jumpStoreStatus = jumpCredential.storeStatus
+        val jumpSource = jumpCredential.source
         val hostField = JTextField(preset?.endpoint?.host.orEmpty(), 24)
         val portSpinner = JSpinner(SpinnerNumberModel(preset?.endpoint?.port ?: 22, 1, 65535, 1))
         val usernameField = JTextField(preset?.endpoint?.username.orEmpty(), 24)
@@ -336,6 +381,7 @@ internal class SshConnectionController(
         val jumpKeyFileField = JTextField(24)
         val jumpKeyFileButton = JButton("Browse...")
         val jumpPassphraseField = JPasswordField(24)
+        val credentialHint = JLabel()
         val panel = JPanel(GridBagLayout())
         addField(panel, 0, "Host", hostField)
         addField(panel, 1, "Port", portSpinner)
@@ -345,18 +391,13 @@ internal class SshConnectionController(
         addField(panel, 5, "Private key", keyFilePanel)
         addField(panel, 6, "Passphrase", passphraseField)
         addField(panel, 7, "", rememberPassword)
-        if (preset?.authenticationMethod == ConnectionAuthenticationMethod.PASSWORD &&
-            storeStatus != CredentialStoreStatus.AVAILABLE
-        ) {
-            addField(panel, 8, "", JLabel("OS credential store unavailable; password remains session-only."))
-        } else if (storedPassword != null) {
-            addField(panel, 8, "", JLabel("Saved password will be used unless a replacement is entered."))
-        }
+        addField(panel, 8, "", credentialHint)
         if (jump != null) {
             addField(panel, 9, "Jump host", buildJumpCredentialPanel(
                 jump = jump,
                 storedJumpPassword = storedJumpPassword,
                 jumpStoreStatus = jumpStoreStatus,
+                jumpSource = jumpSource,
                 passwordField = jumpPasswordField,
                 keyFileField = jumpKeyFileField,
                 keyFileButton = jumpKeyFileButton,
@@ -380,7 +421,18 @@ internal class SshConnectionController(
             keyFileField.isEnabled = usePublicKey
             keyFileButton.isEnabled = usePublicKey
             passphraseField.isEnabled = usePublicKey
-            rememberPassword.isEnabled = usePassword && preset != null && storeStatus == CredentialStoreStatus.AVAILABLE
+            rememberPassword.isEnabled = usePassword && preset != null &&
+                (storeStatus == CredentialStoreStatus.AVAILABLE || storeStatus == CredentialStoreStatus.LOCKED) &&
+                credential.source != CredentialSource.SESSION
+            credentialHint.text = when {
+                !usePassword -> ""
+                credential.source == CredentialSource.SESSION -> UiText.CONNECT_SESSION_PASSWORD
+                storeStatus == CredentialStoreStatus.LOCKED -> UiText.CONNECT_STORE_LOCKED
+                storeStatus != CredentialStoreStatus.AVAILABLE ->
+                    "OS credential store unavailable; password remains session-only."
+                storedPassword != null -> "Saved password will be used unless a replacement is entered."
+                else -> ""
+            }
         }
         authenticationField.addActionListener { updateAuthenticationFields() }
         keyFileButton.addActionListener {
@@ -536,6 +588,7 @@ internal class SshConnectionController(
         jump: JumpHostPreset,
         storedJumpPassword: CharArray?,
         jumpStoreStatus: CredentialStoreStatus,
+        jumpSource: CredentialSource,
         passwordField: JPasswordField,
         keyFileField: JTextField,
         keyFileButton: JButton,
@@ -548,6 +601,8 @@ internal class SshConnectionController(
         when (jump.authenticationMethod) {
             ConnectionAuthenticationMethod.PASSWORD -> {
                 val hint = when {
+                    jumpSource == CredentialSource.SESSION -> UiText.CONNECT_SESSION_PASSWORD
+                    jumpStoreStatus == CredentialStoreStatus.LOCKED -> UiText.CONNECT_STORE_LOCKED
                     jumpStoreStatus != CredentialStoreStatus.AVAILABLE ->
                         "OS credential store unavailable; the jump password stays session-only."
                     storedJumpPassword != null -> "Saved jump password will be used unless a replacement is entered."
@@ -704,6 +759,19 @@ internal class SshConnectionController(
     private fun dismissConnectionDialog() {
         val dismiss = Runnable { connectionDialog.getAndSet(null)?.dispose() }
         if (SwingUtilities.isEventDispatchThread()) dismiss.run() else SwingUtilities.invokeLater(dismiss)
+    }
+}
+
+internal enum class CredentialSource { OS_STORE, SESSION, NONE }
+
+internal data class LoadedCredential(
+    val storeStatus: CredentialStoreStatus,
+    val password: StoredPassword?,
+    val credentialRevision: Long?,
+    val source: CredentialSource,
+) : AutoCloseable {
+    override fun close() {
+        password?.close()
     }
 }
 

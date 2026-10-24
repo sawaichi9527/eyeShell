@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
@@ -56,6 +57,32 @@ class SystemPasswordCredentialStoreTest {
         assertEquals(1, collection.updated)
         assertTrue(collection.values.isEmpty())
         assertEquals(mapOf("application" to "eyeShell", "profile-id" to profileId.toString()), collection.lastAttributes)
+    }
+
+    @Test
+    fun `linux store unlocks a locked collection before writing`() {
+        val profileId = UUID.fromString("00000000-0000-0000-0000-000000000046")
+        val collection = FakeSecretCollection().apply { locked = true }
+        val store = LinuxSecretServicePasswordStore { collection }
+
+        store.save(profileId, charArrayOf('s', 'e', 'c'))
+
+        assertEquals(1, collection.unlockCalls)
+        assertStoredPassword(store, profileId, charArrayOf('s', 'e', 'c'))
+    }
+
+    @Test
+    fun `linux store fails closed when the unlock is refused`() {
+        val profileId = UUID.fromString("00000000-0000-0000-0000-000000000047")
+        val collection = object : SecretCollection by FakeSecretCollection() {
+            override fun isLocked(): Boolean = true
+            override fun unlock() = Unit
+        }
+        val store = LinuxSecretServicePasswordStore { collection }
+
+        assertThrows(CredentialStoreException::class.java) {
+            store.save(profileId, charArrayOf('s', 'e', 'c'))
+        }
     }
 
     @Test
@@ -178,12 +205,18 @@ class SystemPasswordCredentialStoreTest {
 
     private class FakeSecretCollection : SecretCollection {
         var locked = false
+        var unlockCalls = 0
         var created = 0
         var updated = 0
         var lastAttributes: Map<String, String>? = null
         val values = mutableMapOf<String, FakeItem>()
 
         override fun isLocked(): Boolean = locked
+
+        override fun unlock() {
+            unlockCalls++
+            locked = false
+        }
 
         override fun items(attributes: Map<String, String>): List<String> {
             lastAttributes = attributes

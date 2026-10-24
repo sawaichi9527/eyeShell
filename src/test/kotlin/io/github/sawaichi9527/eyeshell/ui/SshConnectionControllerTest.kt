@@ -4,6 +4,7 @@ import io.github.sawaichi9527.eyeshell.secrets.CredentialStoreException
 import io.github.sawaichi9527.eyeshell.secrets.CredentialStoreStatus
 import io.github.sawaichi9527.eyeshell.secrets.PasswordCredentialStore
 import io.github.sawaichi9527.eyeshell.secrets.ProfileCredentialGuard
+import io.github.sawaichi9527.eyeshell.secrets.SessionPasswordCache
 import io.github.sawaichi9527.eyeshell.secrets.StoredPassword
 import io.github.sawaichi9527.eyeshell.ssh.ChangedHostKeyHandler
 import io.github.sawaichi9527.eyeshell.ssh.ExecResult
@@ -130,8 +131,13 @@ class SshConnectionControllerTest {
                 ConnectionAuthenticationMethod.PASSWORD,
             )
             val loaded = controller.loadStoredPassword(stalePreset)
-            assertEquals(CredentialStoreStatus.UNAVAILABLE, loaded.first)
-            assertNull(loaded.second)
+            try {
+                assertEquals(CredentialStoreStatus.UNAVAILABLE, loaded.storeStatus)
+                assertNull(loaded.password)
+                assertEquals(CredentialSource.NONE, loaded.source)
+            } finally {
+                loaded.close()
+            }
             assertTrue(store.retrievedProfiles.isEmpty())
         } finally {
             request.close()
@@ -152,26 +158,180 @@ class SshConnectionControllerTest {
 
         try {
             val loaded = controller.loadStoredPassword(passwordPreset)
-            loaded.second.use { password ->
-                val actual = password?.copyValue()
-                try {
-                    assertEquals(CredentialStoreStatus.AVAILABLE, loaded.first)
-                    assertArrayEquals(charArrayOf('f', 'o', 'u', 'n', 'd'), actual)
-                } finally {
-                    actual?.fill('\u0000')
+            try {
+                loaded.password.use { password ->
+                    val actual = password?.copyValue()
+                    try {
+                        assertEquals(CredentialStoreStatus.AVAILABLE, loaded.storeStatus)
+                        assertEquals(CredentialSource.OS_STORE, loaded.source)
+                        assertArrayEquals(charArrayOf('f', 'o', 'u', 'n', 'd'), actual)
+                    } finally {
+                        actual?.fill('\u0000')
+                    }
                 }
+            } finally {
+                loaded.close()
             }
             assertEquals(listOf(profileId), store.retrievedProfiles)
 
             val keyPreset = passwordPreset.copy(authenticationMethod = ConnectionAuthenticationMethod.PUBLIC_KEY)
             val notLoaded = controller.loadStoredPassword(keyPreset)
-            assertEquals(CredentialStoreStatus.UNAVAILABLE, notLoaded.first)
-            assertNull(notLoaded.second)
+            try {
+                assertEquals(CredentialStoreStatus.UNAVAILABLE, notLoaded.storeStatus)
+                assertNull(notLoaded.password)
+                assertEquals(CredentialSource.NONE, notLoaded.source)
+            } finally {
+                notLoaded.close()
+            }
             assertEquals(listOf(profileId), store.retrievedProfiles)
         } finally {
             controller.close()
         }
     }
+
+    @Test
+    fun `uses a session password while the keyring is locked`() {
+        val profileId = UUID.fromString("00000000-0000-0000-0000-000000000053")
+        val store = RecordingPasswordStore(status = CredentialStoreStatus.LOCKED)
+        val sessionPasswords = SessionPasswordCache()
+        val controller = SshConnectionController(store, sessionPasswords = sessionPasswords)
+        sessionPasswords.put(profileId, charArrayOf('t', 'y', 'p', 'e', 'd'))
+
+        try {
+            val loaded = controller.loadStoredPassword(passwordPreset(profileId))
+            try {
+                assertEquals(CredentialStoreStatus.LOCKED, loaded.storeStatus)
+                assertEquals(CredentialSource.SESSION, loaded.source)
+                assertNull(loaded.credentialRevision)
+                val actual = loaded.password?.copyValue()
+                try {
+                    assertArrayEquals(charArrayOf('t', 'y', 'p', 'e', 'd'), actual)
+                } finally {
+                    actual?.fill('\u0000')
+                }
+                assertTrue(store.retrievedProfiles.isEmpty(), "A locked store must not be queried")
+                assertTrue(store.saved.isEmpty())
+            } finally {
+                loaded.close()
+            }
+        } finally {
+            sessionPasswords.close()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `session password takes precedence over a stored password`() {
+        val profileId = UUID.fromString("00000000-0000-0000-0000-000000000054")
+        val store = RecordingPasswordStore(retrieved = charArrayOf('s', 't', 'o', 'r', 'e', 'd'))
+        val sessionPasswords = SessionPasswordCache()
+        val controller = SshConnectionController(store, sessionPasswords = sessionPasswords)
+        sessionPasswords.put(profileId, charArrayOf('t', 'y', 'p', 'e', 'd'))
+
+        try {
+            val loaded = controller.loadStoredPassword(passwordPreset(profileId))
+            try {
+                assertEquals(CredentialSource.SESSION, loaded.source)
+                val actual = loaded.password?.copyValue()
+                try {
+                    assertArrayEquals(charArrayOf('t', 'y', 'p', 'e', 'd'), actual)
+                } finally {
+                    actual?.fill('\u0000')
+                }
+            } finally {
+                loaded.close()
+            }
+        } finally {
+            sessionPasswords.close()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `a successful store save drops the stale session password`() {
+        val profileId = UUID.fromString("00000000-0000-0000-0000-000000000055")
+        val store = RecordingPasswordStore()
+        val sessionPasswords = SessionPasswordCache()
+        val controller = SshConnectionController(
+            store,
+            SshTerminalConnector { _, _, _, _, _, _ -> FakeHostSession(FakeTerminalSession()) },
+            sessionPasswords = sessionPasswords,
+        )
+        sessionPasswords.put(profileId, charArrayOf('o', 'l', 'd'))
+        val request = passwordRequest(profileId, remember = true)
+
+        try {
+            controller.openTerminal(request, HostKeyVerifier { true }, ChangedHostKeyHandler { })
+
+            assertFalse(sessionPasswords.contains(profileId))
+            assertEquals(1, store.saved.size)
+        } finally {
+            request.close()
+            sessionPasswords.close()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `closing the controller clears session passwords`() {
+        val profileId = UUID.fromString("00000000-0000-0000-0000-000000000056")
+        val sessionPasswords = SessionPasswordCache()
+        val controller = SshConnectionController(RecordingPasswordStore(), sessionPasswords = sessionPasswords)
+        sessionPasswords.put(profileId, charArrayOf('t', 'y', 'p', 'e', 'd'))
+
+        controller.close()
+
+        assertFalse(sessionPasswords.contains(profileId))
+    }
+
+    @Test
+    fun `keeps the connect password in memory so reconnect does not ask again`() {
+        val profileId = UUID.fromString("00000000-0000-0000-0000-000000000057")
+        val sessionPasswords = SessionPasswordCache()
+        val controller = SshConnectionController(RecordingPasswordStore(), sessionPasswords = sessionPasswords)
+        val request = passwordRequest(profileId, remember = false)
+        val opened = OpenedTerminal(FakeHostSession(FakeTerminalSession()), FakeTerminalSession(), false)
+
+        try {
+            controller.rememberForReconnect(request, opened, profileId)
+
+            val cached = sessionPasswords.copyOf(profileId)
+            try {
+                assertArrayEquals(charArrayOf('s', 'a', 'v', 'e', 'd'), cached)
+            } finally {
+                cached?.fill('\u0000')
+            }
+        } finally {
+            request.close()
+            sessionPasswords.close()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `does not duplicate a password that was saved to the store`() {
+        val profileId = UUID.fromString("00000000-0000-0000-0000-000000000058")
+        val sessionPasswords = SessionPasswordCache()
+        val controller = SshConnectionController(RecordingPasswordStore(), sessionPasswords = sessionPasswords)
+        val request = passwordRequest(profileId, remember = true)
+        val opened = OpenedTerminal(FakeHostSession(FakeTerminalSession()), FakeTerminalSession(), false)
+
+        try {
+            controller.rememberForReconnect(request, opened, profileId)
+
+            assertFalse(sessionPasswords.contains(profileId))
+        } finally {
+            request.close()
+            sessionPasswords.close()
+            controller.close()
+        }
+    }
+
+    private fun passwordPreset(profileId: UUID) = HostConnectionPreset(
+        profileId,
+        SshEndpoint("example.test", 22, "operator"),
+        ConnectionAuthenticationMethod.PASSWORD,
+    )
 
     private fun passwordRequest(profileId: UUID, remember: Boolean) = SshConnectionController.ConnectionRequest(
         endpoint = SshEndpoint("example.test", 22, "operator"),
@@ -184,11 +344,12 @@ class SshConnectionControllerTest {
     private class RecordingPasswordStore(
         private val failSave: Boolean = false,
         private val retrieved: CharArray? = null,
+        private val status: CredentialStoreStatus = CredentialStoreStatus.AVAILABLE,
     ) : PasswordCredentialStore {
         val saved = mutableListOf<Pair<UUID, CharArray>>()
         val retrievedProfiles = mutableListOf<UUID>()
 
-        override fun status() = CredentialStoreStatus.AVAILABLE
+        override fun status() = status
 
         override fun retrieve(profileId: UUID): StoredPassword? {
             retrievedProfiles += profileId

@@ -9,6 +9,7 @@ import io.github.sawaichi9527.eyeshell.platform.LaunchStrategy
 import io.github.sawaichi9527.eyeshell.platform.SafeMode
 import io.github.sawaichi9527.eyeshell.secrets.SystemPasswordCredentialStore
 import io.github.sawaichi9527.eyeshell.secrets.ProfileCredentialGuard
+import io.github.sawaichi9527.eyeshell.secrets.SessionPasswordCache
 import io.github.sawaichi9527.eyeshell.storage.SqliteHostCatalog
 import io.github.sawaichi9527.eyeshell.ui.CommandsController
 import io.github.sawaichi9527.eyeshell.ui.EyeShellWindow
@@ -39,13 +40,19 @@ fun main(arguments: Array<String>) {
     SwingUtilities.invokeLater {
         val passwordStore = SystemPasswordCredentialStore.create()
         val credentialGuard = ProfileCredentialGuard()
-        val connectionController = SshConnectionController(passwordStore, credentialGuard = credentialGuard)
+        val sessionPasswords = SessionPasswordCache()
+        val connectionController = SshConnectionController(
+            passwordStore,
+            credentialGuard = credentialGuard,
+            sessionPasswords = sessionPasswords,
+        )
         val catalog = SqliteHostCatalog(EyeShellPaths.catalogDatabaseFile())
         val commandsController = CommandsController(catalog)
         val hostCatalogController = HostCatalogController(
             catalog,
             passwordStore,
             credentialGuard,
+            sessionPasswords,
             { owner, preset -> connectionController.connect(owner, preset) },
         )
         EyeShellWindow(

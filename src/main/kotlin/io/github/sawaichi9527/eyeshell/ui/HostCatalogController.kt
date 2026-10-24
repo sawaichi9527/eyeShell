@@ -4,6 +4,7 @@ import io.github.sawaichi9527.eyeshell.ssh.SshEndpoint
 import io.github.sawaichi9527.eyeshell.secrets.CredentialStoreStatus
 import io.github.sawaichi9527.eyeshell.secrets.PasswordCredentialStore
 import io.github.sawaichi9527.eyeshell.secrets.ProfileCredentialGuard
+import io.github.sawaichi9527.eyeshell.secrets.SessionPasswordCache
 import io.github.sawaichi9527.eyeshell.storage.HostCatalog
 import io.github.sawaichi9527.eyeshell.storage.HostDraft
 import io.github.sawaichi9527.eyeshell.storage.SavedAuthenticationMethod
@@ -48,6 +49,7 @@ internal class HostCatalogController(
     private val catalog: HostCatalog,
     private val passwordStore: PasswordCredentialStore,
     private val credentialGuard: ProfileCredentialGuard = ProfileCredentialGuard(),
+    private val sessionPasswords: SessionPasswordCache = SessionPasswordCache(),
     private val connect: (EyeShellWindow, HostConnectionPreset) -> Boolean,
 ) : AutoCloseable {
     private val executor = Executors.newSingleThreadExecutor(Thread.ofVirtual().name("host-catalog-", 0).factory())
@@ -83,7 +85,7 @@ internal class HostCatalogController(
         ) {
             return credentialGuard.invalidate(existing.profileId) {
                 withoutCredential(existing.profileId) { catalog.updateHost(existing.id, draft) }
-            }
+            }.also { sessionPasswords.invalidate(existing.profileId) }
         }
         if (existing.draft.authenticationMethod != SavedAuthenticationMethod.PASSWORD &&
             draft.authenticationMethod == SavedAuthenticationMethod.PASSWORD
@@ -98,9 +100,10 @@ internal class HostCatalogController(
             credentialGuard.invalidate(host.profileId) {
                 withoutCredential(host.profileId) { catalog.deleteHost(host.id) }
             }
-            return
+        } else {
+            credentialGuard.invalidate(host.profileId) { catalog.deleteHost(host.id) }
         }
-        credentialGuard.invalidate(host.profileId) { catalog.deleteHost(host.id) }
+        sessionPasswords.invalidate(host.profileId)
     }
 
     private fun <T> withoutCredential(profileId: java.util.UUID, mutation: () -> T): T {
@@ -191,20 +194,50 @@ internal class HostCatalogController(
             connectButton.isEnabled = selected
         }
         tree.addTreeSelectionListener { updateSelectionActions() }
+        fun connectHost(host: SavedHost, closeOnStart: Boolean) {
+            val hosts = currentHosts(state)
+            val jumpProfileId = host.draft.jumpHostProfileId
+            val jumpHost = jumpProfileId?.let { profileId -> hosts.firstOrNull { it.profileId == profileId } }
+            if (jumpProfileId != null && jumpHost == null) {
+                JOptionPane.showMessageDialog(
+                    dialog,
+                    "The selected jump host no longer exists. Edit '${host.draft.name}' to choose another jump host.",
+                    "Jump host unavailable",
+                    JOptionPane.ERROR_MESSAGE,
+                )
+                return
+            }
+            if (connect(owner, host.toPreset(jumpHost))) {
+                if (closeOnStart) dialog.dispose()
+            } else {
+                JOptionPane.showMessageDialog(
+                    dialog,
+                    "Another SSH connection attempt is already in progress.",
+                    "Connection in progress",
+                    JOptionPane.INFORMATION_MESSAGE,
+                )
+            }
+        }
         add.addActionListener {
             val editor = showHostEditor(dialog, null, currentHosts(state), selectedGroup(state)) ?: return@addActionListener
             val warning = AtomicReference<String?>()
+            val created = AtomicReference<SavedHost?>()
             mutate(
                 state,
                 operation = {
-                    val created = catalog.createHost(editor.draft)
+                    val host = catalog.createHost(editor.draft)
+                    created.set(host)
                     try {
-                        applyEditorCredentials(created, editor)
+                        applyEditorCredentials(host, editor)
                     } catch (_: Exception) {
                         warning.set("Host saved, but the password could not be saved.")
                     }
                 },
-                afterSave = { warning.get()?.let { message -> showCredentialWarning(dialog, message) } },
+                afterSave = {
+                    warning.get()?.let { message -> showCredentialWarning(dialog, message) }
+                    val host = created.get()
+                    if (host != null && editor.connectAfterSave) connectHost(host, closeOnStart = true)
+                },
                 onRejected = editor::discardPassword,
             )
         }
@@ -250,28 +283,7 @@ internal class HostCatalogController(
         }
         connectButton.addActionListener {
             val selected = selectedHost(state) ?: return@addActionListener
-            val hosts = currentHosts(state)
-            val jumpProfileId = selected.draft.jumpHostProfileId
-            val jumpHost = jumpProfileId?.let { profileId -> hosts.firstOrNull { it.profileId == profileId } }
-            if (jumpProfileId != null && jumpHost == null) {
-                JOptionPane.showMessageDialog(
-                    dialog,
-                    "The selected jump host no longer exists. Edit '${selected.draft.name}' to choose another jump host.",
-                    "Jump host unavailable",
-                    JOptionPane.ERROR_MESSAGE,
-                )
-                return@addActionListener
-            }
-            if (connect(owner, selected.toPreset(jumpHost))) {
-                dialog.dispose()
-            } else {
-                JOptionPane.showMessageDialog(
-                    dialog,
-                    "Another SSH connection attempt is already in progress.",
-                    "Connection in progress",
-                    JOptionPane.INFORMATION_MESSAGE,
-                )
-            }
+            connectHost(selected, closeOnStart = true)
         }
         close.addActionListener { dialog.dispose() }
         dialog.addWindowListener(object : WindowAdapter() {
@@ -473,27 +485,30 @@ internal class HostCatalogController(
         }
         val group = JTextField(existing?.draft?.group ?: defaultGroup.orEmpty(), 24)
         val tags = JTextField(existing?.draft?.tags?.joinToString(", ").orEmpty(), 24)
-        val storeAvailable = credentialStoreAvailable()
+        val storeStatus = credentialStoreStatus()
+        val storeUsable = storeStatus == CredentialStoreStatus.AVAILABLE || storeStatus == CredentialStoreStatus.LOCKED
         val password = JPasswordField(24)
-        val rememberPassword = JCheckBox("Save password in OS credential store", existing == null && storeAvailable)
+        val rememberPassword = JCheckBox("Save password in OS credential store", existing == null && storeUsable)
         val clearPassword = JButton("Clear saved password")
+        val connectAfterSave = JCheckBox("Connect after saving", false)
         val credentialHint = JLabel()
         var clearRequested = false
 
         fun updateCredentialFields() {
-            val passwordAuthentication = authentication.selectedItem == ConnectionAuthenticationMethod.PASSWORD
-            password.isEnabled = passwordAuthentication && storeAvailable
-            rememberPassword.isEnabled = passwordAuthentication && storeAvailable
-            clearPassword.isEnabled = passwordAuthentication && storeAvailable && existing != null && !clearRequested
-            credentialHint.text = when {
-                !passwordAuthentication -> ""
-                !storeAvailable -> "OS credential store unavailable; passwords stay session-only."
-                clearRequested -> "The saved password will be cleared when you save."
-                existing == null -> "Leave blank to save the host without a password."
-                else -> "Leave blank to keep the saved password."
-            }
+            val state = hostEditorCredentialState(
+                passwordAuthentication = authentication.selectedItem == ConnectionAuthenticationMethod.PASSWORD,
+                storeStatus = storeStatus,
+                existingHost = existing != null,
+                rememberSelected = rememberPassword.isSelected,
+                clearRequested = clearRequested,
+            )
+            password.isEnabled = state.passwordEnabled
+            rememberPassword.isEnabled = state.rememberEnabled
+            clearPassword.isEnabled = state.clearEnabled
+            credentialHint.text = state.hint
         }
         authentication.addActionListener { updateCredentialFields() }
+        rememberPassword.addActionListener { updateCredentialFields() }
         clearPassword.addActionListener {
             clearRequested = true
             password.text = ""
@@ -514,6 +529,7 @@ internal class HostCatalogController(
             addField(9, "Group", group)
             addField(10, "Tags", tags)
             addField(11, "", credentialHint)
+            if (existing == null) addField(12, "", connectAfterSave)
         }
         try {
             while (JOptionPane.showConfirmDialog(
@@ -534,12 +550,16 @@ internal class HostCatalogController(
                         jumpHostProfileId = (jumpHost.selectedItem as SavedHost?)?.profileId,
                     ).normalized()
                     val entered = password.password
-                    val savePassword = password.isEnabled && rememberPassword.isSelected && entered.isNotEmpty()
-                    if (!savePassword) java.util.Arrays.fill(entered, '\u0000')
+                    val savePassword = password.isEnabled && storeUsable &&
+                        rememberPassword.isSelected && entered.isNotEmpty()
+                    val sessionPassword = password.isEnabled && !savePassword && entered.isNotEmpty()
+                    if (!savePassword && !sessionPassword) java.util.Arrays.fill(entered, '\u0000')
                     return HostEditorResult(
                         draft = draft,
                         password = entered.takeIf { savePassword },
                         clearSavedPassword = clearRequested,
+                        sessionPassword = entered.takeIf { sessionPassword },
+                        connectAfterSave = connectAfterSave.isSelected,
                     )
                 } catch (failure: IllegalArgumentException) {
                     JOptionPane.showMessageDialog(
@@ -556,10 +576,10 @@ internal class HostCatalogController(
         }
     }
 
-    private fun credentialStoreAvailable(): Boolean = try {
-        passwordStore.status() == CredentialStoreStatus.AVAILABLE
+    private fun credentialStoreStatus(): CredentialStoreStatus = try {
+        passwordStore.status()
     } catch (_: Exception) {
-        false
+        CredentialStoreStatus.UNAVAILABLE
     }
 
     private fun savePassword(host: SavedHost, password: CharArray) {
@@ -580,8 +600,16 @@ internal class HostCatalogController(
                 }
                 password != null -> {
                     savePassword(host, password)
+                    sessionPasswords.invalidate(host.profileId)
                     action = CredentialAction.SAVED
                 }
+            }
+        }
+        if (editor.clearSavedPassword) sessionPasswords.invalidate(host.profileId)
+        editor.consumeSessionPassword { password ->
+            if (password != null) {
+                sessionPasswords.put(host.profileId, password)
+                action = CredentialAction.SESSION
             }
         }
         return action
@@ -612,6 +640,8 @@ internal class HostCatalogController(
         val draft: HostDraft,
         private var password: CharArray?,
         val clearSavedPassword: Boolean,
+        private var sessionPassword: CharArray? = null,
+        val connectAfterSave: Boolean = false,
     ) {
         fun consumePassword(block: (CharArray?) -> Unit) {
             val value = password
@@ -623,9 +653,21 @@ internal class HostCatalogController(
             }
         }
 
+        fun consumeSessionPassword(block: (CharArray?) -> Unit) {
+            val value = sessionPassword
+            sessionPassword = null
+            try {
+                block(value)
+            } finally {
+                value?.fill('\u0000')
+            }
+        }
+
         fun discardPassword() {
             password?.fill('\u0000')
             password = null
+            sessionPassword?.fill('\u0000')
+            sessionPassword = null
         }
     }
 
@@ -660,7 +702,39 @@ internal class HostCatalogController(
     }
 }
 
-internal enum class CredentialAction { NONE, SAVED, CLEARED }
+internal enum class CredentialAction { NONE, SAVED, CLEARED, SESSION }
+
+internal data class HostEditorCredentialState(
+    val passwordEnabled: Boolean,
+    val rememberEnabled: Boolean,
+    val clearEnabled: Boolean,
+    val hint: String,
+)
+
+internal fun hostEditorCredentialState(
+    passwordAuthentication: Boolean,
+    storeStatus: CredentialStoreStatus,
+    existingHost: Boolean,
+    rememberSelected: Boolean,
+    clearRequested: Boolean,
+): HostEditorCredentialState {
+    val storeAvailable = storeStatus == CredentialStoreStatus.AVAILABLE
+    val storeUsable = storeAvailable || storeStatus == CredentialStoreStatus.LOCKED
+    return HostEditorCredentialState(
+        passwordEnabled = passwordAuthentication,
+        rememberEnabled = passwordAuthentication && storeUsable,
+        clearEnabled = passwordAuthentication && storeAvailable && existingHost && !clearRequested,
+        hint = when {
+            !passwordAuthentication -> ""
+            clearRequested -> UiText.CLEAR_PENDING
+            storeStatus == CredentialStoreStatus.LOCKED -> UiText.STORE_LOCKED
+            !storeAvailable -> UiText.STORE_UNAVAILABLE
+            rememberSelected -> UiText.STORE_WILL_SAVE
+            existingHost -> UiText.STORE_KEEP_OR_SESSION
+            else -> UiText.STORE_SESSION_ONLY
+        },
+    )
+}
 
 internal fun SavedHost.toPreset(jumpHost: SavedHost? = null): HostConnectionPreset = HostConnectionPreset(
     profileId = profileId,

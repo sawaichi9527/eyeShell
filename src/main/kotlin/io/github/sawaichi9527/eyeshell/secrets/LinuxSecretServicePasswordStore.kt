@@ -66,6 +66,7 @@ internal class LinuxSecretServicePasswordStore(
 
     private inline fun <T> withCollection(operation: String, action: (SecretCollection) -> T): T = try {
         collections.open().use { collection ->
+            if (collection.isLocked()) collection.unlock()
             if (collection.isLocked()) throw CredentialStoreException("Linux secret service is locked")
             action(collection)
         }
@@ -84,6 +85,10 @@ internal fun interface SecretCollectionFactory {
 
 internal interface SecretCollection : AutoCloseable {
     fun isLocked(): Boolean
+
+    /** Asks the desktop to unlock the collection, which may show a system prompt. */
+    fun unlock()
+
     fun items(attributes: Map<String, String>): List<String>
     fun secret(item: String): CharArray?
     fun create(label: String, password: CharArray, attributes: Map<String, String>)
@@ -99,6 +104,10 @@ private class FreedesktopSecretCollection(
     private val collection: SimpleCollection,
 ) : SecretCollection {
     override fun isLocked(): Boolean = collection.isLocked
+
+    override fun unlock() {
+        collection.unlockWithUserPermission()
+    }
 
     override fun items(attributes: Map<String, String>): List<String> = collection.getItems(attributes).orEmpty()
 

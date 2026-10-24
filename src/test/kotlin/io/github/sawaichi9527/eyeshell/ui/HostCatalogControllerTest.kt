@@ -3,6 +3,7 @@ package io.github.sawaichi9527.eyeshell.ui
 import io.github.sawaichi9527.eyeshell.ssh.SshEndpoint
 import io.github.sawaichi9527.eyeshell.secrets.CredentialStoreStatus
 import io.github.sawaichi9527.eyeshell.secrets.PasswordCredentialStore
+import io.github.sawaichi9527.eyeshell.secrets.SessionPasswordCache
 import io.github.sawaichi9527.eyeshell.secrets.StoredPassword
 import io.github.sawaichi9527.eyeshell.secrets.UnavailablePasswordCredentialStore
 import io.github.sawaichi9527.eyeshell.storage.HostCatalog
@@ -284,6 +285,193 @@ class HostCatalogControllerTest {
     }
 
     @Test
+    fun `clear request forgets the saved password and the session password`() {
+        val host = savedHost()
+        val passwordStore = RecordingPasswordStore(charArrayOf('o', 'l', 'd'))
+        val sessionPasswords = SessionPasswordCache()
+        val controller = HostCatalogController(
+            TestCatalog(listOf(host)),
+            passwordStore,
+            sessionPasswords = sessionPasswords,
+        ) { _, _ -> true }
+
+        try {
+            sessionPasswords.put(host.profileId, charArrayOf('s', 'e', 's', 's', 'i', 'o', 'n'))
+            val action = controller.applyEditorCredentials(host, editor(host, null, clear = true))
+
+            assertEquals(CredentialAction.CLEARED, action)
+            assertEquals(listOf(host.profileId), passwordStore.forgotten)
+            assertFalse(sessionPasswords.contains(host.profileId))
+        } finally {
+            sessionPasswords.close()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `editor password is kept in memory when it cannot be saved`() {
+        val host = savedHost()
+        val passwordStore = RecordingPasswordStore()
+        val sessionPasswords = SessionPasswordCache()
+        val controller = HostCatalogController(
+            TestCatalog(listOf(host)),
+            passwordStore,
+            sessionPasswords = sessionPasswords,
+        ) { _, _ -> true }
+        val secret = charArrayOf('s', 'e', 's', 's', 'i', 'o', 'n')
+
+        try {
+            val action = controller.applyEditorCredentials(
+                host,
+                editor(host, null, clear = false, sessionPassword = secret),
+            )
+
+            assertEquals(CredentialAction.SESSION, action)
+            assertTrue(passwordStore.saved.isEmpty())
+            assertArrayEquals(charArrayOf('\u0000', '\u0000', '\u0000', '\u0000', '\u0000', '\u0000', '\u0000'), secret)
+            val cached = sessionPasswords.copyOf(host.profileId)
+            assertArrayEquals(charArrayOf('s', 'e', 's', 's', 'i', 'o', 'n'), cached)
+            cached?.fill('\u0000')
+        } finally {
+            sessionPasswords.close()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `saving to the os store drops any stale session password`() {
+        val host = savedHost()
+        val passwordStore = RecordingPasswordStore()
+        val sessionPasswords = SessionPasswordCache()
+        val controller = HostCatalogController(
+            TestCatalog(listOf(host)),
+            passwordStore,
+            sessionPasswords = sessionPasswords,
+        ) { _, _ -> true }
+
+        try {
+            sessionPasswords.put(host.profileId, charArrayOf('o', 'l', 'd'))
+            val action = controller.applyEditorCredentials(host, editor(host, charArrayOf('n', 'e', 'w'), clear = false))
+
+            assertEquals(CredentialAction.SAVED, action)
+            assertFalse(sessionPasswords.contains(host.profileId))
+        } finally {
+            sessionPasswords.close()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `deleting a host drops its session password`() {
+        val host = savedHost()
+        val sessionPasswords = SessionPasswordCache()
+        val controller = HostCatalogController(
+            TestCatalog(listOf(host)),
+            RecordingPasswordStore(),
+            sessionPasswords = sessionPasswords,
+        ) { _, _ -> true }
+
+        try {
+            sessionPasswords.put(host.profileId, charArrayOf('s', 'e', 's', 's', 'i', 'o', 'n'))
+            controller.deleteHost(host)
+
+            assertFalse(sessionPasswords.contains(host.profileId))
+        } finally {
+            sessionPasswords.close()
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `credential fields stay editable when the credential store is locked`() {
+        val locked = hostEditorCredentialState(
+            passwordAuthentication = true,
+            storeStatus = CredentialStoreStatus.LOCKED,
+            existingHost = true,
+            rememberSelected = false,
+            clearRequested = false,
+        )
+
+        assertTrue(locked.passwordEnabled, "A locked keyring must not disable password entry")
+        assertTrue(locked.rememberEnabled, "Remember stays available because saving can unlock the keyring")
+        assertFalse(locked.clearEnabled)
+        assertEquals(UiText.STORE_LOCKED, locked.hint)
+    }
+
+    @Test
+    fun `credential fields explain an unavailable store`() {
+        val unavailable = hostEditorCredentialState(
+            passwordAuthentication = true,
+            storeStatus = CredentialStoreStatus.UNAVAILABLE,
+            existingHost = false,
+            rememberSelected = false,
+            clearRequested = false,
+        )
+
+        assertTrue(unavailable.passwordEnabled)
+        assertFalse(unavailable.rememberEnabled)
+        assertFalse(unavailable.clearEnabled)
+        assertEquals(UiText.STORE_UNAVAILABLE, unavailable.hint)
+    }
+
+    @Test
+    fun `credential fields explain saving and session-only use for an available store`() {
+        val saving = hostEditorCredentialState(
+            passwordAuthentication = true,
+            storeStatus = CredentialStoreStatus.AVAILABLE,
+            existingHost = false,
+            rememberSelected = true,
+            clearRequested = false,
+        )
+        assertEquals(UiText.STORE_WILL_SAVE, saving.hint)
+        assertTrue(saving.passwordEnabled)
+        assertTrue(saving.rememberEnabled)
+        assertFalse(saving.clearEnabled)
+
+        val editing = hostEditorCredentialState(
+            passwordAuthentication = true,
+            storeStatus = CredentialStoreStatus.AVAILABLE,
+            existingHost = true,
+            rememberSelected = false,
+            clearRequested = false,
+        )
+        assertEquals(UiText.STORE_KEEP_OR_SESSION, editing.hint)
+        assertTrue(editing.clearEnabled)
+
+        assertEquals(
+            UiText.STORE_SESSION_ONLY,
+            hostEditorCredentialState(
+                passwordAuthentication = true,
+                storeStatus = CredentialStoreStatus.AVAILABLE,
+                existingHost = false,
+                rememberSelected = false,
+                clearRequested = false,
+            ).hint,
+        )
+
+        val clearing = hostEditorCredentialState(
+            passwordAuthentication = true,
+            storeStatus = CredentialStoreStatus.AVAILABLE,
+            existingHost = true,
+            rememberSelected = true,
+            clearRequested = true,
+        )
+        assertEquals(UiText.CLEAR_PENDING, clearing.hint)
+        assertFalse(clearing.clearEnabled)
+
+        val otherAuthentication = hostEditorCredentialState(
+            passwordAuthentication = false,
+            storeStatus = CredentialStoreStatus.AVAILABLE,
+            existingHost = true,
+            rememberSelected = true,
+            clearRequested = false,
+        )
+        assertFalse(otherAuthentication.passwordEnabled)
+        assertFalse(otherAuthentication.rememberEnabled)
+        assertEquals("", otherAuthentication.hint)
+    }
+
+    @Test
     fun `the saved hosts dialog groups hosts and enables host actions only for a host row`() {
         val catalog = TestCatalog(
             listOf(
@@ -424,8 +612,12 @@ class HostCatalogControllerTest {
         override fun close() {}
     }
 
-    private fun editor(host: SavedHost, password: CharArray?, clear: Boolean) =
-        HostCatalogController.HostEditorResult(host.draft, password, clear)
+    private fun editor(
+        host: SavedHost,
+        password: CharArray?,
+        clear: Boolean,
+        sessionPassword: CharArray? = null,
+    ) = HostCatalogController.HostEditorResult(host.draft, password, clear, sessionPassword)
 
     private fun savedHost() = SavedHost(
         1,
