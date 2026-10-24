@@ -39,9 +39,9 @@ class SqliteHostCatalogTest {
             assertEquals("Lab '主機'; DROP TABLE hosts;", created.draft.name)
             assertEquals("測試員", created.draft.endpoint.username)
             assertEquals(listOf("nightly", "中文"), created.draft.tags)
-            assertEquals(2, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
-            assertEquals(2, queryInt(database, "SELECT COUNT(*) FROM schema_versions"))
-            assertEquals(5, queryInt(database, "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table'"))
+            assertEquals(3, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
+            assertEquals(3, queryInt(database, "SELECT COUNT(*) FROM schema_versions"))
+            assertEquals(6, queryInt(database, "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table'"))
         } finally {
             reopened.close()
         }
@@ -64,7 +64,30 @@ class SqliteHostCatalogTest {
         assertEquals(first.profileId, reopened.profileId)
         assertEquals("Legacy group", first.draft.group)
         assertEquals(listOf("legacy-tag"), first.draft.tags)
-        assertEquals(2, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
+        assertEquals(3, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
+    }
+
+    @Test
+    fun `persists saved command snippets`() {
+        val database = temporaryDirectory.resolve("commands.db")
+        val first = SqliteHostCatalog(database).use { catalog ->
+            val created = catalog.createCommandSnippet(CommandSnippetDraft("  Disk usage  ", "  df -h /  "))
+            catalog.createCommandSnippet(CommandSnippetDraft("Kernel", "uname -a"))
+            assertEquals("Disk usage", created.name)
+            assertEquals("df -h /", created.command)
+            created
+        }
+
+        SqliteHostCatalog(database).use { catalog ->
+            assertEquals(listOf("Disk usage", "Kernel"), catalog.listCommandSnippets().map { it.name })
+            val updated = catalog.updateCommandSnippet(first.id, CommandSnippetDraft("Disk", "df -h"))
+            assertEquals(CommandSnippet(first.id, "Disk", "df -h"), updated)
+            catalog.deleteCommandSnippet(catalog.listCommandSnippets().single { it.name == "Kernel" }.id)
+        }
+
+        SqliteHostCatalog(database).use { catalog ->
+            assertEquals(listOf(CommandSnippet(first.id, "Disk", "df -h")), catalog.listCommandSnippets())
+        }
     }
 
     @Test
@@ -114,7 +137,7 @@ class SqliteHostCatalogTest {
                 statement.executeQuery("SELECT name FROM pragma_table_info('hosts')").use { results ->
                     while (results.next()) columns += results.getString(1)
                 }
-                statement.execute("INSERT INTO schema_versions(version, description) VALUES (3, 'future')")
+                statement.execute("INSERT INTO schema_versions(version, description) VALUES (4, 'future')")
             }
         }
 

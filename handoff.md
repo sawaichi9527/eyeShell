@@ -12,6 +12,8 @@ M2 Linux Agentless Monitoring is in progress on the Windows host. Committed so f
 
 SFTP (Phase 2 high-priority item) is implemented on the Windows host: `sshd-sftp:2.19.0` was added with SHA-256 verification metadata (`3d645ff`), a `MinaSftpClient` boundary reuses the shared transport, an `SftpController` runs directory ops and a background transfer queue with `.part` staging and retry (`bd5fd16`), and an `SftpPanel` in the bottom dock lists files and offers upload/download/new folder/rename/delete bound to the selected session (`108e9e8`). An embedded-SSH SFTP subsystem integration test and an `SftpPanel` UI test are included; the full Windows suite is at 125 tests, 8 skips, 0 failures and the live GUI launches. Live SFTP validation against the real filesystem on this Linux host is recorded below (2026-10-24). Drag-and-drop upload of local files and per-transfer progress percentages are implemented and validated (2026-10-24). OpenSSH interoperability was also validated with an RSA user key and RSA host key (2026-10-24); Ed25519 user and host keys are now supported through the `net.i2p.crypto:eddsa` provider (2026-10-24).
 
+Command Snippets (Phase 2) are implemented: SQLite schema v3 adds a `command_snippets` table, the Commands tool tab lists, adds, edits, and deletes saved commands, and Run sends the selected command to the active session. Validation is recorded below (2026-10-24); the suite is at 149 tests.
+
 ### 2026-08-04 GUI review findings (fixed 2026-10-23)
 
 A manual GUI review on the Windows host reported five issues. All five are now implemented on the Ubuntu host; the root causes below are kept for traceability.
@@ -211,7 +213,7 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 ## Next Actions
 
 - M1J, M1K, M1L, and M1M are implemented and validated on Ubuntu 26.04 and re-validated on the Windows host (97 tests, 7 skips, `check` passed); Windows-specific platform validation is complete except the MSI/ZIP installers (see below).
-- M2 monitoring and SFTP are implemented and Windows-validated (125 tests, 8 skips); both are now also validated live against this Linux host (2026-10-24). SFTP drag-and-drop upload and transfer progress percentages are implemented (2026-10-24).
+- M2 monitoring and SFTP are implemented and Windows-validated (125 tests, 8 skips); both are now also validated live against this Linux host (2026-10-24). SFTP drag-and-drop upload and transfer progress percentages are implemented (2026-10-24). Command Snippets are implemented with SQLite persistence and session-bound Run (2026-10-24).
 - Pre-release: validate the Windows MSI (requires the WiX toolset, which jpackage invokes on Windows) and ZIP installer branches of the packaging tasks; development-stage validation uses `gradlew-local.ps1 run` for GUI smoke checks and milestone `jpackageAppImage` bundles instead.
 - Validate the native Wayland path on a WLToolkit-capable JBR 25 runtime (Ubuntu 24.04/26.04 Wayland session) and confirm the X toolkit still launches under XWayland and full X11.
 - Validate the build and Swing fallback path on Ubuntu 24.04 X11.
@@ -399,10 +401,20 @@ Scope confirmed by user: per-tab lifecycle status + repo write only; feature cod
 - Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
 - Remaining unverified scope: keyboard-interactive and agent authentication against OpenSSH, Windows Ed25519 handling, and long-term maintenance of the 2019-era EdDSA-Java provider.
 
+### Ubuntu host validation (saved command snippets)
+
+- Commands: `./scripts/gradlew-local.sh test --tests "*CommandsPanelTest" --tests "*SqliteHostCatalogTest" --tests "*WorkbenchPanelTest"`; `./scripts/gradlew-local.sh test --rerun-tasks`; `./scripts/gradlew-local.sh check`; live GUI smoke via `./scripts/gradlew-local.sh run` plus `wmctrl -l`; read-only JDBC inspection of `~/.local/share/eyeShell/eyeshell.db`; `git diff --check`.
+- Executed at: 2026-10-24
+- Exit codes: 0 for all commands; the GUI was terminated manually after the smoke window appeared.
+- Result: Added SQLite schema v3 with a `command_snippets` table (unique non-blank name, non-blank command, STRICT, timestamps) and implemented `CommandSnippetCatalog` CRUD in `SqliteHostCatalog`. Added a `CommandsController` that serializes catalog work on a virtual-thread executor and publishes on the EDT, plus a `CommandsPanel` in the tool dock that lists snippets, previews the command, adds/edits/deletes through dialogs, and runs the selected snippet against the currently selected session (double-click or Run). `TerminalSessionPage.sendCommand` trims trailing newlines and appends one carriage return. The Commands tab is bound to session selection, so switching or closing tabs retargets or disables Run. New tests cover current/next schema versions (3) and table counts, snippet CRUD with reopening, background/EDT controller behavior, panel rendering, Run without a session, and the terminal carriage-return contract. The suite runs 149 tests: 149 executed, 0 failures, 0 errors, 9 skipped. `check` passed; the live GUI launched with a window titled `eyeShell`. A read-only inspection of the existing `~/.local/share/eyeShell/eyeshell.db` after the smoke run confirmed schema version 3 and the `command_snippets` table alongside the host tables, proving the v2-to-v3 migration on a real catalog.
+- Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10.
+- Test report: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`.
+- Remaining unverified scope: the add/edit dialogs were not exercised by an automated GUI walkthrough, snippets are global rather than per-host, and multi-line snippets are sent verbatim.
+
 ## Known Issues
 
 - The Windows environment has been set up and validated, covering: JDK 21 bootstrap, Gradle 9.5.0 dependency verification, code validation, and cross-platform test hardening. Working tree: clean.
-- The Commands tool tab remains a placeholder; monitoring and SFTP are implemented and live-validated on this Linux host.
+- Command snippets are global (not scoped per host or workspace) and Run sends the command text with a single carriage return; multi-line snippets are sent verbatim.
 - SFTP drag-and-drop supports local-to-remote upload only; dragging a remote file out to the desktop is not supported (use the Download action).
 - Native Wayland behavior is not covered by the Temurin 21 M0 runtime; the M1L launch strategy probes for `sun.awt.WLToolkit` and falls back to the X toolkit (XWayland) when it is unavailable, so native Wayland selection is unverified until a WLToolkit-capable JBR 25 runtime is evaluated.
 - Scrollback clearing remains unavailable while alternate screen is active; Copy All and Save All now operate on the retained main buffer.

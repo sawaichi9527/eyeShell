@@ -43,6 +43,7 @@ class EyeShellWindow(
     private val terminalViewFactory: () -> TerminalView,
     connectAction: ((EyeShellWindow) -> Unit)? = null,
     hostsAction: ((EyeShellWindow) -> Unit)? = null,
+    commandsController: CommandsController? = null,
     private val closeAction: () -> Unit = {},
 ) : JFrame("eyeShell") {
     private val closed = AtomicBoolean()
@@ -50,6 +51,7 @@ class EyeShellWindow(
     private val workbench: WorkbenchPanel = WorkbenchPanel(
         connectAction = connectAction?.let { action -> { action(this) } },
         hostsAction = hostsAction?.let { action -> { action(this) } },
+        commandsController = commandsController,
         monitorSelectionChanged = { component ->
             val page = pagesByComponent[component]
             if (page == null) {
@@ -117,7 +119,7 @@ class EyeShellWindow(
             workbench.addSession(hostSession.endpoint.displayName, page.component, {
                 pagesByComponent.remove(page.component)
                 page.close()
-            })
+            }, page::sendCommand)
         } catch (failure: Throwable) {
             try {
                 page.close()
@@ -214,6 +216,11 @@ internal class TerminalSessionPage(
         monitorSampler.close()
     }
 
+    fun sendCommand(command: String) {
+        check(!closed.get()) { "Terminal session is closed" }
+        session.write(command.trimEnd('\r', '\n') + "\r")
+    }
+
     fun startExitMonitor(onExit: () -> Unit) {
         if (!exitMonitorStarted.compareAndSet(false, true)) return
         Thread.ofVirtual().name("terminal-exit-${session.name}").start {
@@ -273,6 +280,7 @@ internal class TerminalSessionPage(
 class WorkbenchPanel(
     connectAction: (() -> Unit)? = null,
     hostsAction: (() -> Unit)? = null,
+    commandsController: CommandsController? = null,
     monitorSelectionChanged: ((Component) -> Unit)? = null,
     sftpSelectionChanged: ((Component?) -> Unit)? = null,
 ) : JPanel(BorderLayout()) {
@@ -308,7 +316,7 @@ class WorkbenchPanel(
         isEnabled = hostsAction != null
         addActionListener { hostsAction?.invoke() }
     }
-    private val toolDock = CollapsibleToolDock()
+    private val toolDock = CollapsibleToolDock(commandsController)
     private val toolDockToggle = JButton("Show tools").apply {
         name = "toolDockToggle"
         getAccessibleContext().accessibleName = "Toggle session tools"
@@ -324,6 +332,7 @@ class WorkbenchPanel(
         sessionTabs.addChangeListener {
             updateSelectedSessionStatus()
             val selected = sessionTabs.selectedComponent
+            toolDock.bindCommandSender(selected?.let(sessions::get)?.sendCommand)
             if (selected != null && sessions.containsKey(selected)) {
                 onMonitorSelectionChanged?.invoke(selected)
                 onSftpSelectionChanged?.invoke(selected)
@@ -339,10 +348,15 @@ class WorkbenchPanel(
     val isToolDockExpanded: Boolean
         get() = toolDock.isExpanded
 
-    fun addSession(title: String, component: JComponent, closeAction: () -> Unit) {
+    fun addSession(
+        title: String,
+        component: JComponent,
+        closeAction: () -> Unit,
+        sendCommand: ((String) -> Unit)? = null,
+    ) {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal tabs must be added on the Swing EDT" }
         if (sessions.isEmpty()) sessionTabs.remove(emptySession)
-        val tab = SessionTab(title, closeAction)
+        val tab = SessionTab(title, closeAction, sendCommand)
         sessions[component] = tab
         sessionTabs.addTab(title, component)
         val index = sessionTabs.indexOfComponent(component)
@@ -406,6 +420,8 @@ class WorkbenchPanel(
 
     internal fun isSessionExited(component: Component): Boolean =
         sessions[component]?.status == SessionStatus.EXITED
+
+    internal fun commandsPanel(): CommandsPanel = toolDock.commandsPanel()
 
     internal fun bindSftp(controller: io.github.sawaichi9527.eyeshell.sftp.SftpController?) {
         check(SwingUtilities.isEventDispatchThread()) { "SFTP binding must run on the Swing EDT" }
@@ -519,6 +535,7 @@ class WorkbenchPanel(
 private class SessionTab(
     val title: String,
     val closeAction: () -> Unit,
+    val sendCommand: ((String) -> Unit)? = null,
 ) {
     var status: SessionStatus = SessionStatus.CONNECTED
     val statusLabel = JLabel().apply { name = "sessionStatusLabel" }
@@ -530,13 +547,14 @@ private fun accumulateFailure(current: Throwable?, next: Throwable): Throwable {
     return current
 }
 
-private class CollapsibleToolDock : JPanel(BorderLayout()) {
+private class CollapsibleToolDock(commandsController: CommandsController?) : JPanel(BorderLayout()) {
     private val sftpPanel = SftpPanel()
+    private val commandsPanel = CommandsPanel().apply { bind(commandsController) }
     private val content = JTabbedPane(JTabbedPane.TOP).apply {
         name = "toolDockContent"
         preferredSize = Dimension(0, 220)
         addTab("SFTP", sftpPanel)
-        addTab("Commands", emptyToolPanel("Saved commands will appear here."))
+        addTab("Commands", commandsPanel)
         isVisible = false
     }
     var isExpanded: Boolean = false
@@ -553,18 +571,17 @@ private class CollapsibleToolDock : JPanel(BorderLayout()) {
         sftpPanel.bind(controller)
     }
 
+    fun bindCommandSender(sender: ((String) -> Unit)?) {
+        commandsPanel.bindSession(sender)
+    }
+
+    fun commandsPanel(): CommandsPanel = commandsPanel
+
     fun setExpanded(expanded: Boolean) {
         if (isExpanded == expanded) return
         isExpanded = expanded
         content.isVisible = expanded
         revalidate()
         repaint()
-    }
-
-    companion object {
-        private fun emptyToolPanel(text: String): JPanel = JPanel(BorderLayout()).apply {
-            border = BorderFactory.createEmptyBorder(20, 20, 20, 20)
-            add(JLabel(text, SwingConstants.CENTER), BorderLayout.CENTER)
-        }
     }
 }

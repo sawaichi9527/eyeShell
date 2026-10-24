@@ -89,6 +89,21 @@ class WorkbenchPanelTest {
     }
 
     @Test
+    fun `sends a saved command to the terminal with a carriage return`() {
+        SwingUtilities.invokeAndWait {
+            val panel = WorkbenchPanel()
+            val session = TestTerminalSession("commands")
+            val page = TerminalSessionPage(panel, TestTerminalView(JPanel()), TestHostSession(session)).also { it.attach() }
+            try {
+                page.sendCommand("df -h\n")
+                assertEquals("df -h\r", session.written.toString())
+            } finally {
+                page.close()
+            }
+        }
+    }
+
+    @Test
     fun `window construction attaches the first session without selection hook failures`() {
         SwingUtilities.invokeAndWait {
             val window = EyeShellWindow(
@@ -545,12 +560,17 @@ class WorkbenchPanelTest {
         override val name: String = "test-session",
     ) : TerminalSession {
         override val isOpen: Boolean = true
+        val written = StringBuilder()
 
         override fun read(buffer: CharArray, offset: Int, length: Int): Int = -1
 
-        override fun write(bytes: ByteArray) = Unit
+        override fun write(bytes: ByteArray) {
+            written.append(String(bytes, Charsets.UTF_8))
+        }
 
-        override fun write(text: String) = Unit
+        override fun write(text: String) {
+            written.append(text)
+        }
 
         override fun resize(columns: Int, rows: Int) = Unit
 

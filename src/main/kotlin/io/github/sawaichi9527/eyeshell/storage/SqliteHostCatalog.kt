@@ -16,7 +16,7 @@ import org.sqlite.SQLiteConfig
 
 class SqliteHostCatalog(
     databasePath: Path,
-) : HostCatalog {
+) : HostCatalog, CommandSnippetCatalog {
     val databaseFile: Path = databasePath.toAbsolutePath().normalize()
     private val closed = AtomicBoolean()
     private var initialized = false
@@ -103,6 +103,64 @@ class SqliteHostCatalog(
     }
 
     @Synchronized
+    override fun listCommandSnippets(): List<CommandSnippet> = withConnection { connection ->
+        connection.prepareStatement(LIST_COMMAND_SNIPPETS).use { statement ->
+            statement.executeQuery().use { results ->
+                buildList {
+                    while (results.next()) {
+                        add(
+                            CommandSnippet(
+                                id = results.getLong("id"),
+                                name = results.getString("name"),
+                                command = results.getString("command"),
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    @Synchronized
+    override fun createCommandSnippet(draft: CommandSnippetDraft): CommandSnippet = writeTransaction { connection ->
+        val normalized = draft.normalized()
+        connection.prepareStatement(CREATE_COMMAND_SNIPPET).use { statement ->
+            statement.setString(1, normalized.name)
+            statement.setString(2, normalized.command)
+            statement.executeQuery().use { results ->
+                check(results.next()) { "Command snippet insert did not return an identifier" }
+                CommandSnippet(results.getLong(1), normalized.name, normalized.command)
+            }
+        }
+    }
+
+    @Synchronized
+    override fun updateCommandSnippet(id: Long, draft: CommandSnippetDraft): CommandSnippet =
+        writeTransaction { connection ->
+            require(id > 0) { "Command snippet identifier must be positive" }
+            val normalized = draft.normalized()
+            val updated = connection.prepareStatement(UPDATE_COMMAND_SNIPPET).use { statement ->
+                statement.setString(1, normalized.name)
+                statement.setString(2, normalized.command)
+                statement.setLong(3, id)
+                statement.executeUpdate()
+            }
+            require(updated == 1) { "Unknown command snippet: $id" }
+            CommandSnippet(id, normalized.name, normalized.command)
+        }
+
+    @Synchronized
+    override fun deleteCommandSnippet(id: Long) {
+        require(id > 0) { "Command snippet identifier must be positive" }
+        writeTransaction { connection ->
+            connection.prepareStatement("DELETE FROM command_snippets WHERE id = ?").use { statement ->
+                statement.setLong(1, id)
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    @Synchronized
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         connection?.close()
@@ -168,6 +226,11 @@ class SqliteHostCatalog(
             if (version == 1) {
                 migrateToStableProfileIds(connection)
                 recordSchemaVersion(connection, 2, "stable host profile identifiers")
+                version = 2
+            }
+            if (version == 2) {
+                connection.createStatement().use { it.execute(CREATE_COMMAND_SNIPPETS) }
+                recordSchemaVersion(connection, 3, "saved command snippets")
             }
             connection.commit()
         } catch (failure: Throwable) {
@@ -378,7 +441,7 @@ class SqliteHostCatalog(
     )
 
     companion object {
-        private const val CURRENT_SCHEMA_VERSION = 2
+        private const val CURRENT_SCHEMA_VERSION = 3
         private const val BUSY_TIMEOUT_MILLIS = 5_000
         private val DIRECTORY_PERMISSIONS = setOf(
             PosixFilePermission.OWNER_READ,
@@ -441,8 +504,25 @@ class SqliteHostCatalog(
             """,
             "CREATE INDEX host_tags_tag_id_idx ON host_tags(tag_id)",
         )
-        private const val LIST_HOSTS = """
-            SELECT h.id, h.profile_uuid, h.name, h.host, h.port, h.username, h.authentication_method,
+        private const val CREATE_COMMAND_SNIPPETS = """
+            CREATE TABLE command_snippets (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE CHECK (length(trim(name)) > 0),
+                command TEXT NOT NULL CHECK (length(trim(command)) > 0),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            ) STRICT
+        """
+        private const val LIST_COMMAND_SNIPPETS = """
+            SELECT id, name, command FROM command_snippets ORDER BY name, id
+        """
+        private const val CREATE_COMMAND_SNIPPET = """
+            INSERT INTO command_snippets(name, command) VALUES (?, ?) RETURNING id
+        """
+        private const val UPDATE_COMMAND_SNIPPET = """
+            UPDATE command_snippets SET name = ?, command = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+        """
+        private const val LIST_HOSTS = """            SELECT h.id, h.profile_uuid, h.name, h.host, h.port, h.username, h.authentication_method,
                    g.name AS group_name, t.name AS tag_name
             FROM hosts h
             LEFT JOIN host_groups g ON g.id = h.group_id
