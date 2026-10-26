@@ -199,6 +199,7 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Decide whether a future catalog revision may store a Private Key File path reference; M1G intentionally does not persist it.
 - Validate keyboard-interactive dialogs against external multi-prompt and MFA-capable SSH servers.
 - Validate OpenSSH agent authentication on Ubuntu 24.04/26.04 with a desktop-inherited `SSH_AUTH_SOCK`.
+- Decide whether to add AppImage packaging (jpackage app-image wrapped with a pinned `appimagetool` plus an application icon) or keep the DEB / portable tar.gz only.
 
 ## Known Issues
 
@@ -233,6 +234,7 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - The keyring existence check is non-prompting, so while the login collection is locked eyeShell does not unlock it to discover a saved password. If the collection cannot list its items while locked, a saved password is not offered until the collection is unlocked by the desktop or by an explicit save; the connect dialog keeps saying the keyring is locked. This trades a possible automatic unlock prompt for the previous behaviour of prompting even when nothing was stored.
 - The `********` mask is a FlatLaf placeholder (`JTextField.placeholderText`), not stored text: it never enters the password document, and a non-FlatLaf LAF falls back to an empty field plus the hint text.
 - `Clear Buffer` keeps the last line (the upstream JediTerm behaviour) so the prompt line survives; the retained main buffer used by `Copy All Output` is cleared with it.
+- Linux packaging is verified for the committed code: the jpackage app image runs with no system JDK, and the portable tar.gz and DEB are built from the same inputs. AppImage packaging is **not implemented**: `jpackage --type` has no AppImage target, so it would need `appimagetool` plus an application icon; the owner deferred that decision on 2026-10-27.
 - The terminal font family and size are compile-time defaults (`TerminalTypography.DEFAULT_FONT_SIZE`, `INITIAL_COLUMNS`/`INITIAL_ROWS`); there is no in-app font or zoom control yet. A host without any CJK-complete mono font falls back through Cascadia/DejaVu to `Monospaced`, where full-width glyphs can render narrower than two cells; installing Sarasa Mono or `fonts-noto-cjk` restores exact alignment on Linux.
 - Font metrics are computed with a 1x1 `BufferedImage` graphics context, as JediTerm does, so the chosen size assumes the default UI scale; a HiDPI scale factor is not re-applied to the font selection.
 - No automated test drives real mouse or keyboard gestures: the GUI checklist in `docs/MANUAL_GUI_CHECKLIST.md` still needs a human pass for dialog flows, drag-and-drop, and visual styling.
@@ -496,3 +498,13 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Commands: `git push origin main`.
 - Result: pushed `80e362b..eaa1bb9` (2 commits: `5844a90` terminal typography, `eaa1bb9` SFTP panel) to `origin/main`; working tree clean and `main` in sync afterwards at 2026-10-27T00:23+08:00.
 - Not re-run for the push: no code changed after the validated `232 tests / 0 failures / 12 skipped` run recorded above, except these documentation updates.
+
+### 2026-10-27 Session close (packaging verification)
+
+- Commands: `./scripts/gradlew-local.sh test --rerun-tasks --console=plain`; `./scripts/gradlew-local.sh check --rerun-tasks --console=plain`; `git diff --check`; `./scripts/gradlew-local.sh jpackageAppImage`; `./scripts/gradlew-local.sh jpackagePortable jpackageInstaller`; `env -u JAVA_HOME -u JDK_HOME PATH=/usr/bin:/bin ./build/package/eyeShell/bin/eyeShell` + `wmctrl -l`.
+- Executed at: 2026-10-27T00:40+08:00
+- Duration / exit codes: test 113 s, exit 0; check 63 s, exit 0; diff check exit 0; `jpackageAppImage` 35 s, exit 0; `jpackagePortable` + `jpackageInstaller` 97 s, exit 0; the packaged launcher was started without `JAVA_HOME`/`JDK_HOME` and its `eyeShell` window was confirmed, then the process was terminated.
+- Result: HEAD `c8c3a85`, working tree clean and `main` in sync with `origin/main`. Full suite runs 232 tests: 232 executed, 0 failures, 0 errors, 12 skipped (the existing opt-in/platform-gated set). `check` passed. Packaging artifacts built from the committed sources: `build/package/eyeShell/` (app image, 177 MB, bundled runtime 162 MB), `build/package/eyeShell-0.1.0.tar.gz` (69 MB), `build/package/eyeshell_0.1.0_amd64.deb` (50 MB, installs to `/opt/eyeshell` with a desktop entry and declared dependencies). The app image launched successfully with no system JDK on `PATH`.
+- Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10, default 512 MiB test heap. `libfuse2t64`, `dpkg-deb`, and `fakeroot` are present; `appimagetool` is not installed.
+- Artifacts: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`; logs at `/tmp/opencode/close-test.log`, `/tmp/opencode/close-check.log`, `/tmp/opencode/pkg-build.log`, and `/tmp/opencode/appimage-run.log`.
+- Not verified: the DEB was built but not installed on a clean machine; the packaged app was only checked for launching (no SSH/SFTP session through the packaged runtime); AppImage packaging was not implemented (owner deferred it on 2026-10-27); Windows packaging (MSI/ZIP) was not run; `tokenscope` is unavailable, so no Token Usage row was appended.
