@@ -508,3 +508,9 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10, default 512 MiB test heap. `libfuse2t64`, `dpkg-deb`, and `fakeroot` are present; `appimagetool` is not installed.
 - Artifacts: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`; logs at `/tmp/opencode/close-test.log`, `/tmp/opencode/close-check.log`, `/tmp/opencode/pkg-build.log`, and `/tmp/opencode/appimage-run.log`.
 - Not verified: the DEB was built but not installed on a clean machine; the packaged app was only checked for launching (no SSH/SFTP session through the packaged runtime); AppImage packaging was not implemented (owner deferred it on 2026-10-27); Windows packaging (MSI/ZIP) was not run; `tokenscope` is unavailable, so no Token Usage row was appended.
+
+### 2026-10-27 Session close push
+
+- Commands: `git add handoff.md`; `git commit`; `git push origin main`.
+- Result: pushed `c8c3a85..2a9eba0` to `origin/main`; working tree clean and `main` in sync afterwards at 2026-10-27T00:48+08:00.
+- Not re-run for the push: no code changed after the validated `232 tests / 0 failures / 12 skipped` run recorded above; only this documentation update was added.
