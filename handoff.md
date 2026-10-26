@@ -8,7 +8,7 @@ eyeShell has completed Phase 1 and the Phase 2 high-priority set except the item
 
 Current validation baseline (Ubuntu 26.04, 2026-10-26): 213 tests, 0 failures, 0 errors, 12 skips (all opt-in or platform-gated), `check` passes, and the GUI launches. Multi-session resources are characterized: three simultaneous 100,000-line sessions retain 160 MiB inside the default 512 MiB test heap.
 
-A follow-up UX/robustness change is implemented but **not yet committed**: reconnecting an exited session now happens inside the same tab (the JediTerm widget, its scrollback, highlight rules, and search/selection state survive), Enter stays available for the tab's lifetime, the second/abandoned shell channel opened per connection was removed, the host-editor password field shows a `********` mask when a saved password exists, the keyring is no longer unlocked just to discover that nothing is stored, and `Clear Buffer` now clears the visible screen as well as the scrollback.
+A UX/robustness change is committed and pushed (`4421b17` on `origin/main`): reconnecting an exited session now happens inside the same tab (the JediTerm widget, its scrollback, highlight rules, and search/selection state survive), Enter stays available for the tab's lifetime, the second/abandoned shell channel opened per connection was removed, the password field shows a `********` mask when a saved password exists, the keyring is no longer unlocked just to discover that nothing is stored, and `Clear Buffer` now clears the visible screen as well as the scrollback.
 
 ## Completed
 
@@ -157,7 +157,7 @@ A follow-up UX/robustness change is implemented but **not yet committed**: recon
 
 ## In Progress
 
-The exited-session reconnect change (same-tab reconnect, Enter retry, single shell channel), the saved-password mask, the non-prompting keyring existence check, and the `Clear Buffer` fix are implemented and validated locally on Ubuntu 26.04; they are **not committed yet**. Remaining Phase 2 and Phase 3 candidates are explicitly deferred; see Deferred / Backlog.
+No feature work is in progress. The reconnect, password-mask, keyring, and `Clear Buffer` work is committed and pushed (`4421b17`). Remaining Phase 2 and Phase 3 candidates are explicitly deferred; see Deferred / Backlog.
 
 ## Deferred / Backlog
 
@@ -451,3 +451,9 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Result: The host editor's `Save password in OS credential store` checkbox now defaults to checked whenever the OS store is usable, including edits, and the connection dialog can persist a first credential because `loadStoredPassword` carries a profile revision for the empty case. The opt-in `live Linux Secret Service supports the credential lifecycle` test now also asserts `contains()` transitions (`false` -> save -> `true` -> forget -> `false`) against the real service; it passed with a disposable random profile that was deleted in `finally` and whose arrays were zeroed. No eyeShell credential existed on this host before the run, which explains the empty Password field that prompted this follow-up.
 - Full suite runs 213 tests: 213 executed, 0 failures, 0 errors, 12 skipped (the live Secret Service case stays skipped in the default suite).
 - Remaining unverified scope: the dialog itself was not clicked through; the mask is proven by the pure placeholder function plus an offscreen FlatLaf render, and `contains()` by the live lifecycle test. Windows was not re-run.
+
+### 2026-10-26 commit and push
+
+- Commands: `git add -A`; `git commit` (single commit); `git push origin main`.
+- Result: pushed `459e209..4421b17` to `origin/main` — 16 files, 896 insertions, 138 deletions. `main` is in sync with `origin/main` afterwards; working tree clean at 2026-10-26T22:35+08:00.
+- Not re-run for the push: no code changed after the validated `213 tests / 0 failures / 12 skipped` run recorded above, except these documentation updates.
