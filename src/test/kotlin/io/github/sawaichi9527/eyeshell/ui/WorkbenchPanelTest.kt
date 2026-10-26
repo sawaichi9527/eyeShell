@@ -251,6 +251,53 @@ class WorkbenchPanelTest {
     }
 
     @Test
+    fun `sftp failures are reported and cached until an explicit retry`() {
+        val session = TestTerminalSession("no-sftp")
+        val host = TestHostSession(session)
+        lateinit var page: TerminalSessionPage
+
+        onEdt {
+            page = TerminalSessionPage(WorkbenchPanel(), TestTerminalView(JPanel()), host, session)
+            page.attach()
+        }
+
+        try {
+            val firstFailure = java.util.concurrent.atomic.AtomicReference<String>()
+            val first = CountDownLatch(1)
+            onEdt {
+                page.loadSftp { _, failure ->
+                    firstFailure.set(failure)
+                    first.countDown()
+                }
+            }
+            assertTrue(first.await(5, TimeUnit.SECONDS), "SFTP failure was never reported")
+            assertTrue(
+                firstFailure.get()?.contains("SFTP is not supported") == true,
+                "Unexpected reason: ${firstFailure.get()}",
+            )
+            assertEquals(1, host.sftpCalls, "The subsystem should be attempted once")
+
+            val cached = java.util.concurrent.atomic.AtomicReference<String>()
+            onEdt { page.loadSftp { _, failure -> cached.set(failure) } }
+            assertTrue(cached.get() != null, "A cached failure must be reported without reopening SFTP")
+            assertEquals(1, host.sftpCalls, "A cached failure must not retry the subsystem")
+
+            val retried = CountDownLatch(1)
+            onEdt { page.resetSftp() }
+            onEdt {
+                page.loadSftp { _, failure ->
+                    cached.set(failure)
+                    retried.countDown()
+                }
+            }
+            assertTrue(retried.await(5, TimeUnit.SECONDS))
+            assertEquals(2, host.sftpCalls, "An explicit retry must reopen SFTP")
+        } finally {
+            onEdt { page.close() }
+        }
+    }
+
+    @Test
     fun `window attaches the already opened terminal instead of opening another channel`() {
         val session = TestTerminalSession("single")
         val host = TestHostSession(session)
@@ -856,6 +903,8 @@ class WorkbenchPanelTest {
         private var closed = false
         var openTerminalCount = 0
             private set
+        var sftpCalls = 0
+            private set
 
         val isClosed: Boolean
             get() = closed
@@ -867,8 +916,10 @@ class WorkbenchPanelTest {
 
         override fun execute(command: String): ExecResult = ExecResult(0, "")
 
-        override fun sftp(): io.github.sawaichi9527.eyeshell.sftp.SftpClient =
-            throw UnsupportedOperationException()
+        override fun sftp(): io.github.sawaichi9527.eyeshell.sftp.SftpClient {
+            sftpCalls++
+            throw UnsupportedOperationException("SFTP is not supported by this test session")
+        }
 
         override fun isOpen(): Boolean = !closed
 

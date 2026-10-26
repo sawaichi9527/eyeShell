@@ -16,6 +16,60 @@ class SftpControllerTest {
     lateinit var temporaryDirectory: Path
 
     @Test
+    fun `clears finished transfers but keeps a running one`() {
+        val slow = temporaryDirectory.resolve("slow.txt")
+        Files.writeString(slow, "slow")
+        val client = BlockingUploadClient()
+        val controller = SftpController(client, maxRetries = 0)
+
+        try {
+            val settled = CountDownLatch(1)
+            controller.setListener { job ->
+                if (job.status == TransferStatus.COMPLETED) settled.countDown()
+            }
+            controller.enqueue(SftpTransferRequest("/slow.txt", slow, TransferDirection.UPLOAD))
+            assertTrue(client.started.await(5, TimeUnit.SECONDS), "Upload never started")
+            assertEquals(0, controller.clearFinishedJobs(), "A running transfer must not be cleared")
+
+            client.release.countDown()
+            assertTrue(settled.await(5, TimeUnit.SECONDS), "Upload never completed")
+            assertEquals(1, controller.clearFinishedJobs())
+            assertTrue(controller.jobsSnapshot().isEmpty())
+        } finally {
+            client.release.countDown()
+            controller.close()
+        }
+    }
+
+    private class BlockingUploadClient : SftpClient {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+
+        override fun list(path: String): List<RemoteFile> = emptyList()
+        override fun stat(path: String): RemoteFile? = null
+        override fun makeDirectory(path: String) = Unit
+        override fun rename(from: String, to: String) = Unit
+        override fun delete(path: String) = Unit
+        override fun download(
+            remotePath: String,
+            localFile: Path,
+            overwrite: Boolean,
+            onProgress: (Long, Long) -> Unit,
+        ) = Unit
+        override fun upload(
+            localFile: Path,
+            remotePath: String,
+            overwrite: Boolean,
+            onProgress: (Long, Long) -> Unit,
+        ) {
+            started.countDown()
+            release.await(5, TimeUnit.SECONDS)
+            onProgress(1, 1)
+        }
+        override fun close() = Unit
+    }
+
+    @Test
     fun `lists a remote directory on a background thread`() {
         val client = FakeSftpClient(
             entries = listOf(

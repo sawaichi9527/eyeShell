@@ -4,6 +4,7 @@ import io.github.sawaichi9527.eyeshell.sftp.RemoteFile
 import io.github.sawaichi9527.eyeshell.sftp.SftpController
 import io.github.sawaichi9527.eyeshell.sftp.SftpTransferRequest
 import io.github.sawaichi9527.eyeshell.sftp.TransferDirection
+import io.github.sawaichi9527.eyeshell.sftp.TransferStatus
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Dimension
@@ -24,7 +25,10 @@ import javax.swing.SwingUtilities
 import javax.swing.TransferHandler
 import javax.swing.table.DefaultTableModel
 
-class SftpPanel : JPanel(BorderLayout()) {
+class SftpPanel(
+    /** Test seam: when present, the Download button writes here instead of opening a save dialog. */
+    private val downloadTargetChooser: ((RemoteFile) -> java.nio.file.Path?)? = null,
+) : JPanel(BorderLayout()) {
     private var controller: SftpController? = null
     private var currentDirectory = "/"
     private val cardLayout = CardLayout()
@@ -35,11 +39,40 @@ class SftpPanel : JPanel(BorderLayout()) {
     private val refreshButton = JButton("Refresh")
     private val upButton = JButton("Up")
     private val uploadButton = JButton("Upload")
+    private val downloadButton = JButton("Download").apply {
+        name = "sftpDownload"
+        toolTipText = "Download the selected file"
+        isEnabled = false
+    }
     private val newFolderButton = JButton("New Folder")
-    private val renameButton = JButton("Rename")
-    private val deleteButton = JButton("Delete")
+    private val renameButton = JButton("Rename").apply { isEnabled = false }
+    private val deleteButton = JButton("Delete").apply { isEnabled = false }
+    private val clearTransfersButton = JButton("Clear Transfers").apply {
+        name = "sftpClearTransfers"
+        toolTipText = "Clear finished uploads and downloads from the history"
+        isEnabled = false
+    }
     private val emptyLabel = JLabel("Connect to a host to browse remote files.", SwingConstants.CENTER).apply {
         name = "sftpEmpty"
+    }
+    private val unavailableMessage = javax.swing.JTextArea().apply {
+        name = "sftpUnavailableMessage"
+        isEditable = false
+        isOpaque = false
+        lineWrap = true
+        wrapStyleWord = true
+        columns = 28
+    }
+    private val retryButton = JButton("Retry").apply {
+        name = "sftpRetry"
+    }
+    private val unavailablePanel = JPanel(BorderLayout()).apply {
+        add(JLabel("SFTP is unavailable for this session.", SwingConstants.CENTER), BorderLayout.NORTH)
+        add(JScrollPane(unavailableMessage), BorderLayout.CENTER)
+        add(JPanel().apply { add(retryButton) }, BorderLayout.SOUTH)
+    }
+    private val loadingLabel = JLabel("Opening SFTP...", SwingConstants.CENTER).apply {
+        name = "sftpLoading"
     }
     private val tableModel = object : DefaultTableModel(arrayOf("Name", "Size", "Permissions"), 0) {
         override fun isCellEditable(row: Int, column: Int): Boolean = false
@@ -56,6 +89,10 @@ class SftpPanel : JPanel(BorderLayout()) {
         name = "sftpTransferTable"
         setRowHeight(18)
     }
+    private val statusLabel = JLabel(" ").apply {
+        name = "sftpStatus"
+    }
+    private var rememberedController: SftpController? = null
     private val dropHandler = object : TransferHandler() {
         override fun canImport(support: TransferHandler.TransferSupport): Boolean =
             controller != null && support.isDataFlavorSupported(DataFlavor.javaFileListFlavor)
@@ -88,6 +125,8 @@ class SftpPanel : JPanel(BorderLayout()) {
         name = "sftpPanel"
         cards.add(emptyLabel, "disconnected")
         cards.add(buildConnectedPanel(), "connected")
+        cards.add(unavailablePanel, "unavailable")
+        cards.add(loadingLabel, "loading")
         add(cards, BorderLayout.CENTER)
         transferHandler = dropHandler
         fileTable.transferHandler = dropHandler
@@ -95,14 +134,60 @@ class SftpPanel : JPanel(BorderLayout()) {
     }
 
     fun bind(controller: SftpController?) {
+        val sameController = controller != null && controller === rememberedController
+        rememberedController = controller
         this.controller = controller
+        refreshTransfers()
         if (controller == null) {
             showDisconnected()
             return
         }
         controller.setListener { SwingUtilities.invokeLater { refreshTransfers() } }
         showConnected()
-        refresh()
+        if (!sameController) {
+            tableModel.setRowCount(0)
+            updateActionEnablement()
+            currentDirectory = "/"
+            pathField.text = "/"
+            statusLabel.text = "Opening the remote home directory..."
+            controller.homeDirectory { home ->
+                SwingUtilities.invokeLater {
+                    if (this.controller !== controller) return@invokeLater
+                    if (!home.isNullOrBlank() && home != "/") {
+                        currentDirectory = normalize(home)
+                        pathField.text = currentDirectory
+                    }
+                    refresh()
+                }
+            }
+        } else {
+            refresh()
+        }
+    }
+
+    /**
+     * Replaces the empty state with the reason the SFTP subsystem could not be opened, so a
+     * server without SFTP no longer looks like an unconnected host.
+     */
+    fun showUnavailable(reason: String, retry: () -> Unit) {
+        controller = null
+        unavailableMessage.text = reason
+        unavailableMessage.caretPosition = 0
+        retryButton.actionListeners.toList().forEach(retryButton::removeActionListener)
+        retryButton.addActionListener { retry() }
+        showCard("unavailable")
+    }
+
+    /** Clears any previous session's listing while a newly selected session opens its subsystem. */
+    fun showLoading() {
+        controller = null
+        showCard("loading")
+    }
+
+    private fun showCard(name: String) {
+        cardLayout.show(cards, name)
+        revalidate()
+        repaint()
     }
 
     private fun buildConnectedPanel(): JPanel = JPanel(BorderLayout()).apply {
@@ -118,30 +203,41 @@ class SftpPanel : JPanel(BorderLayout()) {
             }, BorderLayout.EAST)
         }
         val actions = JPanel().apply {
+            add(downloadButton)
             add(uploadButton)
             add(newFolderButton)
             add(renameButton)
             add(deleteButton)
+            add(clearTransfersButton)
         }
         refreshButton.addActionListener { refresh() }
         upButton.addActionListener { navigateUp() }
         uploadButton.addActionListener { upload() }
+        downloadButton.addActionListener { downloadSelected() }
         newFolderButton.addActionListener { newFolder() }
         renameButton.addActionListener { rename() }
         deleteButton.addActionListener { delete() }
+        clearTransfersButton.addActionListener {
+            controller?.clearFinishedJobs()
+            refreshTransfers()
+        }
+        fileTable.selectionModel.addListSelectionListener { updateActionEnablement() }
         fileTable.addMouseListener(object : java.awt.event.MouseAdapter() {
             override fun mouseClicked(event: java.awt.event.MouseEvent) {
                 if (event.clickCount == 2) {
                     selectedFile()?.let { file ->
-                        if (file.isDirectory) navigate(file.name) else download(file)
+                        if (file.isDirectory) navigate(remotePathFor(file.name)) else download(file)
                     }
                 }
             }
         })
         val center = JPanel(BorderLayout()).apply {
+            add(statusLabel, BorderLayout.NORTH)
             add(JScrollPane(fileTable), BorderLayout.CENTER)
-            add(JScrollPane(transferTable), BorderLayout.SOUTH)
-            transferTable.preferredSize = Dimension(0, 90)
+            add(JScrollPane(transferTable).apply {
+                preferredSize = Dimension(0, 84)
+                minimumSize = Dimension(0, 60)
+            }, BorderLayout.SOUTH)
         }
         add(toolbar, BorderLayout.NORTH)
         add(center, BorderLayout.CENTER)
@@ -149,21 +245,20 @@ class SftpPanel : JPanel(BorderLayout()) {
     }
 
     private fun showDisconnected() {
-        cardLayout.show(cards, "disconnected")
-        revalidate()
-        repaint()
+        showCard("disconnected")
     }
 
     private fun showConnected() {
-        cardLayout.show(cards, "connected")
-        revalidate()
-        repaint()
+        showCard("connected")
     }
 
     private fun refresh() {
         val active = controller ?: return
+        pathField.text = currentDirectory
+        statusLabel.text = "Listing $currentDirectory ..."
         active.list(currentDirectory) { result ->
             SwingUtilities.invokeLater {
+                if (controller !== active) return@invokeLater
                 result.onSuccess { files ->
                     tableModel.setRowCount(0)
                     files.forEach { file ->
@@ -174,8 +269,16 @@ class SftpPanel : JPanel(BorderLayout()) {
                         ))
                     }
                     pathField.text = currentDirectory
+                    statusLabel.text = if (files.isEmpty()) {
+                        "$currentDirectory is empty."
+                    } else {
+                        "${files.size} entries in $currentDirectory"
+                    }
+                    updateActionEnablement()
                 }.onFailure { failure ->
-                    JOptionPane.showMessageDialog(this, failure.message, "Could not list directory", JOptionPane.ERROR_MESSAGE)
+                    tableModel.setRowCount(0)
+                    updateActionEnablement()
+                    statusLabel.text = "Could not list $currentDirectory: ${failure.message ?: failure.javaClass.simpleName}"
                 }
             }
         }
@@ -192,10 +295,21 @@ class SftpPanel : JPanel(BorderLayout()) {
                 job.status.name,
             ))
         }
+        clearTransfersButton.isEnabled = jobs.any { job ->
+            job.status == TransferStatus.COMPLETED ||
+                job.status == TransferStatus.FAILED ||
+                job.status == TransferStatus.CANCELLED
+        }
     }
 
     private fun navigate(path: String) {
-        currentDirectory = normalize(path)
+        val trimmed = path.trim()
+        currentDirectory = when {
+            trimmed.isEmpty() -> "/"
+            trimmed.startsWith("/") -> normalize(trimmed)
+            // A typed or double-clicked relative name is resolved against the current directory.
+            else -> remotePathFor(trimmed)
+        }
         refresh()
     }
 
@@ -219,9 +333,34 @@ class SftpPanel : JPanel(BorderLayout()) {
 
     private fun download(file: RemoteFile) {
         val active = controller ?: return
+        if (file.isDirectory) {
+            statusLabel.text = "Only files can be downloaded; double-click a folder to open it."
+            return
+        }
+        val target = downloadTargetChooser?.invoke(file) ?: askDownloadTarget(file) ?: return
+        enqueueTransfer(active, target, remotePathFor(file.name), TransferDirection.DOWNLOAD)
+    }
+
+    private fun downloadSelected() {
+        val file = selectedFile()
+        if (file == null) {
+            statusLabel.text = "Select a file to download."
+            return
+        }
+        download(file)
+    }
+
+    private fun askDownloadTarget(file: RemoteFile): java.nio.file.Path? {
         val chooser = JFileChooser().apply { selectedFile = File(file.name) }
-        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return
-        enqueueTransfer(active, chooser.selectedFile.toPath(), remotePathFor(file.name), TransferDirection.DOWNLOAD)
+        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return null
+        return chooser.selectedFile.toPath()
+    }
+
+    private fun updateActionEnablement() {
+        val file = selectedFile()
+        downloadButton.isEnabled = file != null && !file.isDirectory
+        renameButton.isEnabled = file != null
+        deleteButton.isEnabled = file != null
     }
 
     private fun enqueueTransfer(active: SftpController, local: java.nio.file.Path, remote: String, direction: TransferDirection) {

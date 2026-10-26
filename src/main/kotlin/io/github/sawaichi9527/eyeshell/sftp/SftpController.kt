@@ -26,6 +26,14 @@ class SftpController(
         }
     }
 
+    /** Asks the server for the user's home directory so the browser does not have to start at "/". */
+    fun homeDirectory(onResult: (String?) -> Unit) {
+        requireOpen()
+        executor.submit {
+            onResult(runCatching { sftpClient.homeDirectory() }.getOrNull())
+        }
+    }
+
     fun stat(path: String, onResult: (Result<RemoteFile?>) -> Unit) {
         requireOpen()
         executor.submit {
@@ -72,6 +80,21 @@ class SftpController(
     }
 
     fun jobsSnapshot(): List<TransferJob> = synchronized(jobs) { jobs.values.toList() }
+
+    /**
+     * Removes completed, failed, and cancelled jobs from the history. Queued and running
+     * transfers are kept so an in-flight transfer never loses its progress row.
+     */
+    fun clearFinishedJobs(): Int = synchronized(jobs) {
+        val finished = jobs.values.filter(::isFinished)
+        jobs.values.removeAll(::isFinished)
+        finished.size
+    }
+
+    private fun isFinished(job: TransferJob): Boolean = when (job.status) {
+        TransferStatus.COMPLETED, TransferStatus.FAILED, TransferStatus.CANCELLED -> true
+        TransferStatus.QUEUED, TransferStatus.RUNNING -> false
+    }
 
     fun setListener(listener: (TransferJob) -> Unit) {
         listeners = listOf(listener)

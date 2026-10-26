@@ -5,6 +5,9 @@ import java.nio.file.Path
 interface SftpClient : AutoCloseable {
     fun list(path: String): List<RemoteFile>
 
+    /** The directory the server considers the user's home, used as the initial browser path. */
+    fun homeDirectory(): String? = null
+
     fun stat(path: String): RemoteFile?
 
     fun makeDirectory(path: String)

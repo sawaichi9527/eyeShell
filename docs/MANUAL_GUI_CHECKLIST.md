@@ -63,6 +63,7 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 ## 6. Terminal behaviour
 
 - Scroll through 100,000 lines without freezing the UI.
+- Text renders in a monospace font at a comfortable size; Chinese/Japanese/Korean glyphs occupy exactly two Latin cells without visible gaps, and a 120-character log line does not wrap at a 1280 px window.
 - Search (Ctrl+F) navigates matches and rejects invalid regex with a message.
 - Add/Manage highlight rules: colors, bold/italic/underline, priority, and Merge/Override all render as chosen.
 - Select Visible, Select All Output, Copy All Output (8,388,608 limit prompt), and Save All Output behave as documented, including on the alternate screen.
@@ -73,6 +74,10 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 ## 7. SFTP
 
 - Directory listing, upload, download, new folder, rename, and delete all succeed against the remote host.
+- `Download` is enabled only for a selected file and writes it to the chosen local path with progress; double-clicking a file does the same. Selecting a folder disables Download.
+- `Clear Transfers` empties the finished upload/download history and is disabled while nothing has finished; a running transfer keeps its row.
+- Switching to a tab briefly shows `Opening SFTP...` and then that session's listing; another session's files are never shown.
+- A server without the SFTP subsystem shows `SFTP is unavailable for this session.` with the reason and a `Retry` button instead of looking unconnected.
 - Dropping local files uploads them to the current directory; dropping a folder shows a rejection message.
 - The transfer table shows increasing percentages and reaches 100%.
 - A failed transfer is reported and does not leave a partial target file behind.

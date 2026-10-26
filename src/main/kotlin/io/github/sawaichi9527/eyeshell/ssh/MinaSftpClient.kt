@@ -32,6 +32,12 @@ internal class MinaSftpClient(
         }
     }
 
+    override fun homeDirectory(): String? = try {
+        client.canonicalPath(".")
+    } catch (_: IOException) {
+        null
+    }
+
     override fun stat(path: String): RemoteFile? = try {
         val attributes = client.stat(path)
         RemoteFile(

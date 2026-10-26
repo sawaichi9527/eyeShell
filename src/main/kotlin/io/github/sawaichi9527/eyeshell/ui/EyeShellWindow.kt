@@ -164,10 +164,21 @@ class EyeShellWindow(
     private fun bindSftpFor(component: Component?) {
         try {
             val page = component?.let(pagesByComponent::get)
-            if (page != null) {
-                workbench.bindSftp(page.sftpController())
-            } else if (initialized) {
-                workbench.bindSftp(null)
+            if (page == null) {
+                if (initialized) workbench.bindSftp(null)
+                return
+            }
+            val target = component
+            workbench.showSftpLoading()
+            page.loadSftp { controller, failure ->
+                if (closed.get() || !workbench.isSelectedSession(target)) return@loadSftp
+                when {
+                    controller != null -> workbench.bindSftp(controller)
+                    failure != null -> workbench.bindSftpUnavailable(failure) {
+                        page.resetSftp()
+                        bindSftpFor(target)
+                    }
+                }
             }
         } catch (_: Throwable) {
             if (initialized) {
@@ -221,8 +232,10 @@ internal class TerminalSessionPage(
     private val outputController = TerminalOutputController(terminalView)
     private val highlightController = TerminalHighlightController(terminalView)
     private var monitorSampler = MonitorSampler(hostSession)
-    private val sftpCreated = AtomicBoolean()
+    private val sftpLock = Any()
+    private var sftpLoading = false
     private var sftpController: io.github.sawaichi9527.eyeshell.sftp.SftpController? = null
+    private var sftpFailure: String? = null
     private var reconnectDispatcher: KeyEventDispatcher? = null
     private var reconnectPreset: HostConnectionPreset? = null
     private var reconnectRequest: ((HostConnectionPreset) -> Boolean)? = null
@@ -232,13 +245,56 @@ internal class TerminalSessionPage(
         add(terminalView.component, BorderLayout.CENTER)
     }
 
-    fun sftpController(): io.github.sawaichi9527.eyeshell.sftp.SftpController? {
-        if (!sftpCreated.compareAndSet(false, true)) return sftpController
-        return try {
-            io.github.sawaichi9527.eyeshell.sftp.SftpController(hostSession.sftp()).also { sftpController = it }
-        } catch (_: Throwable) {
-            null
+    /**
+     * Opens the SFTP subsystem off the EDT and reports either the controller or the reason it
+     * could not be opened. The outcome is cached: switching tabs does not retry, and [resetSftp]
+     * clears a cached failure for an explicit retry.
+     */
+    fun loadSftp(onResult: (controller: io.github.sawaichi9527.eyeshell.sftp.SftpController?, failure: String?) -> Unit) {
+        check(SwingUtilities.isEventDispatchThread()) { "SFTP binding must start on the Swing EDT" }
+        val host = synchronized(sftpLock) {
+            sftpController?.let {
+                onResult(it, null)
+                return
+            }
+            sftpFailure?.let {
+                onResult(null, it)
+                return
+            }
+            if (sftpLoading) return
+            sftpLoading = true
+            hostSession
         }
+        Thread.ofVirtual().name("sftp-open").start {
+            val outcome = runCatching { io.github.sawaichi9527.eyeshell.sftp.SftpController(host.sftp()) }
+            synchronized(sftpLock) { sftpLoading = false }
+            val controller = outcome.getOrNull()
+            val failure = outcome.exceptionOrNull()?.let(::describeFailureChain)
+            if (controller != null) {
+                val keep = synchronized(sftpLock) {
+                    if (closed.get()) false else true.also { sftpController = controller }
+                }
+                if (!keep) {
+                    runCatching { controller.close() }
+                    return@start
+                }
+            } else {
+                synchronized(sftpLock) { sftpFailure = failure }
+            }
+            SwingUtilities.invokeLater {
+                if (!closed.get()) onResult(controller, failure)
+            }
+        }
+    }
+
+    /** Clears a cached SFTP failure so the next [loadSftp] opens the subsystem again. */
+    fun resetSftp() {
+        check(SwingUtilities.isEventDispatchThread()) { "SFTP binding must reset on the Swing EDT" }
+        val previous = synchronized(sftpLock) {
+            sftpFailure = null
+            sftpController.also { sftpController = null }
+        }
+        runCatching { previous?.close() }
     }
 
     fun attach(
@@ -273,9 +329,12 @@ internal class TerminalSessionPage(
         exitGeneration.incrementAndGet()
         monitorStarted.set(false)
         monitorSampler.close()
-        sftpCreated.set(false)
-        sftpController?.close()
-        sftpController = null
+        synchronized(sftpLock) {
+            sftpController?.close()
+            sftpController = null
+            sftpFailure = null
+            sftpLoading = false
+        }
 
         val previousSession = session
         val previousHostSession = hostSession
@@ -365,7 +424,7 @@ internal class TerminalSessionPage(
         exitGeneration.incrementAndGet()
         removeReconnectOnEnter()
         monitorSampler.close()
-        sftpController?.close()
+        synchronized(sftpLock) { sftpController?.close() }
         outputController.close(terminalView::close)
         try {
             session.close()
@@ -542,6 +601,16 @@ class WorkbenchPanel(
         toolDock.bindSftp(controller)
     }
 
+    internal fun bindSftpUnavailable(reason: String, retry: () -> Unit) {
+        check(SwingUtilities.isEventDispatchThread()) { "SFTP binding must run on the Swing EDT" }
+        toolDock.bindSftpUnavailable(reason, retry)
+    }
+
+    internal fun showSftpLoading() {
+        check(SwingUtilities.isEventDispatchThread()) { "SFTP binding must run on the Swing EDT" }
+        toolDock.showSftpLoading()
+    }
+
     private fun createWorkbenchSplit(): JSplitPane = JSplitPane(
         JSplitPane.HORIZONTAL_SPLIT,
         monitorPanel,
@@ -665,12 +734,22 @@ private fun accumulateFailure(current: Throwable?, next: Throwable): Throwable {
     return current
 }
 
+/** Renders a cause chain as one line, so the SFTP panel can say why it could not open. */
+private fun describeFailureChain(failure: Throwable): String {
+    val parts = generateSequence(failure) { current ->
+        current.cause?.takeIf { it !== current }
+    }.map { current ->
+        current.message?.takeIf(String::isNotBlank) ?: current.javaClass.simpleName
+    }.distinct().toList()
+    return parts.joinToString(": ").take(600).ifEmpty { failure.javaClass.simpleName }
+}
+
 private class CollapsibleToolDock(commandsController: CommandsController?) : JPanel(BorderLayout()) {
     private val sftpPanel = SftpPanel()
     private val commandsPanel = CommandsPanel().apply { bind(commandsController) }
     private val content = JTabbedPane(JTabbedPane.TOP).apply {
         name = "toolDockContent"
-        preferredSize = Dimension(0, 220)
+        preferredSize = Dimension(0, 300)
         addTab("SFTP", sftpPanel)
         addTab("Commands", commandsPanel)
         isVisible = false
@@ -687,6 +766,14 @@ private class CollapsibleToolDock(commandsController: CommandsController?) : JPa
 
     fun bindSftp(controller: io.github.sawaichi9527.eyeshell.sftp.SftpController?) {
         sftpPanel.bind(controller)
+    }
+
+    fun bindSftpUnavailable(reason: String, retry: () -> Unit) {
+        sftpPanel.showUnavailable(reason, retry)
+    }
+
+    fun showSftpLoading() {
+        sftpPanel.showLoading()
     }
 
     fun bindCommandSender(sender: ((String) -> Unit)?) {
