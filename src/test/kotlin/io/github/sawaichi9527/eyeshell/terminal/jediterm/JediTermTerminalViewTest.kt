@@ -5,6 +5,7 @@ import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
 import io.github.sawaichi9527.eyeshell.terminal.HighlightMergeMode
 import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
+import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
 import io.github.sawaichi9527.eyeshell.platform.SafeMode
 import java.io.StringWriter
 import java.io.IOException
@@ -30,6 +31,14 @@ class JediTermTerminalViewTest {
     @Test
     fun `terminal retains the phase one scrollback baseline`() {
         assertEquals(EyeShellTerminalSettings.MAX_SCROLLBACK_LINES, EyeShellTerminalSettings().bufferMaxLinesCount)
+    }
+
+    @Test
+    fun `terminal settings use the resolved terminal typography`() {
+        val settings = EyeShellTerminalSettings()
+
+        assertEquals(TerminalTypography.defaultFont().family, settings.getTerminalFont().family)
+        assertEquals(TerminalTypography.DEFAULT_FONT_SIZE, settings.getTerminalFontSize())
     }
 
     @Test

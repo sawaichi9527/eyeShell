@@ -12,6 +12,7 @@ import com.jediterm.terminal.ui.JediTermWidget
 import com.jediterm.terminal.ui.settings.DefaultSettingsProvider
 import com.jediterm.terminal.util.CharUtils
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
+import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
 import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
 import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
 import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputSnapshot
@@ -21,15 +22,16 @@ import javax.swing.JComponent
 import javax.swing.SwingUtilities
 
 class JediTermTerminalView(
-    columns: Int = 80,
-    rows: Int = 24,
+    columns: Int = TerminalTypography.INITIAL_COLUMNS,
+    rows: Int = TerminalTypography.INITIAL_ROWS,
     scrollbackLines: Int = EyeShellTerminalSettings.MAX_SCROLLBACK_LINES,
     maxRefreshRate: Int = EyeShellTerminalSettings.MAX_REFRESH_RATE,
+    font: java.awt.Font = TerminalTypography.defaultFont(),
 ) : TerminalView {
     private val widget = JediTermWidget(
         columns,
         rows,
-        EyeShellTerminalSettings(scrollbackLines, maxRefreshRate),
+        EyeShellTerminalSettings(scrollbackLines, maxRefreshRate, font),
     )
     private val searchController = JediTermSearchController(widget)
     private val highlightController = JediTermHighlightController(widget)
@@ -226,8 +228,13 @@ private class SessionTtyConnector(
 internal class EyeShellTerminalSettings(
     private val scrollbackLines: Int = MAX_SCROLLBACK_LINES,
     private val refreshRate: Int = MAX_REFRESH_RATE,
+    private val font: java.awt.Font = TerminalTypography.defaultFont(),
 ) : DefaultSettingsProvider() {
     override fun audibleBell(): Boolean = false
+
+    override fun getTerminalFont(): java.awt.Font = font
+
+    override fun getTerminalFontSize(): Float = font.size2D
 
     override fun getBufferMaxLinesCount(): Int = scrollbackLines
 

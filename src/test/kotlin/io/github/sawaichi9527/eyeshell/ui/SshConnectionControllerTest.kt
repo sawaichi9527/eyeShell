@@ -13,6 +13,7 @@ import io.github.sawaichi9527.eyeshell.ssh.HostSession
 import io.github.sawaichi9527.eyeshell.ssh.SshAuthentication
 import io.github.sawaichi9527.eyeshell.ssh.SshEndpoint
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
+import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
 import java.io.IOException
 import java.util.UUID
 import org.junit.jupiter.api.Assertions.assertArrayEquals
@@ -41,6 +42,28 @@ class SshConnectionControllerTest {
     @Test
     fun `falls back to the failure type when no cause has a message`() {
         assertEquals("RuntimeException", describeFailure(RuntimeException()))
+    }
+
+    @Test
+    fun `opens the shell with the terminal's initial size`() {
+        val profileId = UUID.fromString("00000000-0000-0000-0000-000000000057")
+        val terminal = FakeTerminalSession()
+        val host = FakeHostSession(terminal)
+        val controller = SshConnectionController(
+            RecordingPasswordStore(),
+            SshTerminalConnector { _, _, _, _, _, _ -> host },
+        )
+        val request = passwordRequest(profileId, remember = false)
+
+        try {
+            controller.openTerminal(request, HostKeyVerifier { true }, ChangedHostKeyHandler { })
+
+            assertEquals(TerminalTypography.INITIAL_COLUMNS, host.lastColumns)
+            assertEquals(TerminalTypography.INITIAL_ROWS, host.lastRows)
+        } finally {
+            request.close()
+            controller.close()
+        }
     }
 
     @Test
@@ -467,8 +490,16 @@ class SshConnectionControllerTest {
         override val endpoint: SshEndpoint = SshEndpoint("example.test", 22, "operator"),
     ) : HostSession {
         private var closed = false
+        var lastColumns: Int = 0
+            private set
+        var lastRows: Int = 0
+            private set
 
-        override fun openTerminal(columns: Int, rows: Int): TerminalSession = terminal
+        override fun openTerminal(columns: Int, rows: Int): TerminalSession {
+            lastColumns = columns
+            lastRows = rows
+            return terminal
+        }
 
         override fun execute(command: String): ExecResult = ExecResult(0, "")
 

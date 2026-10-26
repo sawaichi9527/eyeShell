@@ -19,6 +19,7 @@ import io.github.sawaichi9527.eyeshell.secrets.SessionPasswordCache
 import io.github.sawaichi9527.eyeshell.secrets.StoredPassword
 import io.github.sawaichi9527.eyeshell.secrets.UnavailablePasswordCredentialStore
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
+import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
@@ -291,7 +292,10 @@ internal class SshConnectionController(
             transport = transport,
         )
         val terminal = try {
-            hostSession.openTerminal()
+            hostSession.openTerminal(
+                columns = TerminalTypography.INITIAL_COLUMNS,
+                rows = TerminalTypography.INITIAL_ROWS,
+            )
         } catch (failure: Exception) {
             hostSession.close()
             throw failure
