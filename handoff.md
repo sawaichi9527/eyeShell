@@ -490,3 +490,9 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Test environment: Ubuntu 26.04 x86_64, GNOME Wayland session with `DISPLAY=:0`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 distribution/caches under `.local/gradle-home`, Kotlin 2.4.10, default 512 MiB test heap.
 - Artifacts: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`; panel renders at `/tmp/opencode/sftp-connected.png`, `sftp-unavailable.png`, `sftp-loading.png`; log at `/tmp/opencode/sftp3-test.log`.
 - Remaining unverified scope: the user's own server was not available; the success path was exercised against an embedded MINA server and the failure path with a fake client. The Retry button was not clicked by hand, a subsystem open that hangs stays on `Opening SFTP...`, and the panel was rendered offscreen rather than inspected on the user's machine.
+
+### 2026-10-27 commit and push
+
+- Commands: `git push origin main`.
+- Result: pushed `80e362b..eaa1bb9` (2 commits: `5844a90` terminal typography, `eaa1bb9` SFTP panel) to `origin/main`; working tree clean and `main` in sync afterwards at 2026-10-27T00:23+08:00.
+- Not re-run for the push: no code changed after the validated `232 tests / 0 failures / 12 skipped` run recorded above, except these documentation updates.
