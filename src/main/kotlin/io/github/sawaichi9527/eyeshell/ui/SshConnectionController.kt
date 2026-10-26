@@ -39,6 +39,7 @@ import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JPasswordField
 import javax.swing.JCheckBox
+import javax.swing.JComponent
 import javax.swing.JSpinner
 import javax.swing.JTextArea
 import javax.swing.JTextField
@@ -60,17 +61,24 @@ internal class SshConnectionController(
 
     fun connect(owner: EyeShellWindow): Boolean = connect(owner, null)
 
-    internal fun connect(owner: EyeShellWindow, preset: HostConnectionPreset?): Boolean {
+    internal fun connect(owner: EyeShellWindow, preset: HostConnectionPreset?): Boolean =
+        connect(owner, preset, null)
+
+    /**
+     * @param target existing terminal tab to reconnect in place. When null, or when the tab can no
+     *   longer accept a session, the connection opens a new tab instead.
+     */
+    internal fun connect(owner: EyeShellWindow, preset: HostConnectionPreset?, target: JComponent?): Boolean {
         check(SwingUtilities.isEventDispatchThread()) { "The SSH connection dialog must open on the Swing EDT" }
         if (closed.get() || connectionTask?.isDone == false) return false
         owner.setConnectionState("Preparing SSH connection...", true)
         connectionTask = executor.submit {
-            connectInBackground(owner, preset)
+            connectInBackground(owner, preset, target)
         }
         return true
     }
 
-    private fun connectInBackground(owner: EyeShellWindow, preset: HostConnectionPreset?) {
+    private fun connectInBackground(owner: EyeShellWindow, preset: HostConnectionPreset?, target: JComponent?) {
         var credential = loadStoredPassword(preset)
         var jumpCredential = preset?.jumpHost?.let { loadStoredPassword(it.toPreset()) }
             ?: LoadedCredential(CredentialStoreStatus.UNAVAILABLE, null, null, CredentialSource.NONE)
@@ -103,7 +111,7 @@ internal class SshConnectionController(
                         }
                     }
                     is ConnectionDialogDecision.Connect -> {
-                        connectRequest(owner, decision.request)
+                        connectRequest(owner, decision.request, target)
                         return
                     }
                 }
@@ -137,6 +145,18 @@ internal class SshConnectionController(
         if (storeStatus != CredentialStoreStatus.AVAILABLE && storeStatus != CredentialStoreStatus.LOCKED) {
             return LoadedCredential(storeStatus, null, null, CredentialSource.NONE)
         }
+        // Ask the store whether an item exists before reading it: retrieving unlocks a locked
+        // keyring, and prompting for the OS password when nothing is stored is not expected.
+        if (!passwordStore.contains(preset.profileId)) {
+            // Still carry the profile revision so a password typed for a first save can be stored
+            // later, without touching the credential store now.
+            val revision = try {
+                credentialGuard.snapshot(preset.profileId) { }.revision
+            } catch (_: Exception) {
+                null
+            }
+            return LoadedCredential(storeStatus, null, revision, CredentialSource.NONE)
+        }
         val snapshot = try {
             credentialGuard.snapshot(preset.profileId) { active ->
                 if (active) passwordStore.retrieve(preset.profileId) else null
@@ -149,7 +169,7 @@ internal class SshConnectionController(
         return LoadedCredential(safeStoreStatus(), stored, snapshot.revision, CredentialSource.OS_STORE)
     }
 
-    private fun connectRequest(owner: EyeShellWindow, request: ConnectionRequest) {
+    private fun connectRequest(owner: EyeShellWindow, request: ConnectionRequest, target: JComponent?) {
         request.use {
             publishConnectionState(owner, "Connecting to ${request.endpoint.displayName}...", connecting = true)
             val changedHostKey = AtomicReference<ChangedHostKey>()
@@ -178,16 +198,22 @@ internal class SshConnectionController(
                 )
                 val reconnectProfileId = request.passwordProfileId ?: UUID.randomUUID()
                 rememberForReconnect(request, opened, reconnectProfileId)
+                val reconnectPreset = HostConnectionPreset(
+                    profileId = reconnectProfileId,
+                    endpoint = request.endpoint,
+                    authenticationMethod = request.authentication.toConnectionMethod(),
+                    jumpHost = request.jumpHost,
+                )
                 SwingUtilities.invokeLater {
                     if (owner.isDisplayable && !closed.get()) {
                         try {
-                            val reconnectPreset = HostConnectionPreset(
-                                profileId = reconnectProfileId,
-                                endpoint = request.endpoint,
-                                authenticationMethod = request.authentication.toConnectionMethod(),
-                                jumpHost = request.jumpHost,
-                            )
-                            owner.attachTerminal(opened.hostSession) { connect(owner, reconnectPreset) }
+                            val reused = target != null &&
+                                owner.reconnectTerminal(target, opened.hostSession, opened.terminal, reconnectPreset)
+                            if (!reused) {
+                                owner.attachTerminal(opened.hostSession, opened.terminal, reconnectPreset) { preset, component ->
+                                    connect(owner, preset, component)
+                                }
+                            }
                             if (opened.passwordSaveFailed) {
                                 showCredentialWarning(owner, "Connected, but the password could not be saved.")
                             }
@@ -197,7 +223,7 @@ internal class SshConnectionController(
                             JOptionPane.showMessageDialog(
                                 owner,
                                 describeFailure(failure),
-                                "Could not open terminal tab",
+                                if (target != null) "Could not reconnect" else "Could not open terminal tab",
                                 JOptionPane.ERROR_MESSAGE,
                             )
                         }
@@ -418,6 +444,10 @@ internal class SshConnectionController(
             val usePassword = authenticationField.selectedItem == ConnectionAuthenticationMethod.PASSWORD
             val usePublicKey = authenticationField.selectedItem == ConnectionAuthenticationMethod.PUBLIC_KEY
             passwordField.isEnabled = usePassword
+            passwordField.putClientProperty(
+                "JTextField.placeholderText",
+                UiText.passwordPlaceholder(passwordAuthentication = usePassword, savedPassword = storedPassword != null),
+            )
             keyFileField.isEnabled = usePublicKey
             keyFileButton.isEnabled = usePublicKey
             passphraseField.isEnabled = usePublicKey
@@ -609,6 +639,10 @@ internal class SshConnectionController(
                     else -> "Enter the jump host password for this connection."
                 }
                 addField(inner, row++, "", JLabel(hint))
+                passwordField.putClientProperty(
+                    "JTextField.placeholderText",
+                    UiText.passwordPlaceholder(passwordAuthentication = true, savedPassword = storedJumpPassword != null),
+                )
                 addField(inner, row++, "Password", passwordField)
             }
             ConnectionAuthenticationMethod.PUBLIC_KEY -> {

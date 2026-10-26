@@ -13,6 +13,12 @@ enum class CredentialStoreStatus {
 interface PasswordCredentialStore : AutoCloseable {
     fun status(): CredentialStoreStatus
 
+    /**
+     * Reports whether a credential exists without unlocking the store or reading the secret.
+     * Used to avoid prompting for a keyring password when nothing is stored for the profile.
+     */
+    fun contains(profileId: UUID): Boolean
+
     fun retrieve(profileId: UUID): StoredPassword?
 
     fun save(profileId: UUID, password: CharArray)
@@ -52,6 +58,8 @@ class UnavailablePasswordCredentialStore(
     }
 
     override fun status(): CredentialStoreStatus = unavailableStatus
+
+    override fun contains(profileId: UUID): Boolean = false
 
     override fun retrieve(profileId: UUID): StoredPassword? = null
 

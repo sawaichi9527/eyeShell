@@ -34,6 +34,7 @@ import javax.swing.tree.DefaultMutableTreeNode
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -383,11 +384,21 @@ class HostCatalogControllerTest {
     }
 
     @Test
+    fun `the password field shows a mask only when a password is actually stored`() {
+        assertEquals(
+            UiText.PASSWORD_PLACEHOLDER,
+            UiText.passwordPlaceholder(passwordAuthentication = true, savedPassword = true),
+        )
+        assertNull(UiText.passwordPlaceholder(passwordAuthentication = true, savedPassword = false))
+        assertNull(UiText.passwordPlaceholder(passwordAuthentication = false, savedPassword = true))
+    }
+
+    @Test
     fun `credential fields stay editable when the credential store is locked`() {
         val locked = hostEditorCredentialState(
             passwordAuthentication = true,
             storeStatus = CredentialStoreStatus.LOCKED,
-            existingHost = true,
+            savedPassword = true,
             rememberSelected = false,
             clearRequested = false,
         )
@@ -403,7 +414,7 @@ class HostCatalogControllerTest {
         val unavailable = hostEditorCredentialState(
             passwordAuthentication = true,
             storeStatus = CredentialStoreStatus.UNAVAILABLE,
-            existingHost = false,
+            savedPassword = false,
             rememberSelected = false,
             clearRequested = false,
         )
@@ -419,7 +430,7 @@ class HostCatalogControllerTest {
         val saving = hostEditorCredentialState(
             passwordAuthentication = true,
             storeStatus = CredentialStoreStatus.AVAILABLE,
-            existingHost = false,
+            savedPassword = false,
             rememberSelected = true,
             clearRequested = false,
         )
@@ -431,7 +442,7 @@ class HostCatalogControllerTest {
         val editing = hostEditorCredentialState(
             passwordAuthentication = true,
             storeStatus = CredentialStoreStatus.AVAILABLE,
-            existingHost = true,
+            savedPassword = true,
             rememberSelected = false,
             clearRequested = false,
         )
@@ -443,7 +454,7 @@ class HostCatalogControllerTest {
             hostEditorCredentialState(
                 passwordAuthentication = true,
                 storeStatus = CredentialStoreStatus.AVAILABLE,
-                existingHost = false,
+                savedPassword = false,
                 rememberSelected = false,
                 clearRequested = false,
             ).hint,
@@ -452,7 +463,7 @@ class HostCatalogControllerTest {
         val clearing = hostEditorCredentialState(
             passwordAuthentication = true,
             storeStatus = CredentialStoreStatus.AVAILABLE,
-            existingHost = true,
+            savedPassword = true,
             rememberSelected = true,
             clearRequested = true,
         )
@@ -462,7 +473,7 @@ class HostCatalogControllerTest {
         val otherAuthentication = hostEditorCredentialState(
             passwordAuthentication = false,
             storeStatus = CredentialStoreStatus.AVAILABLE,
-            existingHost = true,
+            savedPassword = true,
             rememberSelected = true,
             clearRequested = false,
         )
@@ -674,6 +685,7 @@ class HostCatalogControllerTest {
         var lastRetrieved: StoredPassword? = null
 
         override fun status() = CredentialStoreStatus.AVAILABLE
+        override fun contains(profileId: UUID): Boolean = value != null
         override fun retrieve(profileId: UUID): StoredPassword? = value?.let(::StoredPassword).also {
             lastRetrieved = it
         }

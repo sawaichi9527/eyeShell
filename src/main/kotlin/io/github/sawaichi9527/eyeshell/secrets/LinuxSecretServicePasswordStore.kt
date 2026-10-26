@@ -18,6 +18,18 @@ internal class LinuxSecretServicePasswordStore(
         CredentialStoreStatus.UNAVAILABLE
     }
 
+    /**
+     * Lists the matching items without unlocking the collection, so a locked keyring is not
+     * prompted just to discover that nothing is stored for this profile.
+     */
+    override fun contains(profileId: UUID): Boolean = try {
+        collections.open().use { collection -> collection.items(attributes(profileId)).isNotEmpty() }
+    } catch (_: Exception) {
+        false
+    } catch (_: LinkageError) {
+        false
+    }
+
     override fun retrieve(profileId: UUID): StoredPassword? = withCollection("read") { collection ->
         val item = collection.items(attributes(profileId)).firstOrNull() ?: return@withCollection null
         val password = collection.secret(item)

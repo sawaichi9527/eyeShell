@@ -54,6 +54,15 @@ class JediTermTerminalView(
         widget.start()
     }
 
+    override fun canAttach(): Boolean = widget.canOpenSession()
+
+    override fun resetForReattach() {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal reattach preparation must run on the Swing EDT" }
+        if (widget.terminalTextBuffer.isUsingAlternateBuffer) {
+            widget.terminalTextBuffer.useAlternateBuffer(false)
+        }
+    }
+
     override fun captureAllOutput(): TerminalOutputSnapshot {
         check(!SwingUtilities.isEventDispatchThread()) { "Terminal output must be exported off the Swing EDT" }
         val snapshot = widget.terminalTextBuffer.getMainBufferSnapshot()
@@ -171,7 +180,7 @@ private class ContextActionProvider(
         action("Clear Buffer", separated = true, enabled = {
             hasSession && !widget.terminalTextBuffer.isUsingAlternateBuffer
         }) {
-            if (!widget.terminalTextBuffer.isUsingAlternateBuffer) widget.terminalTextBuffer.clearHistory()
+            if (!widget.terminalTextBuffer.isUsingAlternateBuffer) widget.terminalPanel.clearBuffer()
         },
     )
 

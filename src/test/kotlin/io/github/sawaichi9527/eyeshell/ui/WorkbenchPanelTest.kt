@@ -33,26 +33,25 @@ import org.junit.jupiter.api.Test
 
 class WorkbenchPanelTest {
     @Test
-    fun `enter on an exited session requests a reconnect once`() {
+    fun `enter on an exited session requests a reconnect for every press`() {
         val reconnects = AtomicInteger()
         val exited = CountDownLatch(1)
         lateinit var panel: WorkbenchPanel
         lateinit var page: TerminalSessionPage
         lateinit var view: TestTerminalView
+        val preset = reconnectPreset()
 
         SwingUtilities.invokeAndWait {
             panel = WorkbenchPanel()
             view = TestTerminalView(JPanel())
-            page = TerminalSessionPage(panel, view, TestHostSession(TestTerminalSession("exited")))
-            page.attach()
+            val session = TestTerminalSession("exited")
+            page = TerminalSessionPage(panel, view, TestHostSession(session), session)
+            page.attach(preset) {
+                reconnects.incrementAndGet() > 0
+            }
             panel.addSession("exited", page.component, page::close)
             page.startExitMonitor {
                 panel.updateSessionStatus(page.component, SessionStatus.EXITED)
-                page.enableReconnectOnEnter {
-                    if (!panel.isSessionExited(page.component)) return@enableReconnectOnEnter false
-                    reconnects.incrementAndGet()
-                    true
-                }
                 exited.countDown()
             }
         }
@@ -61,33 +60,258 @@ class WorkbenchPanelTest {
             assertTrue(exited.await(5, TimeUnit.SECONDS), "session never reported exit")
             SwingUtilities.invokeAndWait {
                 val focusManager = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager()
-                val event = java.awt.event.KeyEvent(
-                    view.component,
-                    java.awt.event.KeyEvent.KEY_PRESSED,
-                    System.currentTimeMillis(),
-                    0,
-                    java.awt.event.KeyEvent.VK_ENTER,
-                    '\n',
-                )
-                assertTrue(focusManager.dispatchEvent(event))
+                assertTrue(focusManager.dispatchEvent(enterKey(view.component)))
                 assertEquals(1, reconnects.get())
 
-                val second = java.awt.event.KeyEvent(
-                    view.component,
-                    java.awt.event.KeyEvent.KEY_PRESSED,
-                    System.currentTimeMillis(),
-                    0,
-                    java.awt.event.KeyEvent.VK_ENTER,
-                    '\n',
-                )
-                assertEquals(1, reconnects.get())
-                focusManager.dispatchEvent(second)
-                assertEquals(1, reconnects.get())
+                assertTrue(focusManager.dispatchEvent(enterKey(view.component)))
+                assertEquals(2, reconnects.get(), "The Enter hook must stay installed after a reconnect request")
             }
         } finally {
             SwingUtilities.invokeAndWait { panel.closeSessions() }
         }
     }
+
+    @Test
+    fun `a cancelled reconnect attempt can be retried with enter`() {
+        val attempts = AtomicInteger()
+        lateinit var view: TestTerminalView
+        lateinit var page: TerminalSessionPage
+
+        SwingUtilities.invokeAndWait {
+            val panel = WorkbenchPanel()
+            view = TestTerminalView(JPanel())
+            page = TerminalSessionPage(panel, view, TestHostSession(TestTerminalSession("cancelled")), TestTerminalSession("cancelled"))
+            page.attach(reconnectPreset()) {
+                attempts.incrementAndGet()
+                false
+            }
+            panel.addSession("cancelled", page.component, page::close)
+        }
+
+        try {
+            SwingUtilities.invokeAndWait {
+                val focusManager = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager()
+                focusManager.dispatchEvent(enterKey(view.component))
+                assertEquals(1, attempts.get(), "The first Enter must request a reconnect")
+                focusManager.dispatchEvent(enterKey(view.component))
+                assertEquals(2, attempts.get(), "A refused request must not disable the Enter hook")
+            }
+        } finally {
+            SwingUtilities.invokeAndWait { page.close() }
+        }
+    }
+
+    @Test
+    fun `enter is ignored after the page closes`() {
+        val attempts = AtomicInteger()
+        lateinit var view: TestTerminalView
+        lateinit var page: TerminalSessionPage
+
+        SwingUtilities.invokeAndWait {
+            val panel = WorkbenchPanel()
+            view = TestTerminalView(JPanel())
+            page = TerminalSessionPage(panel, view, TestHostSession(TestTerminalSession("closed")), TestTerminalSession("closed"))
+            page.attach(reconnectPreset()) {
+                attempts.incrementAndGet() > 0
+            }
+            panel.addSession("closed", page.component, page::close)
+        }
+
+        SwingUtilities.invokeAndWait { page.close() }
+        SwingUtilities.invokeAndWait {
+            java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().dispatchEvent(enterKey(view.component))
+            assertEquals(0, attempts.get())
+        }
+    }
+
+    @Test
+    fun `the window only reconnects an exited session`() {
+        val reconnects = AtomicInteger()
+        val session = BlockingExitTerminalSession("window-exited")
+        lateinit var view: TestTerminalView
+        lateinit var window: EyeShellWindow
+        lateinit var tabs: JTabbedPane
+
+        onEdt {
+            view = TestTerminalView(JPanel())
+            window = EyeShellWindow(terminalViewFactory = { view }, connectAction = {}, closeAction = {})
+            window.attachTerminal(TestHostSession(session), session, reconnectPreset()) { _, _ ->
+                reconnects.incrementAndGet() > 0
+            }
+            tabs = window.findByName("sessionTabs") as JTabbedPane
+        }
+
+        try {
+            onEdt {
+                val focusManager = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager()
+                focusManager.dispatchEvent(enterKey(view.component))
+                assertEquals(0, reconnects.get(), "Enter must not reconnect a live session")
+            }
+
+            session.signalNaturalExit()
+            assertTrue(session.awaitExitCompleted(5, TimeUnit.SECONDS))
+            await(Duration.ofSeconds(5)) { onEdt { tabStatusText(tabs) } == "Exited" }
+
+            onEdt {
+                val focusManager = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager()
+                assertTrue(focusManager.dispatchEvent(enterKey(view.component)))
+                assertEquals(1, reconnects.get())
+            }
+        } finally {
+            onEdt { window.dispose() }
+        }
+    }
+
+    @Test
+    fun `reconnect swaps the session in place and keeps the terminal view`() {
+        val oldSession = TestTerminalSession("old")
+        val oldHost = TestHostSession(oldSession)
+        val newSession = TestTerminalSession("new")
+        val newHost = TestHostSession(newSession, io.github.sawaichi9527.eyeshell.ssh.SshEndpoint("other.example", 22, "operator"))
+        lateinit var view: TestTerminalView
+        lateinit var page: TerminalSessionPage
+
+        onEdt {
+            val panel = WorkbenchPanel()
+            view = TestTerminalView(JPanel())
+            page = TerminalSessionPage(panel, view, oldHost, oldSession)
+            page.attach(reconnectPreset()) { true }
+            panel.addSession("old", page.component, page::close)
+        }
+
+        try {
+            val component = onEdt { page.component }
+            onEdt {
+                assertTrue(page.reconnect(newHost, newSession, reconnectPreset()))
+                assertSame(component, page.component, "Reconnecting must not replace the tab component")
+                assertSame(newSession, view.attachedSession)
+                assertEquals(0, view.closeCount, "The terminal view must survive the reconnect")
+                assertTrue(oldHost.isClosed, "The replaced connection must be closed")
+                assertFalse(newHost.isClosed)
+            }
+        } finally {
+            onEdt { page.close() }
+        }
+    }
+
+    @Test
+    fun `reconnect refuses when the terminal view cannot take a session`() {
+        val oldSession = TestTerminalSession("busy")
+        val oldHost = TestHostSession(oldSession)
+        val newSession = TestTerminalSession("rejected")
+        lateinit var view: TestTerminalView
+        lateinit var page: TerminalSessionPage
+
+        onEdt {
+            val panel = WorkbenchPanel()
+            view = TestTerminalView(JPanel()).apply { canAttachValue = false }
+            page = TerminalSessionPage(panel, view, oldHost, oldSession)
+            page.attach(reconnectPreset()) { true }
+            panel.addSession("busy", page.component, page::close)
+            assertFalse(page.reconnect(TestHostSession(newSession), newSession, reconnectPreset()))
+            assertSame(oldSession, view.attachedSession)
+            assertFalse(oldHost.isClosed)
+            assertTrue(newSession.isOpen)
+        }
+
+        onEdt { page.close() }
+    }
+
+    @Test
+    fun `an exit from the replaced session does not mark the reconnected tab exited`() {
+        val oldSession = BlockingExitTerminalSession("old")
+        val newSession = BlockingExitTerminalSession("new")
+        val newHost = TestHostSession(newSession)
+        lateinit var panel: WorkbenchPanel
+        lateinit var page: TerminalSessionPage
+
+        onEdt {
+            panel = WorkbenchPanel()
+            page = TerminalSessionPage(panel, TestTerminalView(JPanel()), TestHostSession(oldSession), oldSession)
+            page.attach(reconnectPreset()) { true }
+            panel.addSession("old", page.component, page::close)
+            page.startExitMonitor { panel.updateSessionStatus(page.component, SessionStatus.EXITED) }
+        }
+
+        try {
+            onEdt { assertTrue(page.reconnect(newHost, newSession, reconnectPreset())) }
+            oldSession.signalNaturalExit()
+            assertTrue(oldSession.awaitExitCompleted(5, TimeUnit.SECONDS))
+            Thread.sleep(200)
+            onEdt {
+                assertFalse(panel.isSessionExited(page.component), "A stale exit must not reach the reconnected tab")
+            }
+
+            newSession.signalNaturalExit()
+            assertTrue(newSession.awaitExitCompleted(5, TimeUnit.SECONDS))
+            await(Duration.ofSeconds(5)) { onEdt { panel.isSessionExited(page.component) } }
+        } finally {
+            onEdt { page.close() }
+        }
+    }
+
+    @Test
+    fun `window attaches the already opened terminal instead of opening another channel`() {
+        val session = TestTerminalSession("single")
+        val host = TestHostSession(session)
+        lateinit var view: TestTerminalView
+        lateinit var window: EyeShellWindow
+
+        onEdt {
+            view = TestTerminalView(JPanel())
+            window = EyeShellWindow(terminalViewFactory = { view }, connectAction = {}, closeAction = {})
+            window.attachTerminal(host, session, reconnectPreset()) { _, _ -> true }
+            assertEquals(0, host.openTerminalCount, "The connection's own shell channel must be reused")
+            assertSame(session, view.attachedSession)
+        }
+
+        onEdt { window.dispose() }
+    }
+
+    @Test
+    fun `window reconnects an existing tab and renames it`() {
+        val firstSession = BlockingExitTerminalSession("first")
+        val firstHost = TestHostSession(firstSession)
+        val secondSession = BlockingExitTerminalSession("second")
+        val secondHost = TestHostSession(
+            secondSession,
+            io.github.sawaichi9527.eyeshell.ssh.SshEndpoint("other.example", 22, "operator"),
+        )
+        lateinit var view: TestTerminalView
+        lateinit var window: EyeShellWindow
+        val reconnectRequests = AtomicInteger()
+
+        onEdt {
+            view = TestTerminalView(JPanel())
+            window = EyeShellWindow(terminalViewFactory = { view }, connectAction = {}, closeAction = {})
+            window.attachTerminal(firstHost, firstSession, reconnectPreset()) { _, _ ->
+                reconnectRequests.incrementAndGet() > 0
+            }
+        }
+
+        try {
+            val tabs = onEdt { window.findByName("sessionTabs") as JTabbedPane }
+            onEdt {
+                assertEquals(1, tabs.tabCount)
+                val component = tabs.getComponentAt(0) as JComponent
+                assertTrue(window.reconnectTerminal(component, secondHost, secondSession, reconnectPreset()))
+                assertEquals(1, tabs.tabCount, "Reconnecting must reuse the tab instead of adding one")
+                assertSame(component, tabs.getComponentAt(0))
+                assertEquals("operator@other.example:22", tabs.getTitleAt(0))
+                assertSame(secondSession, view.attachedSession)
+                assertTrue(firstHost.isClosed)
+            }
+
+            onEdt {
+                val focusManager = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager()
+                focusManager.dispatchEvent(enterKey(view.component))
+                assertEquals(0, reconnectRequests.get(), "A reconnected tab must not reconnect again while it is live")
+            }
+        } finally {
+            onEdt { window.dispose() }
+        }
+    }
+
 
     @Test
     fun `sends a saved command to the terminal with a carriage return`() {
@@ -531,6 +755,28 @@ class WorkbenchPanelTest {
         }
     }
 
+    private fun reconnectPreset(): HostConnectionPreset = HostConnectionPreset(
+        profileId = java.util.UUID.fromString("00000000-0000-0000-0000-000000000077"),
+        endpoint = io.github.sawaichi9527.eyeshell.ssh.SshEndpoint("test.example", 22, "operator"),
+        authenticationMethod = ConnectionAuthenticationMethod.PASSWORD,
+    )
+
+    private fun enterKey(source: Component): java.awt.event.KeyEvent = java.awt.event.KeyEvent(
+        source,
+        java.awt.event.KeyEvent.KEY_PRESSED,
+        System.currentTimeMillis(),
+        0,
+        java.awt.event.KeyEvent.VK_ENTER,
+        '\n',
+    )
+
+    private fun tabStatusText(tabs: JTabbedPane): String {
+        val index = tabs.selectedIndex
+        if (index < 0) return ""
+        val header = tabs.getTabComponentAt(index) as? Container ?: return ""
+        return (header.findByName("sessionStatusLabel") as? JLabel)?.text.orEmpty()
+    }
+
     private fun <T> onEdt(action: () -> T): T {
         var result: Result<T>? = null
         SwingUtilities.invokeAndWait { result = runCatching(action) }
@@ -552,10 +798,13 @@ class WorkbenchPanelTest {
     ) : TerminalView {
         var attachedSession: TerminalSession? = null
         var closeCount = 0
+        var canAttachValue: Boolean = true
 
         override fun attach(session: TerminalSession) {
             attachedSession = session
         }
+
+        override fun canAttach(): Boolean = canAttachValue
 
         override fun captureAllOutput(): TerminalOutputSnapshot = TerminalOutputSnapshot {}
 
@@ -605,8 +854,16 @@ class WorkbenchPanelTest {
             io.github.sawaichi9527.eyeshell.ssh.SshEndpoint("test.example", 22, "operator"),
     ) : HostSession {
         private var closed = false
+        var openTerminalCount = 0
+            private set
 
-        override fun openTerminal(columns: Int, rows: Int): TerminalSession = terminal
+        val isClosed: Boolean
+            get() = closed
+
+        override fun openTerminal(columns: Int, rows: Int): TerminalSession {
+            openTerminalCount++
+            return terminal
+        }
 
         override fun execute(command: String): ExecResult = ExecResult(0, "")
 

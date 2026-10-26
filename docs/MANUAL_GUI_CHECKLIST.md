@@ -29,6 +29,8 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 - Selecting a host enables `Edit...`, `Delete`, and `Connect`.
 - Expanding/collapsing folders survives an add or edit; the edited host stays selected (its folder expands if the host moved).
 - Saving a password works, `Clear saved password` removes it, and leaving the field blank keeps the previous password.
+- Editing an existing PASSWORD host opens with a blank Password field showing a `********` mask and the hint `A saved password is set. Leave the field blank to keep it; an entered password is used for this session only.` when a secret exists; the saved secret is never shown. Typing replaces the mask, and `Clear saved password` hides it.
+- `Save password in OS credential store` is checked by default for both Add and Edit, so a password typed in the editor is stored in the OS credential store (unless the box is cleared); `Clear saved password` removes a stored one.
 - With the OS keyring locked, saving a password shows the desktop unlock prompt; after unlocking, the password is stored and is retrieved on the next launch without retyping.
 - With the OS keyring locked, the Password field is still editable, the hint says the keyring is locked, and the entered password is used by the next `Connect` without retyping (it is kept only in memory).
 - `Connect after saving` on a new host saves it and starts the connection confirmation for that host.
@@ -37,6 +39,7 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 ## 3. Connection flows
 
 - Password, Public Key (with and without passphrase), keyboard-interactive, and agent each open a terminal.
+- Connecting to a Saved Host with a stored password shows `********` in the empty Password field; typing removes the mask, and leaving it untouched uses the stored password.
 - A new host key shows the confirmation screen; rejecting it aborts the connection.
 - A changed host key is rejected with no automatic replacement prompt.
 
@@ -50,7 +53,11 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 ## 5. Session lifecycle
 
 - Typing `exit` marks the tab `Exited` and keeps the scrollback visible.
-- Pressing Enter in the exited session opens a new tab with the original endpoint/authentication, preserves the old tab, and reuses the password typed for that session without asking again.
+- Pressing Enter in the exited session reconnects **into the same tab**: the tab title and position stay, the previous scrollback remains above the new shell's output, and the password typed for that session is reused without asking again.
+- Cancelling the reconnect dialog and pressing Enter again reopens it; a failed attempt can be retried the same way.
+- Exiting while an alternate-screen application (for example `vim` or `less`) was killed leaves no alternate-screen residue after the reconnect.
+- Editing the Host/Port before connecting on a reconnect renames the tab to the new endpoint instead of leaving the old name.
+- A new session never shows another session's output in the same tab.
 - Connection failures show the full cause chain, and monitor/SFTP failures never abort terminal attachment.
 
 ## 6. Terminal behaviour
@@ -59,6 +66,8 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 - Search (Ctrl+F) navigates matches and rejects invalid regex with a message.
 - Add/Manage highlight rules: colors, bold/italic/underline, priority, and Merge/Override all render as chosen.
 - Select Visible, Select All Output, Copy All Output (8,388,608 limit prompt), and Save All Output behave as documented, including on the alternate screen.
+- `Clear Buffer` empties the visible screen and the scrollback, keeps the last line, and is disabled while an alternate-screen application is running.
+- Connecting to a Password host with nothing saved does not raise an OS keyring password prompt; connecting to a host with a saved password raises it only when the keyring must be unlocked to read the secret.
 - CJK and wide characters select and copy correctly.
 
 ## 7. SFTP

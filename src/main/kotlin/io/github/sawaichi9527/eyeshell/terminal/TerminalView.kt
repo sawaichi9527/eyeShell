@@ -8,6 +8,19 @@ interface TerminalView : AutoCloseable {
 
     fun attach(session: TerminalSession)
 
+    /**
+     * Whether a new session may be attached to this view without losing the retained scrollback.
+     * A view that is still running a session reports `false`; callers then open a separate tab.
+     */
+    fun canAttach(): Boolean = true
+
+    /**
+     * Prepares the view for a session that replaces the previous one inside the same tab.
+     * The default implementation does nothing; implementations may restore a primary buffer
+     * left behind by an application that exited from its alternate screen.
+     */
+    fun resetForReattach() = Unit
+
     fun captureAllOutput(): TerminalOutputSnapshot
 
     fun writeAllOutput(writer: Writer) = captureAllOutput().writeTo(writer)

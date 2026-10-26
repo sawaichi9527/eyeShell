@@ -14,7 +14,7 @@ internal object UiText {
         "No OS credential store is available. The password is used for this session only and kept in memory until eyeShell closes."
     const val STORE_WILL_SAVE = "The password will be saved to the OS credential store."
     const val STORE_KEEP_OR_SESSION =
-        "Leave blank to keep the saved password. An entered password is used for this session only."
+        "A saved password is set. Leave the field blank to keep it; an entered password is used for this session only."
     const val STORE_SESSION_ONLY =
         "The password is used for this session only. Select Remember to save it in the OS credential store."
     const val CONNECT_SESSION_PASSWORD =
@@ -28,4 +28,10 @@ internal object UiText {
     const val LOAD_TOOLTIP =
         "Load average for the last 1, 5, and 15 minutes: the average number of processes waiting for CPU time. " +
             "When it stays above the CPU core count, the host cannot keep up."
+
+    /** Non-secret mask shown while an empty password field stands for a saved credential. */
+    const val PASSWORD_PLACEHOLDER = "********"
+
+    fun passwordPlaceholder(passwordAuthentication: Boolean, savedPassword: Boolean): String? =
+        if (passwordAuthentication && savedPassword) PASSWORD_PLACEHOLDER else null
 }

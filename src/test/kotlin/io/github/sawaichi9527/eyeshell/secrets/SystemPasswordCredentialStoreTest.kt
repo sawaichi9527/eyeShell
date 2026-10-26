@@ -3,6 +3,7 @@ package io.github.sawaichi9527.eyeshell.secrets
 import java.util.UUID
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -57,6 +58,32 @@ class SystemPasswordCredentialStoreTest {
         assertEquals(1, collection.updated)
         assertTrue(collection.values.isEmpty())
         assertEquals(mapOf("application" to "eyeShell", "profile-id" to profileId.toString()), collection.lastAttributes)
+    }
+
+    @Test
+    fun `linux store reports existence without unlocking the collection`() {
+        val profileId = UUID.fromString("00000000-0000-0000-0000-000000000048")
+        val collection = FakeSecretCollection().apply { locked = true }
+        val store = LinuxSecretServicePasswordStore { collection }
+
+        assertFalse(store.contains(profileId))
+        assertEquals(0, collection.unlockCalls, "A missing credential must not unlock the keyring")
+
+        collection.locked = false
+        store.save(profileId, charArrayOf('s', 'e', 'c'))
+        assertTrue(store.contains(profileId))
+        assertEquals(0, collection.unlockCalls)
+    }
+
+    @Test
+    fun `windows store reports existence without exposing the secret`() {
+        val profileId = UUID.fromString("00000000-0000-0000-0000-000000000049")
+        val api = FakeWindowsCredentialApi()
+        val store = WindowsPasswordCredentialStore(api)
+
+        assertFalse(store.contains(profileId))
+        store.save(profileId, charArrayOf('s', 'e', 'c'))
+        assertTrue(store.contains(profileId))
     }
 
     @Test
@@ -124,13 +151,16 @@ class SystemPasswordCredentialStoreTest {
         try {
             assertEquals(CredentialStoreStatus.AVAILABLE, store.status())
             try {
+                assertFalse(store.contains(profileId), "A random profile must not exist yet")
                 store.save(profileId, firstPassword)
+                assertTrue(store.contains(profileId))
                 assertStoredPassword(store, profileId, firstPassword)
                 store.save(profileId, secondPassword)
                 assertStoredPassword(store, profileId, secondPassword)
             } finally {
                 store.forget(profileId)
             }
+            assertFalse(store.contains(profileId))
             assertNull(store.retrieve(profileId))
         } finally {
             firstPassword.fill('\u0000')
@@ -185,6 +215,11 @@ class SystemPasswordCredentialStoreTest {
         private var value: CharArray? = null
 
         override fun probe() = Unit
+
+        override fun exists(target: String): Boolean {
+            lastTarget = target
+            return value != null
+        }
 
         override fun read(target: String): CharArray? {
             lastTarget = target

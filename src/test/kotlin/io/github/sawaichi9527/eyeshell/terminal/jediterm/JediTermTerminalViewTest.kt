@@ -87,6 +87,92 @@ class JediTermTerminalViewTest {
     }
 
     @Test
+    fun `reattaches a new session to the same view and keeps the scrollback`() {
+        val view = onEdt {
+            JediTermTerminalView(columns = 40, rows = 3).also {
+                it.attach(SyntheticTerminalSession.fromText("first session output\r\nline two\r\nline three\r\nline four\r\n"))
+            }
+        }
+
+        try {
+            await(Duration.ofSeconds(5)) { !view.isSessionRunning }
+            val historyBeforeReconnect = view.historyLineCount
+            assertTrue(historyBeforeReconnect > 0, "The first session must scroll lines into the history buffer")
+
+            onEdt {
+                assertTrue(view.canAttach(), "A finished session must allow a reattach")
+                view.attach(SyntheticTerminalSession.fromText("second session output\r\n"))
+            }
+            await(Duration.ofSeconds(5)) { !view.isSessionRunning }
+
+            val output = StringWriter().also(view::writeAllOutput).toString()
+            assertTrue(output.contains("first session output"), output)
+            assertTrue(output.contains("second session output"), output)
+            assertTrue(
+                view.historyLineCount >= historyBeforeReconnect,
+                "Reattaching must not discard the previous scrollback",
+            )
+        } finally {
+            onEdt { view.close() }
+        }
+    }
+
+    @Test
+    fun `reattach preparation leaves an alternate screen left by the old session`() {
+        val view = onEdt {
+            JediTermTerminalView(columns = 40, rows = 3).also {
+                it.attach(SyntheticTerminalSession.fromText("main line\r\n$ESC[?1049halternate only output"))
+            }
+        }
+
+        try {
+            await(Duration.ofSeconds(5)) { !view.isSessionRunning }
+            assertTrue(view.isUsingAlternateBuffer, "The script must end inside the alternate screen")
+
+            onEdt { view.resetForReattach() }
+            assertFalse(view.isUsingAlternateBuffer)
+
+            onEdt { view.attach(SyntheticTerminalSession.fromText("after reattach\r\n")) }
+            await(Duration.ofSeconds(5)) { !view.isSessionRunning }
+
+            val output = StringWriter().also(view::writeAllOutput).toString()
+            assertTrue(output.contains("main line"), output)
+            assertTrue(output.contains("after reattach"), output)
+            assertFalse(output.contains("alternate only output"), output)
+        } finally {
+            onEdt { view.close() }
+        }
+    }
+
+    @Test
+    fun `clear buffer clears the visible screen and the scrollback`() {
+        val view = onEdt {
+            JediTermTerminalView(columns = 40, rows = 3).also {
+                it.attach(
+                    SyntheticTerminalSession.fromText(
+                        "first line\r\nsecond line\r\nthird line\r\nfourth line\r\n",
+                    ),
+                )
+            }
+        }
+
+        try {
+            await(Duration.ofSeconds(5)) { !view.isSessionRunning }
+            assertTrue(view.historyLineCount > 0, "Expected the script to fill the history buffer")
+
+            onEdt { view.contextActions.single { it.name == "Clear Buffer" }.actionPerformed(null) }
+
+            onEdt { assertEquals(0, view.historyLineCount, "Clear Buffer must clear the scrollback") }
+            val output = StringWriter().also(view::writeAllOutput).toString()
+            assertFalse(output.contains("first line"), output)
+            assertFalse(output.contains("second line"), output)
+            assertFalse(output.contains("third line"), output)
+        } finally {
+            onEdt { view.close() }
+        }
+    }
+
+    @Test
     fun `two terminal views keep session output isolated`() {
         val first = onEdt {
             JediTermTerminalView(columns = 20, rows = 3).also {

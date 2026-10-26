@@ -487,8 +487,13 @@ internal class HostCatalogController(
         val tags = JTextField(existing?.draft?.tags?.joinToString(", ").orEmpty(), 24)
         val storeStatus = credentialStoreStatus()
         val storeUsable = storeStatus == CredentialStoreStatus.AVAILABLE || storeStatus == CredentialStoreStatus.LOCKED
+        val savedPassword = existing != null && storeUsable && try {
+            passwordStore.contains(existing.profileId)
+        } catch (_: Exception) {
+            false
+        }
         val password = JPasswordField(24)
-        val rememberPassword = JCheckBox("Save password in OS credential store", existing == null && storeUsable)
+        val rememberPassword = JCheckBox("Save password in OS credential store", storeUsable)
         val clearPassword = JButton("Clear saved password")
         val connectAfterSave = JCheckBox("Connect after saving", false)
         val credentialHint = JLabel()
@@ -498,11 +503,18 @@ internal class HostCatalogController(
             val state = hostEditorCredentialState(
                 passwordAuthentication = authentication.selectedItem == ConnectionAuthenticationMethod.PASSWORD,
                 storeStatus = storeStatus,
-                existingHost = existing != null,
+                savedPassword = savedPassword,
                 rememberSelected = rememberPassword.isSelected,
                 clearRequested = clearRequested,
             )
             password.isEnabled = state.passwordEnabled
+            password.putClientProperty(
+                "JTextField.placeholderText",
+                UiText.passwordPlaceholder(
+                    passwordAuthentication = state.passwordEnabled,
+                    savedPassword = savedPassword && !clearRequested,
+                ),
+            )
             rememberPassword.isEnabled = state.rememberEnabled
             clearPassword.isEnabled = state.clearEnabled
             credentialHint.text = state.hint
@@ -714,7 +726,7 @@ internal data class HostEditorCredentialState(
 internal fun hostEditorCredentialState(
     passwordAuthentication: Boolean,
     storeStatus: CredentialStoreStatus,
-    existingHost: Boolean,
+    savedPassword: Boolean,
     rememberSelected: Boolean,
     clearRequested: Boolean,
 ): HostEditorCredentialState {
@@ -723,14 +735,14 @@ internal fun hostEditorCredentialState(
     return HostEditorCredentialState(
         passwordEnabled = passwordAuthentication,
         rememberEnabled = passwordAuthentication && storeUsable,
-        clearEnabled = passwordAuthentication && storeAvailable && existingHost && !clearRequested,
+        clearEnabled = passwordAuthentication && storeAvailable && savedPassword && !clearRequested,
         hint = when {
             !passwordAuthentication -> ""
             clearRequested -> UiText.CLEAR_PENDING
             storeStatus == CredentialStoreStatus.LOCKED -> UiText.STORE_LOCKED
             !storeAvailable -> UiText.STORE_UNAVAILABLE
             rememberSelected -> UiText.STORE_WILL_SAVE
-            existingHost -> UiText.STORE_KEEP_OR_SESSION
+            savedPassword -> UiText.STORE_KEEP_OR_SESSION
             else -> UiText.STORE_SESSION_ONLY
         },
     )

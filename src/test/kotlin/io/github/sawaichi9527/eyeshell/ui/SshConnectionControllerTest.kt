@@ -108,9 +108,56 @@ class SshConnectionControllerTest {
     }
 
     @Test
+    fun `first save from the connection dialog can store a credential for a profile with none`() {
+        val profileId = UUID.fromString("00000000-0000-0000-0000-000000000056")
+        val store = RecordingPasswordStore()
+        val terminal = FakeTerminalSession()
+        val controller = SshConnectionController(store, SshTerminalConnector { _, _, _, _, _, _ ->
+            FakeHostSession(terminal)
+        })
+
+        try {
+            val loaded = controller.loadStoredPassword(passwordPreset(profileId))
+            try {
+                assertNull(loaded.password)
+                assertEquals(CredentialSource.NONE, loaded.source)
+                assertEquals(CredentialStoreStatus.AVAILABLE, loaded.storeStatus)
+                assertTrue(
+                    loaded.credentialRevision != null,
+                    "A first save needs a profile revision even when nothing is stored yet",
+                )
+            } finally {
+                loaded.close()
+            }
+            assertTrue(store.retrievedProfiles.isEmpty(), "Discovering an empty profile must not read the store")
+
+            val request = SshConnectionController.ConnectionRequest(
+                endpoint = SshEndpoint("example.test", 22, "operator"),
+                authentication = SshAuthentication.Password(charArrayOf('n', 'e', 'w')),
+                passwordProfileId = profileId,
+                rememberPassword = true,
+                credentialRevision = loaded.credentialRevision,
+            )
+            try {
+                val opened = controller.openTerminal(request, HostKeyVerifier { true }, ChangedHostKeyHandler { })
+                try {
+                    assertFalse(opened.passwordSaveFailed)
+                    assertEquals(listOf(profileId), store.saved.map { it.first })
+                } finally {
+                    opened.hostSession.close()
+                }
+            } finally {
+                request.close()
+            }
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
     fun `does not recreate a credential after the profile changes`() {
         val profileId = UUID.randomUUID()
-        val store = RecordingPasswordStore()
+        val store = RecordingPasswordStore(retrieved = charArrayOf('s', 't', 'a', 'l', 'e'))
         val guard = ProfileCredentialGuard()
         val controller = SshConnectionController(
             store,
@@ -184,6 +231,31 @@ class SshConnectionControllerTest {
                 notLoaded.close()
             }
             assertEquals(listOf(profileId), store.retrievedProfiles)
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `does not read a locked store when nothing is stored for the profile`() {
+        val profileId = UUID.fromString("00000000-0000-0000-0000-000000000055")
+        val store = RecordingPasswordStore(status = CredentialStoreStatus.LOCKED)
+        val controller = SshConnectionController(store)
+
+        try {
+            val loaded = controller.loadStoredPassword(passwordPreset(profileId))
+            try {
+                assertEquals(CredentialStoreStatus.LOCKED, loaded.storeStatus)
+                assertNull(loaded.password)
+                assertEquals(CredentialSource.NONE, loaded.source)
+                assertEquals(listOf(profileId), store.containsQueries)
+                assertTrue(
+                    store.retrievedProfiles.isEmpty(),
+                    "Reading a missing credential must not unlock the keyring",
+                )
+            } finally {
+                loaded.close()
+            }
         } finally {
             controller.close()
         }
@@ -345,11 +417,18 @@ class SshConnectionControllerTest {
         private val failSave: Boolean = false,
         private val retrieved: CharArray? = null,
         private val status: CredentialStoreStatus = CredentialStoreStatus.AVAILABLE,
+        private val containsValue: Boolean = retrieved != null,
     ) : PasswordCredentialStore {
         val saved = mutableListOf<Pair<UUID, CharArray>>()
         val retrievedProfiles = mutableListOf<UUID>()
+        val containsQueries = mutableListOf<UUID>()
 
         override fun status() = status
+
+        override fun contains(profileId: UUID): Boolean {
+            containsQueries += profileId
+            return containsValue
+        }
 
         override fun retrieve(profileId: UUID): StoredPassword? {
             retrievedProfiles += profileId

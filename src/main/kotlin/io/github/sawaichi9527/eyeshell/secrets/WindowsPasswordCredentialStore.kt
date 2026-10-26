@@ -25,6 +25,10 @@ internal class WindowsPasswordCredentialStore(
         CredentialStoreStatus.UNAVAILABLE
     }
 
+    override fun contains(profileId: UUID): Boolean = wrap("read") {
+        api.exists(target(profileId))
+    }
+
     override fun retrieve(profileId: UUID): StoredPassword? = wrap("read") {
         api.read(target(profileId))?.let { password ->
             try {
@@ -59,6 +63,7 @@ internal class WindowsPasswordCredentialStore(
 
 internal interface WindowsCredentialApi {
     fun probe()
+    fun exists(target: String): Boolean
     fun read(target: String): CharArray?
     fun write(target: String, password: CharArray)
     fun delete(target: String)
@@ -67,6 +72,19 @@ internal interface WindowsCredentialApi {
 private class JnaWindowsCredentialApi : WindowsCredentialApi {
     override fun probe() {
         read("eyeShell/probe/availability")?.fill('\u0000')
+    }
+
+    override fun exists(target: String): Boolean {
+        val result = PointerByReference()
+        if (!AdvapiCredentials.INSTANCE.CredRead(target, CREDENTIAL_TYPE_GENERIC, 0, result)) {
+            if (Native.getLastError() == ERROR_NOT_FOUND) return false
+            throw IllegalStateException("CredReadW failed with error ${Native.getLastError()}")
+        }
+        try {
+            return true
+        } finally {
+            result.value?.let(AdvapiCredentials.INSTANCE::CredFree)
+        }
     }
 
     override fun read(target: String): CharArray? {

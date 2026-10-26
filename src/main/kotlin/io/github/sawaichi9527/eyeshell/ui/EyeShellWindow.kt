@@ -16,6 +16,7 @@ import java.awt.KeyboardFocusManager
 import java.awt.KeyEventDispatcher
 import java.awt.event.KeyEvent
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
@@ -52,42 +53,8 @@ class EyeShellWindow(
         connectAction = connectAction?.let { action -> { action(this) } },
         hostsAction = hostsAction?.let { action -> { action(this) } },
         commandsController = commandsController,
-        monitorSelectionChanged = { component ->
-            val page = pagesByComponent[component]
-            if (page == null) {
-                if (initialized) workbench.monitorIdle()
-            } else {
-                try {
-                    page.startMonitor { snapshot ->
-                        SwingUtilities.invokeLater {
-                            if (!closed.get() && workbench.isSelectedSession(component)) {
-                                workbench.setMonitorSnapshot(snapshot)
-                            }
-                        }
-                    }
-                } catch (_: Throwable) {
-                    if (initialized) workbench.monitorIdle()
-                }
-            }
-        },
-        sftpSelectionChanged = { component ->
-            try {
-                val page = pagesByComponent[component]
-                if (page != null) {
-                    workbench.bindSftp(page.sftpController())
-                } else if (initialized) {
-                    workbench.bindSftp(null)
-                }
-            } catch (_: Throwable) {
-                if (initialized) {
-                    try {
-                        workbench.bindSftp(null)
-                    } catch (_: Throwable) {
-                        // A broken SFTP panel must not break terminal attachment.
-                    }
-                }
-            }
-        },
+        monitorSelectionChanged = { component -> bindMonitorFor(component) },
+        sftpSelectionChanged = { component -> bindSftpFor(component) },
     )
     private var initialized = false
 
@@ -100,11 +67,16 @@ class EyeShellWindow(
         initialized = true
     }
 
-    fun attachTerminal(hostSession: HostSession, reconnect: (() -> Boolean)? = null) {
+    internal fun attachTerminal(
+        hostSession: HostSession,
+        terminal: TerminalSession,
+        preset: HostConnectionPreset? = null,
+        reconnect: ((HostConnectionPreset, JComponent) -> Boolean)? = null,
+    ) {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal sessions must be attached on the Swing EDT" }
         val terminalView = terminalViewFactory()
         val page = try {
-            TerminalSessionPage(this, terminalView, hostSession)
+            TerminalSessionPage(this, terminalView, hostSession, terminal)
         } catch (failure: Throwable) {
             try {
                 terminalView.close()
@@ -113,11 +85,14 @@ class EyeShellWindow(
             }
             throw failure
         }
+        val component = page.component
         try {
-            page.attach()
-            pagesByComponent[page.component] = page
-            workbench.addSession(hostSession.endpoint.displayName, page.component, {
-                pagesByComponent.remove(page.component)
+            page.attach(preset) { reconnectPreset ->
+                reconnect != null && workbench.isSessionExited(component) && reconnect(reconnectPreset, component)
+            }
+            pagesByComponent[component] = page
+            workbench.addSession(hostSession.endpoint.displayName, component, {
+                pagesByComponent.remove(component)
                 page.close()
             }, page::sendCommand)
         } catch (failure: Throwable) {
@@ -129,9 +104,78 @@ class EyeShellWindow(
             throw failure
         }
         page.startExitMonitor {
-            workbench.updateSessionStatus(page.component, SessionStatus.EXITED)
-            if (reconnect != null) {
-                page.enableReconnectOnEnter { workbench.isSessionExited(page.component) && reconnect() }
+            workbench.updateSessionStatus(component, SessionStatus.EXITED)
+        }
+    }
+
+    internal fun attachTerminal(
+        hostSession: HostSession,
+        preset: HostConnectionPreset? = null,
+        reconnect: ((HostConnectionPreset, JComponent) -> Boolean)? = null,
+    ) {
+        attachTerminal(hostSession, hostSession.openTerminal(), preset, reconnect)
+    }
+
+    /**
+     * Replaces the SSH session of an existing terminal tab in place, so the JediTerm widget,
+     * its scrollback, highlight rules, and selection state survive the reconnect.
+     * Returns false when the page is gone or its terminal view is still busy; the caller then opens a new tab.
+     */
+    internal fun reconnectTerminal(
+        component: JComponent,
+        hostSession: HostSession,
+        terminal: TerminalSession,
+        preset: HostConnectionPreset,
+    ): Boolean {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal sessions must reconnect on the Swing EDT" }
+        val page = pagesByComponent[component] ?: return false
+        if (!page.reconnect(hostSession, terminal, preset)) return false
+        val title = hostSession.endpoint.displayName
+        workbench.updateSessionTitle(component, title)
+        workbench.updateSessionStatus(component, SessionStatus.CONNECTED)
+        workbench.setConnectionState("Connected to $title", false)
+        if (workbench.isSelectedSession(component)) {
+            bindMonitorFor(component, resetFirst = true)
+            bindSftpFor(component)
+        }
+        return true
+    }
+
+    private fun bindMonitorFor(component: Component, resetFirst: Boolean = false) {
+        val page = pagesByComponent[component]
+        if (page == null) {
+            if (initialized) workbench.monitorIdle()
+            return
+        }
+        if (resetFirst && initialized) workbench.monitorIdle()
+        try {
+            page.startMonitor { snapshot ->
+                SwingUtilities.invokeLater {
+                    if (!closed.get() && workbench.isSelectedSession(component)) {
+                        workbench.setMonitorSnapshot(snapshot)
+                    }
+                }
+            }
+        } catch (_: Throwable) {
+            if (initialized) workbench.monitorIdle()
+        }
+    }
+
+    private fun bindSftpFor(component: Component?) {
+        try {
+            val page = component?.let(pagesByComponent::get)
+            if (page != null) {
+                workbench.bindSftp(page.sftpController())
+            } else if (initialized) {
+                workbench.bindSftp(null)
+            }
+        } catch (_: Throwable) {
+            if (initialized) {
+                try {
+                    workbench.bindSftp(null)
+                } catch (_: Throwable) {
+                    // A broken SFTP panel must not break terminal attachment.
+                }
             }
         }
     }
@@ -165,18 +209,23 @@ class EyeShellWindow(
 internal class TerminalSessionPage(
     private val owner: Component,
     private val terminalView: TerminalView,
-    private val hostSession: HostSession,
+    hostSession: HostSession,
+    session: TerminalSession = hostSession.openTerminal(),
 ) : AutoCloseable {
+    private var hostSession: HostSession = hostSession
+    private var session: TerminalSession = session
     private val closed = AtomicBoolean()
-    private val exitMonitorStarted = AtomicBoolean()
     private val monitorStarted = AtomicBoolean()
-    private val session: TerminalSession = hostSession.openTerminal()
+    private val exitGeneration = AtomicInteger()
+    private var exitCallback: (() -> Unit)? = null
     private val outputController = TerminalOutputController(terminalView)
     private val highlightController = TerminalHighlightController(terminalView)
-    private val monitorSampler = MonitorSampler(hostSession)
+    private var monitorSampler = MonitorSampler(hostSession)
     private val sftpCreated = AtomicBoolean()
     private var sftpController: io.github.sawaichi9527.eyeshell.sftp.SftpController? = null
     private var reconnectDispatcher: KeyEventDispatcher? = null
+    private var reconnectPreset: HostConnectionPreset? = null
+    private var reconnectRequest: ((HostConnectionPreset) -> Boolean)? = null
     val component: JComponent = JPanel(BorderLayout()).apply {
         name = "terminalWorkspace"
         getAccessibleContext().accessibleName = "Terminal workspace"
@@ -192,13 +241,56 @@ internal class TerminalSessionPage(
         }
     }
 
-    fun attach() {
+    fun attach(
+        preset: HostConnectionPreset? = null,
+        requestReconnect: ((HostConnectionPreset) -> Boolean)? = null,
+    ) {
         terminalView.attach(session)
         outputController.install(
             owner,
             addHighlightRule = { highlightController.addRule(owner) },
             manageHighlightRules = { highlightController.manageRules(owner) },
         )
+        reconnectPreset = preset
+        reconnectRequest = requestReconnect
+        if (requestReconnect != null) installReconnectOnEnter()
+    }
+
+    /**
+     * Swaps in a freshly opened SSH session without touching the terminal view, so the retained
+     * scrollback, highlight rules, and context actions belong to the tab for its whole lifetime.
+     * The caller keeps ownership of the new session until this returns true.
+     */
+    fun reconnect(
+        newHostSession: HostSession,
+        newSession: TerminalSession,
+        newPreset: HostConnectionPreset,
+    ): Boolean {
+        if (closed.get() || !terminalView.canAttach()) return false
+        terminalView.resetForReattach()
+        terminalView.attach(newSession)
+
+        exitGeneration.incrementAndGet()
+        monitorStarted.set(false)
+        monitorSampler.close()
+        sftpCreated.set(false)
+        sftpController?.close()
+        sftpController = null
+
+        val previousSession = session
+        val previousHostSession = hostSession
+        session = newSession
+        hostSession = newHostSession
+        monitorSampler = MonitorSampler(newHostSession)
+        reconnectPreset = newPreset
+
+        // The new session is already attached to the view, so a failure to release the replaced
+        // connection must not be reported as a failed reconnect; it only leaks the old transport.
+        runCatching { previousSession.close() }
+        runCatching { previousHostSession.close() }
+
+        armExitMonitor()
+        return true
     }
 
     fun startMonitor(onSnapshot: (MonitorSnapshot) -> Unit): Boolean {
@@ -222,35 +314,40 @@ internal class TerminalSessionPage(
     }
 
     fun startExitMonitor(onExit: () -> Unit) {
-        if (!exitMonitorStarted.compareAndSet(false, true)) return
-        Thread.ofVirtual().name("terminal-exit-${session.name}").start {
-            session.awaitExit()
-            if (!closed.get()) {
-                SwingUtilities.invokeLater {
-                    if (!closed.get()) onExit()
-                }
+        if (exitCallback != null) return
+        exitCallback = onExit
+        armExitMonitor()
+    }
+
+    private fun armExitMonitor() {
+        val callback = exitCallback ?: return
+        val watched = session
+        val generation = exitGeneration.incrementAndGet()
+        Thread.ofVirtual().name("terminal-exit-${watched.name}").start {
+            watched.awaitExit()
+            if (closed.get() || exitGeneration.get() != generation) return@start
+            SwingUtilities.invokeLater {
+                if (!closed.get() && exitGeneration.get() == generation) callback()
             }
         }
     }
 
-    fun enableReconnectOnEnter(action: () -> Boolean) {
+    /**
+     * Enter reconnects only while the tab shows an exited session. The dispatcher stays installed for
+     * the lifetime of the page, so a cancelled or failed attempt can simply be retried; it is removed
+     * when the tab closes.
+     */
+    private fun installReconnectOnEnter() {
         if (reconnectDispatcher != null) return
-        var consumed = false
         val dispatcher = KeyEventDispatcher { event ->
             val source = event.component
             val matches = event.id == KeyEvent.KEY_PRESSED &&
                 event.keyCode == KeyEvent.VK_ENTER &&
                 source != null &&
                 SwingUtilities.isDescendingFrom(source, component)
-            when {
-                consumed || !matches -> false
-                action() -> {
-                    consumed = true
-                    removeReconnectOnEnter()
-                    true
-                }
-                else -> false
-            }
+            val preset = reconnectPreset
+            val request = reconnectRequest
+            matches && preset != null && request != null && request(preset)
         }
         reconnectDispatcher = dispatcher
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(dispatcher)
@@ -265,6 +362,7 @@ internal class TerminalSessionPage(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        exitGeneration.incrementAndGet()
         removeReconnectOnEnter()
         monitorSampler.close()
         sftpController?.close()
@@ -378,6 +476,18 @@ class WorkbenchPanel(
         if (sessionTabs.selectedComponent === component) updateSelectedSessionStatus()
     }
 
+    /** Renames a session tab after an in-place reconnect connected to a different endpoint. */
+    fun updateSessionTitle(component: Component, title: String) {
+        check(SwingUtilities.isEventDispatchThread()) { "Session titles must be updated on the Swing EDT" }
+        val tab = sessions[component] ?: return
+        tab.title = title
+        tab.titleLabel.text = title
+        tab.closeButton.toolTipText = "Close $title"
+        val index = sessionTabs.indexOfComponent(component)
+        if (index >= 0) sessionTabs.setTitleAt(index, title)
+        if (sessionTabs.selectedComponent === component) updateSelectedSessionStatus()
+    }
+
     fun setConnectionState(message: String, connecting: Boolean) {
         check(SwingUtilities.isEventDispatchThread()) { "Connection state must be updated on the Swing EDT" }
         this.connecting = connecting
@@ -469,14 +579,11 @@ class WorkbenchPanel(
         FlowLayout(FlowLayout.LEADING, 4, 0),
     ).apply {
         isOpaque = false
-        add(JLabel(title))
+        add(tab.titleLabel.also { it.text = title })
         add(tab.statusLabel.also { it.text = tab.status.label; it.foreground = tab.status.color })
-        add(JButton("x").apply {
-            name = "closeSessionButton"
-            toolTipText = "Close $title"
-            margin = Insets(0, 4, 0, 4)
-            isFocusable = false
-            addActionListener { closeSession(component) }
+        add(tab.closeButton.also {
+            it.toolTipText = "Close $title"
+            it.addActionListener { closeSession(component) }
         })
     }
 
@@ -537,12 +644,19 @@ class WorkbenchPanel(
 }
 
 private class SessionTab(
-    val title: String,
+    title: String,
     val closeAction: () -> Unit,
     val sendCommand: ((String) -> Unit)? = null,
 ) {
+    var title: String = title
     var status: SessionStatus = SessionStatus.CONNECTED
+    val titleLabel = JLabel(title)
     val statusLabel = JLabel().apply { name = "sessionStatusLabel" }
+    val closeButton = JButton("x").apply {
+        name = "closeSessionButton"
+        margin = Insets(0, 4, 0, 4)
+        isFocusable = false
+    }
 }
 
 private fun accumulateFailure(current: Throwable?, next: Throwable): Throwable {
