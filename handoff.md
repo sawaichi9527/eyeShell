@@ -181,7 +181,7 @@ Deferred by the owner on 2026-10-24. Do not start these without a new explicit d
 |---|---|
 | SOCKS5／HTTP CONNECT proxy (M2B) | Not started; would extend `TransportProvider`. |
 | Port forwarding (M2C) | Not started; needs schema v5 rules bound to saved hosts. |
-| Windows host re-validation (Jump Host, MSI packaging) | The portable ZIP path is now validated on Windows (2026-10-27); jump-host, Windows Credential Manager live lifecycle, and MSI generation are still pending on that host. MSI generation requires the WiX toolset that `jpackage` invokes on Windows. |
+| Windows host re-validation (Jump Host, MSI packaging) | The portable ZIP path is validated on Windows, including a live SSH session (2026-10-27). MSI generation is deferred by the owner on 2026-10-27; it requires the WiX toolset that `jpackage` invokes. Jump Host and the live Windows Credential Manager lifecycle are still pending on that host. |
 | Broadcast a command to all open sessions | FinalShell's core batch feature; builds on multi-tab + `sendCommand`. |
 | Multi-select host connect | Needs a queued connection flow; M1I still serializes connection attempts. |
 | Persisted Workspace／Host Set model | FinalShell has no such concept; the folder tree landed instead, and a persisted workspace model is not justified yet. |
@@ -235,7 +235,7 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Highlight rules are Current Session only and are intentionally discarded when the application closes; persistent Global/Host/Workspace scopes require a later catalog migration and scope resolver.
 - M1G stores authentication method but intentionally does not store Private Key File paths or any authentication secret.
 - M1I supports multiple established terminal tabs but intentionally serializes connection dialogs/attempts. M1J adds natural-exit tab status (`Exited`) but maps any unexpected stop to `Exited`; `Failed`/`Closing` status transitions are not yet produced.
-- The M1M packaging tasks' Windows branches are wired and the portable ZIP is now validated on a Windows host, including a live SSH session (terminal, Monitor, SFTP, reconnect) through the packaged runtime; MSI generation is still unverified because it requires the WiX toolset that `jpackage` invokes on Windows.
+- The M1M packaging tasks' Windows branches are wired and the portable ZIP is validated on a Windows host, including a live SSH session (terminal, Monitor, SFTP, reconnect) through the packaged runtime. MSI generation is deferred by the owner (2026-10-27) because it requires the WiX toolset that `jpackage` invokes on Windows; the portable ZIP is the supported Windows distribution meanwhile.
 - Jump Host supports exactly one hop. Nested jump hosts are rejected by catalog validation, and an ad-hoc (unsaved) jump host is intentionally unavailable: save it as a Saved Host first.
 - A replacement jump-host password typed in the connection dialog is session-only; save jump credentials through the Host editor so they land in the OS credential store.
 - Port forwarding rules are not implemented yet (M2C, schema v5 planned) and the SOCKS5/HTTP CONNECT proxy transport (M2B) is not implemented yet.
