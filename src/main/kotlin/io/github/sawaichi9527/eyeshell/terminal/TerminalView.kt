@@ -42,6 +42,13 @@ interface TerminalView : AutoCloseable {
      * their current size; the JediTerm view reinitialises its metrics and resizes the PTY.
      */
     fun setFontSize(size: Float) = Unit
+
+    /**
+     * Applies a color scheme to the retained buffer without recreating the view, so scrollback,
+     * highlight rules, and searches survive the change. Views that cannot recolor themselves keep
+     * their current scheme.
+     */
+    fun setColorScheme(scheme: TerminalColorScheme) = Unit
 }
 
 fun interface TerminalOutputSnapshot {

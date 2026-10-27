@@ -40,6 +40,16 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `the terminal color scheme id survives a reload`() {
+        val file = directory.resolve("settings.properties")
+        assertEquals("", AppSettings.load(file).terminalColorSchemeId)
+
+        AppSettings.load(file).terminalColorSchemeId = "dracula"
+
+        assertEquals("dracula", AppSettings.load(file).terminalColorSchemeId)
+    }
+
+    @Test
     fun `a damaged file falls back to defaults instead of failing`() {
         val file = directory.resolve("settings.properties")
         Files.writeString(file, "terminal.font.size=not-a-number\n")

@@ -10,6 +10,7 @@ import io.github.sawaichi9527.eyeshell.platform.LoggingSetup
 import io.github.sawaichi9527.eyeshell.platform.SafeMode
 import io.github.sawaichi9527.eyeshell.platform.AppSettings
 import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
+import io.github.sawaichi9527.eyeshell.terminal.TerminalColorSchemes
 import io.github.sawaichi9527.eyeshell.secrets.SystemPasswordCredentialStore
 import io.github.sawaichi9527.eyeshell.secrets.ProfileCredentialGuard
 import io.github.sawaichi9527.eyeshell.secrets.SessionPasswordCache
@@ -66,6 +67,7 @@ fun main(arguments: Array<String>) {
                     scrollbackLines = safeMode.scrollbackLines,
                     maxRefreshRate = safeMode.maxRefreshRate,
                     font = TerminalTypography.resolveFont(size = appSettings.terminalFontSize.toFloat()),
+                    colorScheme = TerminalColorSchemes.fromId(appSettings.terminalColorSchemeId),
                 )
             },
             connectAction = { owner -> connectionController.connect(owner) },

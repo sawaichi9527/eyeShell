@@ -1,11 +1,13 @@
 package io.github.sawaichi9527.eyeshell.terminal.jediterm
 
 import com.jediterm.terminal.TextStyle
+import com.jediterm.terminal.TerminalColor
 import com.jediterm.terminal.model.StyleState
 import com.jediterm.terminal.model.TerminalTextBuffer
 import com.jediterm.terminal.ui.JediTermWidget
 import com.jediterm.terminal.ui.TerminalPanel
 import com.jediterm.terminal.ui.settings.SettingsProvider
+import io.github.sawaichi9527.eyeshell.terminal.TerminalColorScheme
 import io.github.sawaichi9527.eyeshell.terminal.TerminalFontFallback
 import java.awt.Font
 
@@ -17,13 +19,53 @@ import java.awt.Font
 internal class EyeShellTerminalWidget(
     columns: Int,
     rows: Int,
-    settingsProvider: SettingsProvider,
-) : JediTermWidget(columns, rows, settingsProvider) {
+    private val settings: EyeShellTerminalSettings,
+) : JediTermWidget(columns, rows, settings) {
+    init {
+        applyColorScheme(settings.colorScheme)
+    }
+
     override fun createTerminalPanel(
         settingsProvider: SettingsProvider,
         styleState: StyleState,
         terminalTextBuffer: TerminalTextBuffer,
     ): TerminalPanel = EyeShellTerminalPanel(settingsProvider, terminalTextBuffer, styleState)
+
+    /**
+     * Supplies the `StyleState` deliberately: the stock one pins the default style to indexed
+     * black/white, and every SGR reset copies that style into the cells being written, which would
+     * freeze the old scheme into the scrollback. This state keeps the default colors dynamic and
+     * resets to an empty (color-inheriting) style instead.
+     */
+    override fun createDefaultStyle(): StyleState =
+        SchemeStyleState(mySettingsProvider as EyeShellTerminalSettings)
+
+    /**
+     * Recolors the live widget: the terminal panel reads the palette on every paint, and the
+     * default foreground/background are resolved from the current scheme, so a repaint is enough.
+     */
+    internal fun applyColorScheme(scheme: TerminalColorScheme) {
+        settings.colorScheme = scheme
+        myTerminalPanel.repaint()
+    }
+}
+
+/**
+ * `StyleState` whose default colors follow the live scheme instead of a copy taken at startup.
+ *
+ * Cells written with no explicit SGR color store null and are resolved through
+ * [getDefaultForeground]/[getDefaultBackground] while painting, which is what makes an existing
+ * scrollback recolor when the user picks another scheme.
+ */
+private class SchemeStyleState(
+    private val settings: EyeShellTerminalSettings,
+) : StyleState() {
+    override fun getDefaultForeground(): TerminalColor = settings.getDefaultForeground()
+
+    override fun getDefaultBackground(): TerminalColor = settings.getDefaultBackground()
+
+    /** SGR reset clears attributes; leaving the colors unset keeps them scheme-resolved. */
+    override fun reset() = setCurrent(TextStyle.EMPTY)
 }
 
 /**
@@ -33,7 +75,7 @@ internal class EyeShellTerminalWidget(
 internal class EyeShellTerminalPanel(
     settingsProvider: SettingsProvider,
     terminalTextBuffer: TerminalTextBuffer,
-    styleState: StyleState,
+    internal val styleState: StyleState,
 ) : TerminalPanel(settingsProvider, terminalTextBuffer, styleState) {
     private val fallback = TerminalFontFallback()
 

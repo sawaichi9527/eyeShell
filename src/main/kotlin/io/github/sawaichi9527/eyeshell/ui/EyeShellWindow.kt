@@ -7,6 +7,7 @@ import io.github.sawaichi9527.eyeshell.platform.AppSettings
 import io.github.sawaichi9527.eyeshell.ssh.HostSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
+import io.github.sawaichi9527.eyeshell.terminal.TerminalColorScheme
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Component
@@ -52,7 +53,11 @@ class EyeShellWindow(
 ) : JFrame(AppInfo.windowTitle) {
     private val closed = AtomicBoolean()
     private val pagesByComponent = mutableMapOf<JComponent, TerminalSessionPage>()
-    private val settingsController = SettingsController(appSettings) { size -> applyTerminalFontSize(size) }
+    private val settingsController = SettingsController(
+        appSettings,
+        applyFontSize = { size -> applyTerminalFontSize(size) },
+        applyColorScheme = { scheme -> applyTerminalColorScheme(scheme) },
+    )
     private val workbench: WorkbenchPanel = WorkbenchPanel(
         connectAction = connectAction?.let { action -> { action(this) } },
         hostsAction = hostsAction?.let { action -> { action(this) } },
@@ -206,6 +211,12 @@ class EyeShellWindow(
         pagesByComponent.values.toList().forEach { page -> page.applyFontSize(size) }
     }
 
+    /** Applies the Settings color scheme to every open session; new sessions read it from the factory. */
+    internal fun applyTerminalColorScheme(scheme: TerminalColorScheme) {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal color changes must happen on the Swing EDT" }
+        pagesByComponent.values.toList().forEach { page -> page.applyColorScheme(scheme) }
+    }
+
     override fun dispose() {
         if (!closed.compareAndSet(false, true)) return
         var failure: Throwable? = null
@@ -262,6 +273,8 @@ internal class TerminalSessionPage(
     }
 
     fun applyFontSize(size: Float) = terminalView.setFontSize(size)
+
+    fun applyColorScheme(scheme: TerminalColorScheme) = terminalView.setColorScheme(scheme)
 
     /**
      * Opens the SFTP subsystem off the EDT and reports either the controller or the reason it

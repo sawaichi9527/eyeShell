@@ -31,6 +31,18 @@ class AppSettings private constructor(
             save()
         }
 
+    /**
+     * Id of the selected terminal color scheme, or an empty string when nothing is stored. The
+     * terminal package resolves the id, so an unknown or removed id falls back to its default
+     * scheme instead of breaking startup.
+     */
+    var terminalColorSchemeId: String
+        get() = properties.getProperty(KEY_TERMINAL_COLOR_SCHEME).orEmpty()
+        set(value) {
+            properties.setProperty(KEY_TERMINAL_COLOR_SCHEME, value)
+            save()
+        }
+
     private fun save() {
         val target = file ?: return
         try {
@@ -53,6 +65,7 @@ class AppSettings private constructor(
         const val MAX_TERMINAL_FONT_SIZE = 28
 
         private const val KEY_TERMINAL_FONT_SIZE = "terminal.font.size"
+        private const val KEY_TERMINAL_COLOR_SCHEME = "terminal.color.scheme"
 
         fun load(file: Path): AppSettings {
             val properties = Properties()

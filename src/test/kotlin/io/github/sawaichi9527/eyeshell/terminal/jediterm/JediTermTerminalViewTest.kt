@@ -6,6 +6,7 @@ import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
 import io.github.sawaichi9527.eyeshell.terminal.HighlightMergeMode
 import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
 import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
+import io.github.sawaichi9527.eyeshell.terminal.TerminalColorSchemes
 import io.github.sawaichi9527.eyeshell.platform.SafeMode
 import java.io.StringWriter
 import java.io.IOException
@@ -604,6 +605,93 @@ class JediTermTerminalViewTest {
         } finally {
             onEdt { view.close() }
         }
+    }
+
+    @Test
+    fun `color scheme changes recolor a live terminal and keep the scrollback`() {
+        val view = onEdt {
+            JediTermTerminalView(columns = 40, rows = 3).also {
+                it.attach(SyntheticTerminalSession.fromText("first line\r\nsecond line\r\nthird line\r\nfourth line\r\n"))
+            }
+        }
+
+        try {
+            await(Duration.ofSeconds(5)) { !view.isSessionRunning }
+            assertEquals(TerminalColorSchemes.DARK, view.colorScheme)
+            val historyBefore = view.historyLineCount
+            assertTrue(historyBefore > 0, "Expected synthetic output to create scrollback")
+
+            onEdt { view.setColorScheme(TerminalColorSchemes.NORD) }
+
+            assertEquals(TerminalColorSchemes.NORD, view.colorScheme)
+            assertEquals(TerminalColorSchemes.NORD.backgroundRgb, view.defaultBackgroundRgb)
+            assertEquals(TerminalColorSchemes.NORD.ansiRgb, view.ansiPaletteRgb)
+            assertTrue(
+                view.historyLineCount >= historyBefore,
+                "Recoloring must not discard the retained scrollback",
+            )
+            val output = StringWriter().also(view::writeAllOutput).toString()
+            assertTrue(output.contains("first line"), output)
+
+            val nordImage = onEdt { renderImage(view) }
+            assertEquals(
+                TerminalColorSchemes.NORD.backgroundRgb,
+                nordImage.getRGB(nordImage.width - 2, nordImage.height - 2) and 0xFFFFFF,
+                "The panel must paint the scheme background",
+            )
+
+            onEdt { view.setColorScheme(TerminalColorSchemes.LIGHT) }
+            val lightImage = onEdt { renderImage(view) }
+            assertEquals(
+                TerminalColorSchemes.LIGHT.backgroundRgb,
+                lightImage.getRGB(lightImage.width - 2, lightImage.height - 2) and 0xFFFFFF,
+                "A second switch must repaint the retained buffer with the new scheme",
+            )
+            assertTrue(
+                averageBrightness(lightImage) > averageBrightness(nordImage) + 60,
+                "Existing text must be recolored, not just the empty area",
+            )
+        } finally {
+            onEdt { view.close() }
+        }
+    }
+
+    private fun renderImage(view: JediTermTerminalView): java.awt.image.BufferedImage {
+        val component = view.component
+        val frame = javax.swing.JFrame().apply {
+            isUndecorated = true
+            contentPane.add(component)
+            size = java.awt.Dimension(520, 160)
+            addNotify()
+            validate()
+        }
+        try {
+            component.size = java.awt.Dimension(500, 140)
+            component.doLayout()
+            val image = java.awt.image.BufferedImage(500, 140, java.awt.image.BufferedImage.TYPE_INT_ARGB)
+            val graphics = image.createGraphics()
+            try {
+                component.printAll(graphics)
+            } finally {
+                graphics.dispose()
+            }
+            return image
+        } finally {
+            frame.dispose()
+        }
+    }
+
+    private fun averageBrightness(image: java.awt.image.BufferedImage): Double {
+        var total = 0.0
+        var count = 0
+        for (y in 0 until image.height step 2) {
+            for (x in 0 until image.width step 2) {
+                val rgb = image.getRGB(x, y)
+                total += ((rgb shr 16 and 0xFF) + (rgb shr 8 and 0xFF) + (rgb and 0xFF)) / 3.0
+                count++
+            }
+        }
+        return total / count
     }
 
     private fun await(timeout: Duration, condition: () -> Boolean) {

@@ -1,7 +1,11 @@
 package io.github.sawaichi9527.eyeshell.terminal.jediterm
 
+import com.jediterm.core.Color as TerminalRgb
 import com.jediterm.core.util.TermSize
+import com.jediterm.terminal.TextStyle
+import com.jediterm.terminal.TerminalColor
 import com.jediterm.terminal.TtyConnector
+import com.jediterm.terminal.emulator.ColorPalette
 import com.jediterm.terminal.model.MainBufferSnapshot
 import com.jediterm.terminal.model.TerminalLineSnapshot
 import com.jediterm.terminal.model.TerminalTextBuffer
@@ -13,6 +17,8 @@ import com.jediterm.terminal.ui.settings.DefaultSettingsProvider
 import com.jediterm.terminal.util.CharUtils
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
+import io.github.sawaichi9527.eyeshell.terminal.TerminalColorScheme
+import io.github.sawaichi9527.eyeshell.terminal.TerminalColorSchemes
 import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
 import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
 import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputSnapshot
@@ -27,8 +33,9 @@ class JediTermTerminalView(
     scrollbackLines: Int = EyeShellTerminalSettings.MAX_SCROLLBACK_LINES,
     maxRefreshRate: Int = EyeShellTerminalSettings.MAX_REFRESH_RATE,
     font: java.awt.Font = TerminalTypography.defaultFont(),
+    colorScheme: TerminalColorScheme = TerminalColorSchemes.DEFAULT,
 ) : TerminalView {
-    private val settings = EyeShellTerminalSettings(scrollbackLines, maxRefreshRate, font)
+    private val settings = EyeShellTerminalSettings(scrollbackLines, maxRefreshRate, font, colorScheme)
     private val widget = EyeShellTerminalWidget(columns, rows, settings)
     private val searchController = JediTermSearchController(widget)
     private val highlightController = JediTermHighlightController(widget)
@@ -106,6 +113,18 @@ class JediTermTerminalView(
     internal val isUsingAlternateBuffer: Boolean
         get() = widget.terminalTextBuffer.isUsingAlternateBuffer
 
+    internal val colorScheme: TerminalColorScheme
+        get() = settings.colorScheme
+
+    internal val defaultBackgroundRgb: Int
+        get() = settings.colorScheme.backgroundRgb
+
+    internal val defaultForegroundRgb: Int
+        get() = settings.colorScheme.foregroundRgb
+
+    internal val ansiPaletteRgb: List<Int>
+        get() = settings.terminalColorPaletteRgb()
+
     internal val historyLineCount: Int
         get() = widget.terminalTextBuffer.historyLinesCount
 
@@ -141,6 +160,11 @@ class JediTermTerminalView(
         require(size > 0f) { "Terminal font size must be positive" }
         settings.font = settings.font.deriveFont(size)
         (widget.terminalPanel as EyeShellTerminalPanel).refreshFont()
+    }
+
+    override fun setColorScheme(scheme: TerminalColorScheme) {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal color changes must happen on the Swing EDT" }
+        widget.applyColorScheme(scheme)
     }
 
     override fun close() {
@@ -236,9 +260,13 @@ internal class EyeShellTerminalSettings(
     private val scrollbackLines: Int = MAX_SCROLLBACK_LINES,
     private val refreshRate: Int = MAX_REFRESH_RATE,
     font: java.awt.Font = TerminalTypography.defaultFont(),
+    colorScheme: TerminalColorScheme = TerminalColorSchemes.DEFAULT,
 ) : DefaultSettingsProvider() {
     /** Mutable so the Settings dialog can change the size of a live terminal. */
     var font: java.awt.Font = font
+
+    /** Mutable so the Settings dialog can recolor a live terminal. */
+    var colorScheme: TerminalColorScheme = colorScheme
 
     override fun audibleBell(): Boolean = false
 
@@ -250,10 +278,34 @@ internal class EyeShellTerminalSettings(
 
     override fun maxRefreshRate(): Int = refreshRate
 
+    /**
+     * The palette is re-read on every paint by [TerminalPanel], so returning a fresh instance for
+     * the current scheme is what makes a live color change take effect.
+     */
+    override fun getTerminalColorPalette(): ColorPalette = SchemeColorPalette(colorScheme)
+
+    override fun getDefaultForeground(): TerminalColor = TerminalColor(TerminalRgb(colorScheme.foregroundRgb))
+
+    override fun getDefaultBackground(): TerminalColor = TerminalColor(TerminalRgb(colorScheme.backgroundRgb))
+
+    /** Default style for SGR-default cells; [EyeShellTerminalWidget] pushes it into the live `StyleState`. */
+    fun defaultStyle(): TextStyle = TextStyle(getDefaultForeground(), getDefaultBackground())
+
+    internal fun terminalColorPaletteRgb(): List<Int> = colorScheme.ansiRgb
+
     companion object {
         internal const val MAX_SCROLLBACK_LINES = 100_000
         internal const val MAX_REFRESH_RATE = 50
     }
+}
+
+/** Maps a bundled scheme's 16 ANSI colors onto JediTerm's palette adapter. */
+private class SchemeColorPalette(scheme: TerminalColorScheme) : ColorPalette() {
+    private val colors = scheme.ansiRgb.map(::TerminalRgb)
+
+    override fun getForegroundByColorIndex(colorIndex: Int): TerminalRgb = colors[colorIndex]
+
+    override fun getBackgroundByColorIndex(colorIndex: Int): TerminalRgb = colors[colorIndex]
 }
 
 private fun MainBufferSnapshot.writeLogicalLines(writer: Writer) {
