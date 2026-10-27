@@ -165,6 +165,7 @@ A UX/robustness change is committed and pushed (`4421b17` on `origin/main`): rec
 - Added the localized Sarasa family names (`等距更紗黑體 TC`, `等距更纱黑体 SC`) and `Maple Mono NF CN` to the primary preference list, because a zh-TW Windows exposes Sarasa under its Chinese name and the English `Sarasa Mono TC` never matches there.
 - Enumerated installed font families once per process in `TerminalTypography`, so opening each session tab no longer scans the system font list.
 - Installed two fonts per-user on this Windows host after verifying the vendors' published SHA-256: Sarasa Mono TC 1.0.43 (Regular/Bold, SIL OFL) as the CJK-complete terminal font with an exact 2:1 full-width advance, and Maple Mono NF 7.9 (Regular/Bold, SIL OFL) used only through the fallback chain for Nerd Font icons.
+- Added `scripts\gradlew-local.cmd` and `scripts\bootstrap-jdk.cmd` so `cmd.exe` can run the project launchers: `cmd.exe` cannot execute a `.ps1` (the `.ps1` association here is `notepad.exe`, so `.\scripts\gradlew-local.ps1 run` opened the file instead of running it). The wrappers resolve `pwsh` from `PATH`, then `%ProgramFiles%\PowerShell\7`, then the WindowsApps alias, and stop with an explicit error and exit 1 when PowerShell 7 is missing instead of falling back to 5.1. `.gitattributes` now pins `*.cmd` to CRLF.
 
 ## In Progress
 
@@ -251,6 +252,7 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Nerd Font icons only render when a Nerd Font is installed: eyeShell bundles none and Windows ships none, so `U+F0xx` icons stay empty boxes on a machine that has no patched mono font (Maple, JetBrains, Hack, or a Sarasa Nerd variant).
 - On a zh-TW Windows, Sarasa exposes its localized family name (`等距更紗黑體 TC`), so `TerminalTypography` lists both the English and localized names; matching only the English name silently skips the font there.
 - Installed font families are enumerated once per process, so a font installed while eyeShell is running is only picked up after a restart.
+- `cmd.exe` cannot run `.ps1` files, and on this host `.ps1` is associated with `notepad.exe`; the `.cmd` wrappers exist for that shell. They require PowerShell 7 and fail instead of using Windows PowerShell 5.1.
 - Font metrics are computed with a 1x1 `BufferedImage` graphics context, as JediTerm does, so the chosen size assumes the default UI scale; a HiDPI scale factor is not re-applied to the font selection.
 - No automated test drives real mouse or keyboard gestures: the GUI checklist in `docs/MANUAL_GUI_CHECKLIST.md` still needs a human pass for dialog flows, drag-and-drop, and visual styling.
 
@@ -568,3 +570,12 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Commands: `git push origin main`.
 - Result: pushed `d598acf..fcb7521` (2 commits: `f9e57a1` per-run terminal font fallback, `fcb7521` handoff) to `origin/main`; the working tree is clean and `main` is in sync with `origin/main` afterwards at 2026-10-27T15:39+08:00.
 - Not re-run for the push: no code changed after the validated `243 tests / 0 failures / 16 skipped` run recorded above; only documentation was added.
+
+### Windows host validation (cmd.exe wrappers)
+
+- Commands: `cmd /c "scripts\gradlew-local.cmd --version"`; `cmd /c "scripts\bootstrap-jdk.cmd"`; `cmd /c "set PATH=C:\Windows\System32&& set ProgramFiles=C:\nope&& set LOCALAPPDATA=C:\nope&& scripts\gradlew-local.cmd --version"`; `cmd /c "scripts\gradlew-local.cmd run"`; `cmd /c assoc .ps1`; `cmd /c ftype Microsoft.PowerShellScript.1`; `git diff --check`.
+- Executed at: 2026-10-27
+- Exit codes: 0 for `--version` and `bootstrap-jdk.cmd`; 1 with the expected message for the missing-`pwsh` case; the `run` smoke was terminated manually after the window appeared. `assoc`/`ftype` confirm `.ps1` is associated with `notepad.exe` on this host.
+- Result: The reported symptom was `.\scripts\gradlew-local.ps1 run` opening a Notepad window instead of the application. `cmd.exe` does not execute `.ps1` files; it hands them to the file association, which here is `notepad.exe`. Added `scripts\gradlew-local.cmd` and `scripts\bootstrap-jdk.cmd`, which resolve `pwsh` (`PATH` → `%ProgramFiles%\PowerShell\7` → WindowsApps alias) and forward the arguments to the existing PowerShell launchers, so `JAVA_HOME`, `PATH`, and `GRADLE_USER_HOME` stay scoped to the child process. With `pwsh` made unavailable the wrapper exits 1 and prints `PowerShell 7 (pwsh) was not found... Windows PowerShell 5.1 is not supported.` rather than silently using 5.1. `scripts\gradlew-local.cmd --version` reports Gradle 9.5.0, `scripts\bootstrap-jdk.cmd` reports the existing Temurin 21.0.12+8, and `scripts\gradlew-local.cmd run` opens the `eyeShell` window from `cmd.exe`. The README now documents the `cmd.exe` block and why the `.ps1` cannot be run directly there; `*.cmd` is pinned to CRLF in `.gitattributes`.
+- Test environment: Microsoft Windows 10 IoT Enterprise LTSC 10.0.19044 x64, `cmd.exe` (not PowerShell), `pwsh` 7.4.6 on `PATH`, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 under `.local/gradle-home`.
+- Remaining unverified scope: the wrappers were exercised on this host only; a machine whose `pwsh` lives outside `PATH`, `%ProgramFiles%\PowerShell\7`, and the WindowsApps alias would be rejected even though PowerShell 7 is installed, and argument forwarding was checked with simple arguments only (no quoting stress test).
