@@ -171,6 +171,7 @@ A UX/robustness change is committed and pushed (`4421b17` on `origin/main`): rec
 - Added the build version to the window title (`eyeShell v0.1.1`): Gradle expands `src/main/resources/eyeshell-build.properties`, and `AppInfo` strips the snapshot suffix the same way the package version does, so the title, the Settings page, and the ZIP file name cannot drift apart.
 - Replaced the Saved hosts tree with a FinalShell-style tree table: `HostTableModel` shows Name / Host / Port / User / Authentication / Group, folder rows expand and collapse on click with a drawn disclosure triangle, hosts connect on double-click, and a filter field on top matches name, host, port, user, authentication, or group while keeping matches under their folder.
 - Added the gear button at the right edge of the Monitor header, wired to a Settings dialog. Terminal font size is the one implemented setting: it applies to every open session immediately (JediTerm re-initialises its metrics and resizes the PTY) and is persisted to `settings.properties` in the config directory; the language row is visible but disabled with an explicit "not available yet" hint.
+- Replaced the JDK `SimpleFormatter` for console logging with `LoggingSetup.PlainFormatter`, installed at startup: the timestamp, level, and logger name are ASCII, so a zh-TW Windows no longer prints the localized `10月`/`訊息` prefix as UTF-8 into a CP950 console (which rendered as `嚙踝蕭`). Stack traces are still appended, and message text is passed through unchanged.
 
 ## In Progress
 
@@ -260,6 +261,8 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - The Settings dialog currently implements only the terminal font size (10–28 pt). The language row is deliberately disabled with a hint because no translation catalog exists; adding one is a separate piece of work.
 - Preferences live in `%APPDATA%\eyeShell\settings.properties` on Windows and `$XDG_CONFIG_HOME/eyeShell/settings.properties` on Linux. Only non-secret values belong there; passwords stay in the OS credential store and the database.
 - The Saved hosts tree table has no column-header sorting (rows follow folder/name order) and no drag-to-move between folders; the Group field in the host editor remains the only way to move a host. Folder rows toggle on a single click, and only host rows enable Edit/Delete/Connect.
+- Console logging is deliberately ASCII-prefixed and not localized; only the message text can be non-ASCII. The remaining console encoding (CP950 vs UTF-8) belongs to the host, and the launchers do not change it.
+- Closing eyeShell while a channel task is in flight can make Apache MINA print `Exception in thread "Thread-0" java.lang.IllegalStateException: Executor has been shut down` to the console. It is a shutdown race in the client library after the session is already closed, not an application error, but it is noisy; suppressing it needs a controlled client shutdown or a logger filter.
 - `cmd.exe` cannot run `.ps1` files, and on this host `.ps1` is associated with `notepad.exe`; the `.cmd` wrappers exist for that shell. They require PowerShell 7 and fail instead of using Windows PowerShell 5.1.
 - Font metrics are computed with a 1x1 `BufferedImage` graphics context, as JediTerm does, so the chosen size assumes the default UI scale; a HiDPI scale factor is not re-applied to the font selection.
 - No automated test drives real mouse or keyboard gestures: the GUI checklist in `docs/MANUAL_GUI_CHECKLIST.md` still needs a human pass for dialog flows, drag-and-drop, and visual styling.
@@ -631,6 +634,16 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Test environment: Microsoft Windows 10 IoT Enterprise LTSC 10.0.19044 x64, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 under `.local/gradle-home`, Kotlin 2.4.10.
 - Artifacts: `build\reports\tests\test\index.html`; XML results under `build\test-results\test\`; window capture at `build\reports\eyeshell-window.png`; dialog render at `build\reports\hosts-dialog.png`.
 - Remaining unverified scope: the dialog render uses the default Swing look-and-feel (the real app runs FlatDarkLaf), so the filter placeholder text and theme colours still need a human look; the gear/Settings flow was exercised through component tests, not by clicking in the captured window; font-size changes were verified by unit tests and by the terminal view's re-flow, not by a live SSH session at a different size; and the Settings dialog's language row is intentionally disabled.
+
+### Windows host validation (console log encoding)
+
+- Commands: `chcp` + `.\local\jdk-21\bin\java.exe %TEMP%\opencode\EncodingProbe.java > enc-default.txt` (diagnosis); `cmd /c "chcp 950 >nul & java -cp build\classes\kotlin\main;<kotlin-stdlib> LoggingProbe.java > enc-fixed.txt"`; `.\scripts\gradlew-local.ps1 test --tests "*LoggingSetupTest"`; `.\scripts\gradlew-local.ps1 test`; `.\scripts\gradlew-local.ps1 check`; `git diff --check`.
+- Executed at: 2026-10-27
+- Exit codes: 0 for the probes, the targeted test, the full suite, and `check`.
+- Result: The reported symptom was mojibake in the console while `scripts\gradlew-local.cmd run` printed MINA SSHD logs. Diagnosis: JDK 21 reports `native.encoding=MS950` and `stdout.encoding=MS950`, but the `SimpleFormatter` localizes the month and level (`10月`, `訊息`), and those characters reached the console as UTF-8 on a CP950 console — the classic `嚙踝蕭`. The prefix is now formatted by `LoggingSetup.PlainFormatter` and never localized: a probe run under `chcp 950` produced `2026-10-27 19:54:48.048 INFO org.apache.sshd.probe - connected to 192.168.23.217` with a maximum byte value of 116, i.e. pure ASCII. The formatter also appends stack traces. Full suite runs 267 tests: 267 executed, 0 failures, 0 errors, 17 skipped.
+- Test environment: Microsoft Windows 10 IoT Enterprise LTSC 10.0.19044 x64 (zh-TW, native code page MS950), Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 under `.local/gradle-home`, Kotlin 2.4.10.
+- Artifacts: `build\reports\tests\test\index.html`; XML results under `build\test-results\test\`; probes under `%TEMP%\opencode\enc-default.txt` and `enc-fixed.txt`.
+- Remaining unverified scope: the fix covers the JUL prefix only; a message that itself contains non-ASCII text still depends on the console code page. The console was not re-checked inside the owner's own `cmd.exe` window (the probe reproduced the same code page instead). The MINA `Executor has been shut down` line printed when the window closes during an in-flight task is unrelated and still present.
 
 ### 2026-10-27 UI work push
 
