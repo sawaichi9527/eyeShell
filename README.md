@@ -109,7 +109,7 @@ git submodule update --init --recursive
 ./scripts/gradlew-local.sh run
 ```
 
-Windows x64 PowerShell:
+Windows x64 PowerShell 7 (`pwsh`):
 
 ```powershell
 git submodule update --init --recursive
@@ -119,7 +119,19 @@ git submodule update --init --recursive
 .\scripts\gradlew-local.ps1 run
 ```
 
-Use `./scripts/gradlew-local.sh --stop` or `.\scripts\gradlew-local.ps1 --stop` to stop the project-local Gradle daemon. The standard `gradlew` and `gradlew.bat` remain available for isolated CI runners.
+Windows x64 `cmd.exe`:
+
+```bat
+git submodule update --init --recursive
+scripts\bootstrap-jdk.cmd
+scripts\gradlew-local.cmd test
+scripts\gradlew-local.cmd check
+scripts\gradlew-local.cmd run
+```
+
+`cmd.exe` cannot run a `.ps1` file: the file association opens it in an editor instead of executing it. Always use the `.cmd` wrappers from `cmd.exe`, or start `pwsh` first. The wrappers look for `pwsh` on `PATH` and in the usual install locations, and stop with an explicit error when PowerShell 7 is missing; they never fall back to Windows PowerShell 5.1.
+
+Use `./scripts/gradlew-local.sh --stop`, `.\scripts\gradlew-local.ps1 --stop`, or `scripts\gradlew-local.cmd --stop` to stop the project-local Gradle daemon. The standard `gradlew` and `gradlew.bat` remain available for isolated CI runners.
 
 ## Workbench layout
 

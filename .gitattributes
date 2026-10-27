@@ -3,4 +3,5 @@
 *.sh text eol=lf
 gradlew text eol=lf
 *.bat text eol=crlf whitespace=cr-at-eol
+*.cmd text eol=crlf whitespace=cr-at-eol
 *.jar binary
