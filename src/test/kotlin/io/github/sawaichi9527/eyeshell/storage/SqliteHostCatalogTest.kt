@@ -9,6 +9,7 @@ import java.util.Collections
 import java.util.UUID
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
@@ -28,6 +29,7 @@ class SqliteHostCatalogTest {
             authenticationMethod = SavedAuthenticationMethod.KEYBOARD_INTERACTIVE,
             group = " Lab設備 ",
             tags = listOf(" nightly ", "中文", "nightly"),
+            remark = "  夜間測試用  ",
         )
 
         val created = SqliteHostCatalog(database).use { catalog ->
@@ -40,8 +42,9 @@ class SqliteHostCatalogTest {
             assertEquals("Lab '主機'; DROP TABLE hosts;", created.draft.name)
             assertEquals("測試員", created.draft.endpoint.username)
             assertEquals(listOf("nightly", "中文"), created.draft.tags)
-            assertEquals(4, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
-            assertEquals(4, queryInt(database, "SELECT COUNT(*) FROM schema_versions"))
+            assertEquals("夜間測試用", created.draft.remark)
+            assertEquals(5, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
+            assertEquals(5, queryInt(database, "SELECT COUNT(*) FROM schema_versions"))
             assertEquals(6, queryInt(database, "SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table'"))
         } finally {
             reopened.close()
@@ -65,7 +68,33 @@ class SqliteHostCatalogTest {
         assertEquals(first.profileId, reopened.profileId)
         assertEquals("Legacy group", first.draft.group)
         assertEquals(listOf("legacy-tag"), first.draft.tags)
-        assertEquals(4, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
+        assertEquals(5, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
+    }
+
+    @Test
+    fun `migrates v4 catalogs by adding the remark column`() {
+        val database = temporaryDirectory.resolve("v4.db")
+        SqliteHostCatalog(database).use { catalog ->
+            catalog.createHost(draft("Kept", "kept.example"))
+        }
+        DriverManager.getConnection("jdbc:sqlite:$database").use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute("ALTER TABLE hosts DROP COLUMN remark")
+                statement.execute("DELETE FROM schema_versions WHERE version = 5")
+            }
+        }
+
+        SqliteHostCatalog(database).use { catalog ->
+            val host = catalog.listHosts().single()
+            assertEquals("Kept", host.draft.name)
+            assertNull(host.draft.remark)
+            assertEquals("正式環境", catalog.updateHost(host.id, host.draft.copy(remark = "正式環境")).draft.remark)
+        }
+        assertEquals(5, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
+        assertEquals(
+            "正式環境",
+            SqliteHostCatalog(database).use { catalog -> catalog.listHosts().single().draft.remark },
+        )
     }
 
     @Test
@@ -138,7 +167,7 @@ class SqliteHostCatalogTest {
                 statement.executeQuery("SELECT name FROM pragma_table_info('hosts')").use { results ->
                     while (results.next()) columns += results.getString(1)
                 }
-                statement.execute("INSERT INTO schema_versions(version, description) VALUES (5, 'future')")
+                statement.execute("INSERT INTO schema_versions(version, description) VALUES (6, 'future')")
             }
         }
 
@@ -240,7 +269,7 @@ class SqliteHostCatalogTest {
         SqliteHostCatalog(database).use { catalog ->
             val reloaded = catalog.listHosts().single { it.profileId == target.profileId }
             assertEquals(bastion.profileId, reloaded.draft.jumpHostProfileId)
-            assertEquals(4, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
+            assertEquals(5, queryInt(database, "SELECT MAX(version) FROM schema_versions"))
         }
     }
 

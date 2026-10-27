@@ -48,6 +48,7 @@ internal object HostTableRows {
             draft.endpoint.port.toString(),
             draft.endpoint.username,
             draft.group.orEmpty(),
+            draft.remark.orEmpty(),
             authLabel(draft.authenticationMethod),
         ).any { value -> value.lowercase(Locale.ROOT).contains(needle) }
     }
@@ -96,7 +97,8 @@ internal class HostTableModel : AbstractTableModel() {
             PORT_COLUMN -> draft.endpoint.port
             USER_COLUMN -> draft.endpoint.username
             AUTH_COLUMN -> HostTableRows.authLabel(draft.authenticationMethod)
-            else -> draft.group.orEmpty()
+            GROUP_COLUMN -> draft.group.orEmpty()
+            else -> draft.remark.orEmpty()
         }
     }
 
@@ -107,7 +109,8 @@ internal class HostTableModel : AbstractTableModel() {
         const val USER_COLUMN = 3
         const val AUTH_COLUMN = 4
         const val GROUP_COLUMN = 5
+        const val REMARK_COLUMN = 6
 
-        val COLUMNS = listOf("Name", "Host", "Port", "User", "Authentication", "Group")
+        val COLUMNS = listOf("Name", "Host", "Port", "User", "Authentication", "Group", "Remark")
     }
 }

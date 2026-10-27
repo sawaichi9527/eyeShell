@@ -46,6 +46,9 @@ class HostTableRowsTest {
 
         val byAuth = HostTableRows.build(hosts, emptySet(), "public key")
         assertEquals(listOf("direct"), byAuth.map(::label))
+
+        val byRemark = HostTableRows.build(hosts, emptySet(), "備援")
+        assertEquals(listOf("Zeta (1)", "solo"), byRemark.map(::label))
     }
 
     @Test
@@ -80,7 +83,7 @@ class HostTableRowsTest {
         host(1, "direct", port = 2222, method = SavedAuthenticationMethod.PUBLIC_KEY),
         host(2, "alpha", group = "Lab"),
         host(3, "beta", group = "Lab"),
-        host(4, "solo", group = "Zeta"),
+        host(4, "solo", group = "Zeta", remark = "備援"),
     )
 
     private fun host(
@@ -89,6 +92,7 @@ class HostTableRowsTest {
         group: String? = null,
         port: Int = 22,
         method: SavedAuthenticationMethod = SavedAuthenticationMethod.PASSWORD,
+        remark: String? = null,
     ) = SavedHost(
         id,
         UUID(id, 0),
@@ -97,6 +101,7 @@ class HostTableRowsTest {
             endpoint = SshEndpoint("host$id.test", port, "operator"),
             authenticationMethod = method,
             group = group,
+            remark = remark,
         ),
     )
 }

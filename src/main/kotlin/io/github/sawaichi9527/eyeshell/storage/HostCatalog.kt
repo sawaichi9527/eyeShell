@@ -17,11 +17,13 @@ data class HostDraft(
     val group: String? = null,
     val tags: List<String> = emptyList(),
     val jumpHostProfileId: UUID? = null,
+    val remark: String? = null,
 ) {
     init {
         require(name.isNotBlank()) { "Host profile name must not be blank" }
         require(group == null || group.isNotBlank()) { "Host group must not be blank" }
         require(tags.none(String::isBlank)) { "Host tags must not be blank" }
+        require(remark == null || remark.isNotBlank()) { "Host remark must not be blank" }
     }
 
     internal fun normalized(): HostDraft = copy(
@@ -29,6 +31,7 @@ data class HostDraft(
         endpoint = endpoint.copy(host = endpoint.host.trim(), username = endpoint.username.trim()),
         group = group?.trim()?.takeIf(String::isNotEmpty),
         tags = tags.map(String::trim).distinct().sorted(),
+        remark = remark?.trim()?.takeIf(String::isNotEmpty),
     )
 }
 

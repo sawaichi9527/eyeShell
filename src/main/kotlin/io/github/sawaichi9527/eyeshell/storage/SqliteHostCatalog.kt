@@ -57,6 +57,7 @@ class SqliteHostCatalog(
             statement.setString(6, normalized.endpoint.username)
             statement.setString(7, normalized.authenticationMethod.name)
             statement.setString(8, jumpHostUuid)
+            statement.setString(9, normalized.remark)
             statement.executeQuery().use { results ->
                 check(results.next()) { "Host insert did not return an identifier" }
                 results.getLong(1)
@@ -87,7 +88,8 @@ class SqliteHostCatalog(
             statement.setString(5, normalized.endpoint.username)
             statement.setString(6, normalized.authenticationMethod.name)
             statement.setString(7, jumpHostUuid)
-            statement.setLong(8, id)
+            statement.setString(8, normalized.remark)
+            statement.setLong(9, id)
             statement.executeUpdate()
         }
         require(updated == 1) { "Unknown host profile: $id" }
@@ -296,6 +298,13 @@ class SqliteHostCatalog(
                     statement.execute(CREATE_JUMP_HOST_INDEX)
                 }
                 recordSchemaVersion(connection, 4, "jump host references")
+                version = 4
+            }
+            if (version == 4) {
+                connection.createStatement().use { statement ->
+                    statement.execute(ADD_REMARK_COLUMN)
+                }
+                recordSchemaVersion(connection, 5, "host remarks")
             }
             connection.commit()
         } catch (failure: Throwable) {
@@ -468,6 +477,7 @@ class SqliteHostCatalog(
             authenticationMethod = SavedAuthenticationMethod.valueOf(getString("authentication_method")),
             jumpHostProfileId = getString("jump_host_uuid")?.let(UUID::fromString),
             group = getString("group_name"),
+            remark = getString("remark"),
         )
     } catch (failure: IllegalArgumentException) {
         throw SQLException("Host catalog contains invalid profile data", failure)
@@ -493,12 +503,13 @@ class SqliteHostCatalog(
         val authenticationMethod: SavedAuthenticationMethod,
         val jumpHostProfileId: UUID?,
         val group: String?,
+        val remark: String?,
         val tags: MutableList<String> = mutableListOf(),
     ) {
         fun savedHost(): SavedHost = SavedHost(
             id,
             profileId,
-            HostDraft(name, endpoint, authenticationMethod, group, tags.toList(), jumpHostProfileId).normalized(),
+            HostDraft(name, endpoint, authenticationMethod, group, tags.toList(), jumpHostProfileId, remark).normalized(),
         )
     }
 
@@ -508,7 +519,7 @@ class SqliteHostCatalog(
     )
 
     companion object {
-        private const val CURRENT_SCHEMA_VERSION = 4
+        private const val CURRENT_SCHEMA_VERSION = 5
         private const val BUSY_TIMEOUT_MILLIS = 5_000
         private val DIRECTORY_PERMISSIONS = setOf(
             PosixFilePermission.OWNER_READ,
@@ -587,6 +598,9 @@ class SqliteHostCatalog(
         private const val CREATE_JUMP_HOST_INDEX = """
             CREATE INDEX hosts_jump_host_uuid_idx ON hosts(jump_host_uuid)
         """
+        private const val ADD_REMARK_COLUMN = """
+            ALTER TABLE hosts ADD COLUMN remark TEXT
+        """
         private const val LIST_COMMAND_SNIPPETS = """
             SELECT id, name, command FROM command_snippets ORDER BY name, id
         """
@@ -597,7 +611,7 @@ class SqliteHostCatalog(
             UPDATE command_snippets SET name = ?, command = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
         """
         private const val LIST_HOSTS = """            SELECT h.id, h.profile_uuid, h.name, h.host, h.port, h.username, h.authentication_method,
-                   h.jump_host_uuid, g.name AS group_name, t.name AS tag_name
+                   h.jump_host_uuid, h.remark, g.name AS group_name, t.name AS tag_name
             FROM hosts h
             LEFT JOIN host_groups g ON g.id = h.group_id
             LEFT JOIN host_tags ht ON ht.host_id = h.id
@@ -605,14 +619,14 @@ class SqliteHostCatalog(
             ORDER BY h.name, h.id, t.name
         """
         private const val CREATE_HOST = """
-            INSERT INTO hosts(profile_uuid, group_id, name, host, port, username, authentication_method, jump_host_uuid)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO hosts(profile_uuid, group_id, name, host, port, username, authentication_method, jump_host_uuid, remark)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             RETURNING id
         """
         private const val UPDATE_HOST = """
             UPDATE hosts
             SET group_id = ?, name = ?, host = ?, port = ?, username = ?, authentication_method = ?,
-                jump_host_uuid = ?, updated_at = CURRENT_TIMESTAMP
+                jump_host_uuid = ?, remark = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
         """
         private val PROFILE_ID_MIGRATION_PREFIX = listOf(

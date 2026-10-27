@@ -163,6 +163,7 @@ internal class HostCatalogController(
             columnModel.getColumn(HostTableModel.USER_COLUMN).preferredWidth = 110
             columnModel.getColumn(HostTableModel.AUTH_COLUMN).preferredWidth = 130
             columnModel.getColumn(HostTableModel.GROUP_COLUMN).preferredWidth = 110
+            columnModel.getColumn(HostTableModel.REMARK_COLUMN).preferredWidth = 150
         }
         val search = JTextField().apply {
             name = "hostCatalogSearch"
@@ -511,6 +512,7 @@ internal class HostCatalogController(
             }
         }
         val group = JTextField(existing?.draft?.group ?: defaultGroup.orEmpty(), 24)
+        val remark = JTextField(existing?.draft?.remark.orEmpty(), 24)
         val tags = JTextField(existing?.draft?.tags?.joinToString(", ").orEmpty(), 24)
         val storeStatus = credentialStoreStatus()
         val storeUsable = storeStatus == CredentialStoreStatus.AVAILABLE || storeStatus == CredentialStoreStatus.LOCKED
@@ -566,9 +568,10 @@ internal class HostCatalogController(
             addField(7, "", clearPassword)
             addField(8, "Jump host", jumpHost)
             addField(9, "Group", group)
-            addField(10, "Tags", tags)
-            addField(11, "", credentialHint)
-            if (existing == null) addField(12, "", connectAfterSave)
+            addField(10, "Remark", remark)
+            addField(11, "Tags", tags)
+            addField(12, "", credentialHint)
+            if (existing == null) addField(13, "", connectAfterSave)
         }
         try {
             while (JOptionPane.showConfirmDialog(
@@ -587,6 +590,7 @@ internal class HostCatalogController(
                         group = group.text.trim().takeIf(String::isNotEmpty),
                         tags = tags.text.split(',').map(String::trim).filter(String::isNotEmpty),
                         jumpHostProfileId = (jumpHost.selectedItem as SavedHost?)?.profileId,
+                        remark = remark.text.trim().takeIf(String::isNotEmpty),
                     ).normalized()
                     val entered = password.password
                     val savePassword = password.isEnabled && storeUsable &&

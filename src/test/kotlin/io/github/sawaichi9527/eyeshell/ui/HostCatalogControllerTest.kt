@@ -523,6 +523,10 @@ class HostCatalogControllerTest {
                     listOf("Password", "", "Password", "Password", "", "Password"),
                     columnValues(table, HostTableModel.AUTH_COLUMN),
                 )
+                assertEquals(
+                    listOf("", "", "", "", "", "備援機"),
+                    columnValues(table, HostTableModel.REMARK_COLUMN),
+                )
 
                 val labRow = rowOfGroup(table, "Lab")
                 table.setRowSelectionInterval(labRow, labRow)
@@ -703,6 +707,7 @@ class HostCatalogControllerTest {
             endpoint = SshEndpoint("host$id.test", 22, "operator"),
             authenticationMethod = SavedAuthenticationMethod.PASSWORD,
             group = group,
+            remark = if (id == 4L) "備援機" else null,
         ),
     )
 
