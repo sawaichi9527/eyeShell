@@ -58,6 +58,7 @@
 - 另存全部輸出
 - Terminal 內容搜尋
 - 自訂 Regex 顏色與樣式標記
+- Terminal 配色主題（背景、文字與 16 色 ANSI palette）
 - 本地 SQLite 設定儲存
 - OS Credential Store 整合
 - Windows／Linux 64-bit 安裝包
@@ -513,6 +514,7 @@ interface TerminalView : AutoCloseable {
     fun selectAllOutput()
     fun showSearch()
     fun clearScrollback()
+    fun setColorScheme(scheme: TerminalColorScheme)
 }
 ```
 
@@ -528,6 +530,19 @@ Terminal 必須區分：
 - Raw Session Log
 
 Alternate Screen 用於 `vim`、`top`、`less`、`tmux` 等程式，不應將每次畫面刷新全部累積進一般 scrollback。
+
+### 9.4 Terminal 配色主題
+
+Terminal 的 background、foreground 與 16 色 ANSI palette 由使用者選擇，並套用到所有已開啟的 Session。
+
+- 內建配色僅採用公開、常見的組合：`eyeShell Dark`（預設）、`eyeShell Light`、`Solarized Light`、`Solarized Dark`、`Dracula`、`Nord`。
+- 不得複製 FinalShell 的配色資產；色票以公開 palette 數值自行宣告。
+- 淺色主題的 ANSI `white`／`bright white` slot 必須改映射為深色 base，避免淺底淺字。
+- 每個內建主題的 foreground/background 對比必須 ≥ 4.5:1（WCAG AA body text），由測試守門。
+- 選擇即時套用到所有已開啟 Session，不重建 `TerminalView`、不影響 scrollback、Search、Selection 或 Highlight 規則。
+- 預設文字顏色的儲存格必須以「未指定顏色」保存，繪製時才解析為目前主題，因此切換主題時既有 scrollback 一併重新著色。
+- 選擇保存在非機密的 `settings.properties`（`terminal.color.scheme`）；未知或已移除的 id 回退到預設主題。
+- Settings 對話框採左側分類、右側內容的 layout；顏色頁面提供主題下拉選單、即時預覽與對比數值。
 
 ---
 
