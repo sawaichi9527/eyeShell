@@ -597,3 +597,9 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Test environment: Microsoft Windows 10 IoT Enterprise LTSC 10.0.19044 x64, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 under `.local/gradle-home`, Kotlin 2.4.10.
 - Artifacts: `build\reports\tests\test\index.html`; XML results under `build\test-results\test\`; `build\package\eyeShell-0.1.1.zip`; app image at `build\package\eyeShell\`.
 - Remaining unverified scope: the ZIP was not extracted onto a clean machine, the packaged runtime was only checked for launching (no SSH session through it), MSI generation still needs the WiX toolset, and `build\package\eyeShell-0.1.0.zip` from the previous version is still present because `cleanPackagePortable` only deletes the archive for the current version.
+
+### 2026-10-27 0.1.1 package push
+
+- Commands: `git push origin main`; `Remove-Item build\package\eyeShell-0.1.0.zip`.
+- Result: pushed `f5ffa5a..b2227e6` (2 commits: `02e62e0` version 0.1.1, `b2227e6` handoff) to `origin/main`; the working tree is clean and `main` is in sync with `origin/main` afterwards at 2026-10-27T16:09+08:00. The stale `build\package\eyeShell-0.1.0.zip` was deleted on the owner's request, leaving only `eyeShell-0.1.1.zip` (63.1 MB) in the package directory.
+- Not re-run for the push: only the version string and documentation changed after the validated `243 tests / 0 failures / 16 skipped` run and the `jpackagePortable` build recorded above; the pushed source is what produced `eyeShell-0.1.1.zip`.
