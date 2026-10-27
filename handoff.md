@@ -172,6 +172,7 @@ A UX/robustness change is committed and pushed (`4421b17` on `origin/main`): rec
 - Replaced the Saved hosts tree with a FinalShell-style tree table: `HostTableModel` shows Name / Host / Port / User / Authentication / Group, folder rows expand and collapse on click with a drawn disclosure triangle, hosts connect on double-click, and a filter field on top matches name, host, port, user, authentication, or group while keeping matches under their folder.
 - Added the gear button at the right edge of the Monitor header, wired to a Settings dialog. Terminal font size is the one implemented setting: it applies to every open session immediately (JediTerm re-initialises its metrics and resizes the PTY) and is persisted to `settings.properties` in the config directory; the language row is visible but disabled with an explicit "not available yet" hint.
 - Replaced the JDK `SimpleFormatter` for console logging with `LoggingSetup.PlainFormatter`, installed at startup: the timestamp, level, and logger name are ASCII, so a zh-TW Windows no longer prints the localized `10月`/`訊息` prefix as UTF-8 into a CP950 console (which rendered as `嚙踝蕭`). Stack traces are still appended, and message text is passed through unchanged.
+- Added a free-text `Remark` to saved hosts (schema v5): `HostDraft.remark` is trimmed and blank-normalized, `SqliteHostCatalog` migrates v4 databases with `ALTER TABLE hosts ADD COLUMN remark TEXT`, the host editor has a Remark field, the Saved hosts tree table gained a Remark column after Group, and the filter matches remarks too.
 
 ## In Progress
 
@@ -184,7 +185,7 @@ Deferred by the owner on 2026-10-24. Do not start these without a new explicit d
 | Item | Note |
 |---|---|
 | SOCKS5／HTTP CONNECT proxy (M2B) | Not started; would extend `TransportProvider`. |
-| Port forwarding (M2C) | Not started; needs schema v5 rules bound to saved hosts. |
+| Port forwarding (M2C) | Not started; needs schema v6 rules bound to saved hosts (v5 is the host remark). |
 | Windows host re-validation (Jump Host, MSI packaging) | The portable ZIP path is validated on Windows, including a live SSH session (2026-10-27). MSI generation is deferred by the owner on 2026-10-27; it requires the WiX toolset that `jpackage` invokes. Jump Host and the live Windows Credential Manager lifecycle are still pending on that host. |
 | Broadcast a command to all open sessions | FinalShell's core batch feature; builds on multi-tab + `sendCommand`. |
 | Multi-select host connect | Needs a queued connection flow; M1I still serializes connection attempts. |
@@ -263,6 +264,7 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - The Saved hosts tree table has no column-header sorting (rows follow folder/name order) and no drag-to-move between folders; the Group field in the host editor remains the only way to move a host. Folder rows toggle on a single click, and only host rows enable Edit/Delete/Connect.
 - Console logging is deliberately ASCII-prefixed and not localized; only the message text can be non-ASCII. The remaining console encoding (CP950 vs UTF-8) belongs to the host, and the launchers do not change it.
 - Closing eyeShell while a channel task is in flight can make Apache MINA print `Exception in thread "Thread-0" java.lang.IllegalStateException: Executor has been shut down` to the console. It is a shutdown race in the client library after the session is already closed, not an application error, but it is noisy; suppressing it needs a controlled client shutdown or a logger filter.
+- A host Remark is a single-line free-text field, not a secret and never used by the connection flow. It is included in the Saved hosts filter but not in the exported terminal output or the connection preset.
 - `cmd.exe` cannot run `.ps1` files, and on this host `.ps1` is associated with `notepad.exe`; the `.cmd` wrappers exist for that shell. They require PowerShell 7 and fail instead of using Windows PowerShell 5.1.
 - Font metrics are computed with a 1x1 `BufferedImage` graphics context, as JediTerm does, so the chosen size assumes the default UI scale; a HiDPI scale factor is not re-applied to the font selection.
 - No automated test drives real mouse or keyboard gestures: the GUI checklist in `docs/MANUAL_GUI_CHECKLIST.md` still needs a human pass for dialog flows, drag-and-drop, and visual styling.
@@ -635,6 +637,13 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Artifacts: `build\reports\tests\test\index.html`; XML results under `build\test-results\test\`; window capture at `build\reports\eyeshell-window.png`; dialog render at `build\reports\hosts-dialog.png`.
 - Remaining unverified scope: the dialog render uses the default Swing look-and-feel (the real app runs FlatDarkLaf), so the filter placeholder text and theme colours still need a human look; the gear/Settings flow was exercised through component tests, not by clicking in the captured window; font-size changes were verified by unit tests and by the terminal view's re-flow, not by a live SSH session at a different size; and the Settings dialog's language row is intentionally disabled.
 
+### 2026-10-27 UI work push
+
+- Commands: `git push origin main`.
+- Result: pushed `78d8f7b..19a7dc5` (3 commits: `9c33589` title + Monitor settings entry, `0dcd8e5` hosts tree table, `19a7dc5` handoff) to `origin/main`; the working tree is clean and `main` is in sync with `origin/main` afterwards at 2026-10-27T17:59+08:00.
+- Not re-run for the push: no code changed after the validated `264 tests / 0 failures / 17 skipped` run; only documentation was added.
+- Packaging: `build\package\eyeShell-0.1.1.zip` was **not** rebuilt, by the owner's decision, so it does not contain these UI changes. Bump the version before producing a new archive, otherwise two different builds would share the `0.1.1` name.
+
 ### Windows host validation (console log encoding)
 
 - Commands: `chcp` + `.\local\jdk-21\bin\java.exe %TEMP%\opencode\EncodingProbe.java > enc-default.txt` (diagnosis); `cmd /c "chcp 950 >nul & java -cp build\classes\kotlin\main;<kotlin-stdlib> LoggingProbe.java > enc-fixed.txt"`; `.\scripts\gradlew-local.ps1 test --tests "*LoggingSetupTest"`; `.\scripts\gradlew-local.ps1 test`; `.\scripts\gradlew-local.ps1 check`; `git diff --check`.
@@ -651,9 +660,12 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Result: pushed `8395af8..4b2706e` (2 commits: `d419163` ASCII console log prefix, `4b2706e` handoff) to `origin/main`; the working tree is clean and `main` is in sync with `origin/main` afterwards at 2026-10-27T20:18+08:00.
 - Not re-run for the push: no code changed after the validated `267 tests / 0 failures / 17 skipped` run; only documentation was added.
 
-### 2026-10-27 UI work push
+### Windows host validation (host Remark, schema v5)
 
-- Commands: `git push origin main`.
-- Result: pushed `78d8f7b..19a7dc5` (3 commits: `9c33589` title + Monitor settings entry, `0dcd8e5` hosts tree table, `19a7dc5` handoff) to `origin/main`; the working tree is clean and `main` is in sync with `origin/main` afterwards at 2026-10-27T17:59+08:00.
-- Not re-run for the push: no code changed after the validated `264 tests / 0 failures / 17 skipped` run; only documentation was added.
-- Packaging: `build\package\eyeShell-0.1.1.zip` was **not** rebuilt, by the owner's decision, so it does not contain these UI changes. Bump the version before producing a new archive, otherwise two different builds would share the `0.1.1` name.
+- Commands: `.\scripts\gradlew-local.ps1 test --console=plain`; `.\scripts\gradlew-local.ps1 check --console=plain`; `$env:EYESHELL_TEST_DIALOG_RENDER=1` + `.\scripts\gradlew-local.ps1 test --tests "*HostCatalogControllerTest"`; `git diff --check`.
+- Executed at: 2026-10-27
+- Exit codes: 0 for the full suite, `check`, and the render probe.
+- Result: Saved hosts gained a free-text Remark. `HostDraft.remark` is trimmed and blank-normalized; schema v5 adds `hosts.remark` through `ALTER TABLE hosts ADD COLUMN remark TEXT`, recorded in `schema_versions`; `LIST_HOSTS`, `CREATE_HOST`, and `UPDATE_HOST` carry it; the host editor has a Remark field between Group and Tags; the tree table shows a Remark column after Group; and the filter matches it. The render probe shows the seven columns with `gb10-1` carrying the remark `備援機`. New coverage: the v1→v5 migration still lands on version 5 with all five schema rows, a dedicated v4→v5 test drops the column and the version row, reopens the catalog, verifies the existing host survives with a null remark, then writes and re-reads `正式環境`; the Remark round trip is asserted on create; the table test asserts the Remark column contents; and the row test covers filtering by remark. Full suite runs 268 tests: 268 executed, 0 failures, 0 errors, 17 skipped.
+- Test environment: Microsoft Windows 10 IoT Enterprise LTSC 10.0.19044 x64, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 under `.local/gradle-home`, Kotlin 2.4.10.
+- Artifacts: `build\reports\tests\test\index.html`; XML results under `build\test-results\test\`; dialog render at `build\reports\hosts-dialog.png`.
+- Remaining unverified scope: the Remark field is single-line and has no length limit beyond SQLite's TEXT; the migration test simulates a v4 database by dropping the column rather than restoring a real v4 file; the real `%LOCALAPPDATA%\eyeShell\eyeshell.db` (currently v4) has not been opened by the new build yet, so its in-place upgrade will happen on the owner's next launch.
