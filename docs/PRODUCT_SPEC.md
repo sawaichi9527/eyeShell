@@ -748,6 +748,17 @@ LANG=C
 - 非可視 Tab 自動降頻。
 - 連線錯誤使用 exponential backoff。
 - 不因每次採樣重新建立 SSH Transport。
+- Process 的 CPU% 必須是「與前次採樣的 `/proc/<pid>/stat` CPU time 差值 ÷ 經過時間」，而非 `ps` 的 lifetime average；第一次採樣或新出現的 pid 才使用 `ps` 的 `%CPU` 作為替代值。
+- `100%` 代表用滿一個 core，與 `ps`／`top` 的慣例一致。
+
+### 13.3 Sidebar 呈現
+
+- Sidebar 是可垂直捲動的單欄摘要；Processes 表格自身不做垂直捲動，避免出現第二條垂直 scrollbar。
+- Processes 表格固定最多 6 列，欄寬依「表頭與目前內容的最長字串」量測，並保留可讀的最小寬度。
+- 表格使用 `AUTO_RESIZE_OFF`，當內容寬度超過 sidebar 時顯示細的**水平** scrollbar（`AS_NEEDED`），讓長 process name 可完整檢視，而不是被省略號截斷。
+- 每次採樣會重建 sidebar 內容，但 Processes 的水平捲動位置必須保留，不得在使用者閱讀長列時被重設。
+- 使用者以滑鼠拖曳調整過的欄寬優先於自動量測；後續採樣不得把它還原，未被拖曳的欄位仍持續自動調整。
+- 在欄位表頭按左鍵雙擊，必須把該欄恢復為依內容自動調適的寬度（並清除先前的手動寬度）。
 
 ---
 
