@@ -631,3 +631,10 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Test environment: Microsoft Windows 10 IoT Enterprise LTSC 10.0.19044 x64, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 under `.local/gradle-home`, Kotlin 2.4.10.
 - Artifacts: `build\reports\tests\test\index.html`; XML results under `build\test-results\test\`; window capture at `build\reports\eyeshell-window.png`; dialog render at `build\reports\hosts-dialog.png`.
 - Remaining unverified scope: the dialog render uses the default Swing look-and-feel (the real app runs FlatDarkLaf), so the filter placeholder text and theme colours still need a human look; the gear/Settings flow was exercised through component tests, not by clicking in the captured window; font-size changes were verified by unit tests and by the terminal view's re-flow, not by a live SSH session at a different size; and the Settings dialog's language row is intentionally disabled.
+
+### 2026-10-27 UI work push
+
+- Commands: `git push origin main`.
+- Result: pushed `78d8f7b..19a7dc5` (3 commits: `9c33589` title + Monitor settings entry, `0dcd8e5` hosts tree table, `19a7dc5` handoff) to `origin/main`; the working tree is clean and `main` is in sync with `origin/main` afterwards at 2026-10-27T17:59+08:00.
+- Not re-run for the push: no code changed after the validated `264 tests / 0 failures / 17 skipped` run; only documentation was added.
+- Packaging: `build\package\eyeShell-0.1.1.zip` was **not** rebuilt, by the owner's decision, so it does not contain these UI changes. Bump the version before producing a new archive, otherwise two different builds would share the `0.1.1` name.
