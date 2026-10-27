@@ -28,9 +28,9 @@ import javax.swing.JButton
 import javax.swing.JDialog
 import javax.swing.JLabel
 import javax.swing.JPanel
-import javax.swing.JTree
+import javax.swing.JTable
+import javax.swing.JTextField
 import javax.swing.SwingUtilities
-import javax.swing.tree.DefaultMutableTreeNode
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -483,7 +483,7 @@ class HostCatalogControllerTest {
     }
 
     @Test
-    fun `the saved hosts dialog groups hosts and enables host actions only for a host row`() {
+    fun `the saved hosts dialog shows hosts in a grouped tree table and enables host actions only for a host row`() {
         val catalog = TestCatalog(
             listOf(
                 host(1, "direct"),
@@ -504,30 +504,76 @@ class HostCatalogControllerTest {
             }
 
             val dialog = awaitCatalogDialog()
-            val tree = findComponent(dialog, "hostCatalogTree") as JTree
+            val table = findComponent(dialog, "hostCatalogTable") as JTable
 
             SwingUtilities.invokeAndWait {
-                val root = tree.model.root as DefaultMutableTreeNode
-                assertEquals(3, root.childCount)
-                val direct = root.getChildAt(0) as DefaultMutableTreeNode
-                assertTrue(direct.userObject is SavedHost)
-                assertEquals("direct", (direct.userObject as SavedHost).draft.name)
+                assertEquals(
+                    listOf("direct", "Lab (2)", "alpha", "beta", "Zeta (1)", "solo"),
+                    columnValues(table, HostTableModel.NAME_COLUMN),
+                )
+                assertEquals(
+                    listOf("host1.test", "", "host2.test", "host3.test", "", "host4.test"),
+                    columnValues(table, HostTableModel.HOST_COLUMN),
+                )
+                assertEquals(
+                    listOf("operator", "", "operator", "operator", "", "operator"),
+                    columnValues(table, HostTableModel.USER_COLUMN),
+                )
+                assertEquals(
+                    listOf("Password", "", "Password", "Password", "", "Password"),
+                    columnValues(table, HostTableModel.AUTH_COLUMN),
+                )
 
-                val labRow = rowOfGroup(tree, "Lab")
-                val zetaRow = rowOfGroup(tree, "Zeta")
-                assertEquals("Lab (2)", renderedLabel(tree, labRow))
-                assertEquals("Zeta (1)", renderedLabel(tree, zetaRow))
-
-                tree.setSelectionRow(labRow)
+                val labRow = rowOfGroup(table, "Lab")
+                table.setRowSelectionInterval(labRow, labRow)
                 assertFalse(findButton(dialog, "Connect").isEnabled)
                 assertFalse(findButton(dialog, "Edit...").isEnabled)
                 assertFalse(findButton(dialog, "Delete").isEnabled)
                 assertTrue(findButton(dialog, "Add...").isEnabled)
 
-                tree.setSelectionRow(0)
+                table.setRowSelectionInterval(0, 0)
                 assertTrue(findButton(dialog, "Connect").isEnabled)
                 assertTrue(findButton(dialog, "Edit...").isEnabled)
                 assertTrue(findButton(dialog, "Delete").isEnabled)
+            }
+        } finally {
+            SwingUtilities.invokeAndWait {
+                controller.get()?.close()
+                window.get()?.dispose()
+            }
+        }
+    }
+
+    @Test
+    fun `the saved hosts filter keeps matching hosts under their folder`() {
+        val catalog = TestCatalog(
+            listOf(
+                host(1, "direct"),
+                host(2, "alpha", "Lab"),
+                host(3, "beta", "Lab"),
+                host(4, "solo", "Zeta"),
+            ),
+        )
+        val window = AtomicReference<EyeShellWindow>()
+        val controller = AtomicReference<HostCatalogController>()
+        try {
+            SwingUtilities.invokeAndWait {
+                val owner = EyeShellWindow(terminalViewFactory = { NoopTerminalView() })
+                val created = HostCatalogController(catalog, UnavailablePasswordCredentialStore()) { _, _ -> true }
+                window.set(owner)
+                controller.set(created)
+                created.open(owner)
+            }
+
+            val dialog = awaitCatalogDialog()
+            val table = findComponent(dialog, "hostCatalogTable") as JTable
+            val search = findComponent(dialog, "hostCatalogSearch") as JTextField
+
+            SwingUtilities.invokeAndWait {
+                search.text = "zeta"
+
+                assertEquals(listOf("Zeta (1)", "solo"), columnValues(table, HostTableModel.NAME_COLUMN))
+                assertTrue((findComponent(dialog, "hostCatalogStatus") as JLabel).text.contains("1 of 4"))
             }
         } finally {
             SwingUtilities.invokeAndWait {
@@ -546,7 +592,9 @@ class HostCatalogControllerTest {
                     .filterIsInstance<JDialog>()
                     .firstOrNull { window ->
                         window.name == "hostCatalogDialog" &&
-                            (findComponent(window, "hostCatalogTree") as? JTree)?.rowCount?.let { it > 0 } == true
+                            window.isDisplayable &&
+                            window.isVisible &&
+                            (findComponent(window, "hostCatalogTable") as? JTable)?.rowCount?.let { it > 0 } == true
                     }
             }
             dialog?.let { return it }
@@ -577,27 +625,75 @@ class HostCatalogControllerTest {
         }
     }
 
-    private fun rowOfGroup(tree: JTree, name: String): Int {
-        for (row in 0 until tree.rowCount) {
-            val node = tree.getPathForRow(row).lastPathComponent as? DefaultMutableTreeNode ?: continue
-            if ((node.userObject as? HostGroupNode)?.name == name) return row
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable(named = "EYESHELL_TEST_DIALOG_RENDER", matches = "1")
+    fun `renders the saved hosts dialog for visual inspection`() {
+        val catalog = TestCatalog(
+            listOf(
+                host(1, "Freelancer", "Lab"),
+                host(2, "BoulderMesa", "Lab"),
+                host(3, "Chronos", "Lab"),
+                host(4, "gb10-1", "Spark"),
+                host(5, "gb10-2", "Spark"),
+                host(6, "spark-25d5", "Spark"),
+                host(7, "Bastion"),
+                host(8, "strix-halo"),
+            ),
+        )
+        val window = AtomicReference<EyeShellWindow>()
+        val controller = AtomicReference<HostCatalogController>()
+        try {
+            SwingUtilities.invokeAndWait {
+                val owner = EyeShellWindow(terminalViewFactory = { NoopTerminalView() })
+                val created = HostCatalogController(catalog, UnavailablePasswordCredentialStore()) { _, _ -> true }
+                window.set(owner)
+                controller.set(created)
+                created.open(owner)
+            }
+
+            val dialog = awaitCatalogDialog()
+            SwingUtilities.invokeAndWait {
+                val pane = dialog.contentPane
+                pane.setSize(dialog.width, dialog.height)
+                layoutTree(pane)
+                val image = java.awt.image.BufferedImage(
+                    pane.width,
+                    pane.height,
+                    java.awt.image.BufferedImage.TYPE_INT_RGB,
+                )
+                val graphics = image.createGraphics()
+                try {
+                    pane.printAll(graphics)
+                } finally {
+                    graphics.dispose()
+                }
+                val output = java.nio.file.Path.of("build", "reports", "hosts-dialog.png")
+                java.nio.file.Files.createDirectories(output.parent)
+                javax.imageio.ImageIO.write(image, "png", output.toFile())
+            }
+        } finally {
+            SwingUtilities.invokeAndWait {
+                controller.get()?.close()
+                window.get()?.dispose()
+            }
         }
-        error("Group '$name' is not visible in the tree")
     }
 
-    private fun renderedLabel(tree: JTree, row: Int): String {
-        val path = tree.getPathForRow(row)
-        val renderer = tree.cellRenderer.getTreeCellRendererComponent(
-            tree,
-            path.lastPathComponent,
-            false,
-            tree.isExpanded(path),
-            tree.model.isLeaf(path.lastPathComponent),
-            row,
-            false,
-        ) as JLabel
-        return renderer.text
+    private fun layoutTree(component: java.awt.Component) {
+        component.doLayout()
+        if (component is java.awt.Container) component.components.forEach(::layoutTree)
     }
+
+    private fun rowOfGroup(table: JTable, name: String): Int {
+        for (row in 0 until table.rowCount) {
+            val label = table.model.getValueAt(row, HostTableModel.NAME_COLUMN) as? String ?: continue
+            if (label.startsWith("$name (")) return row
+        }
+        error("Group '$name' is not visible in the table")
+    }
+
+    private fun columnValues(table: JTable, column: Int): List<String> =
+        (0 until table.rowCount).map { row -> table.model.getValueAt(row, column).toString() }
 
     private fun host(id: Long, name: String, group: String? = null) = SavedHost(
         id,

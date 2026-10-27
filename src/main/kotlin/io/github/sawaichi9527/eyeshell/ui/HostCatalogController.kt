@@ -10,13 +10,21 @@ import io.github.sawaichi9527.eyeshell.storage.HostDraft
 import io.github.sawaichi9527.eyeshell.storage.SavedAuthenticationMethod
 import io.github.sawaichi9527.eyeshell.storage.SavedHost
 import java.awt.BorderLayout
+import java.awt.Color
 import java.awt.Component
 import java.awt.FlowLayout
+import java.awt.Font
+import java.awt.Graphics
+import java.awt.Graphics2D
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
+import java.awt.RenderingHints
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
+import java.awt.geom.Path2D
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
@@ -24,6 +32,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.DefaultListCellRenderer
+import javax.swing.Icon
 import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.JComboBox
@@ -35,15 +44,15 @@ import javax.swing.JPanel
 import javax.swing.JPasswordField
 import javax.swing.JScrollPane
 import javax.swing.JSpinner
+import javax.swing.JTable
 import javax.swing.JTextField
-import javax.swing.JTree
+import javax.swing.ListSelectionModel
 import javax.swing.SpinnerNumberModel
 import javax.swing.SwingUtilities
-import javax.swing.tree.DefaultMutableTreeNode
-import javax.swing.tree.DefaultTreeCellRenderer
-import javax.swing.tree.DefaultTreeModel
-import javax.swing.tree.TreePath
-import javax.swing.tree.TreeSelectionModel
+import javax.swing.UIManager
+import javax.swing.event.DocumentEvent
+import javax.swing.event.DocumentListener
+import javax.swing.table.DefaultTableCellRenderer
 
 internal class HostCatalogController(
     private val catalog: HostCatalog,
@@ -138,29 +147,27 @@ internal class HostCatalogController(
     )
 
     private fun createDialog(owner: EyeShellWindow): DialogState {
-        val model = DefaultTreeModel(DefaultMutableTreeNode())
-        val tree = JTree(model).apply {
-            name = "hostCatalogTree"
-            getAccessibleContext().accessibleName = "Saved hosts grouped by folder"
-            isRootVisible = false
-            showsRootHandles = true
-            selectionModel.selectionMode = TreeSelectionModel.SINGLE_TREE_SELECTION
-            cellRenderer = object : DefaultTreeCellRenderer() {
-                override fun getTreeCellRendererComponent(
-                    tree: JTree?,
-                    value: Any?,
-                    isSelected: Boolean,
-                    expanded: Boolean,
-                    leaf: Boolean,
-                    row: Int,
-                    hasFocus: Boolean,
-                ): Component = super.getTreeCellRendererComponent(tree, value, isSelected, expanded, leaf, row, hasFocus).apply {
-                    when (val node = (value as? DefaultMutableTreeNode)?.userObject ?: value) {
-                        is HostGroupNode -> text = HostCatalogTree.groupLabel(node)
-                        is SavedHost -> text = HostCatalogTree.hostLabel(node)
-                    }
-                }
-            }
+        val model = HostTableModel()
+        val table = JTable(model).apply {
+            name = "hostCatalogTable"
+            getAccessibleContext().accessibleName = "Saved hosts"
+            setSelectionMode(ListSelectionModel.SINGLE_SELECTION)
+            autoResizeMode = JTable.AUTO_RESIZE_SUBSEQUENT_COLUMNS
+            rowHeight = 24
+            fillsViewportHeight = true
+            tableHeader.reorderingAllowed = false
+            setDefaultRenderer(Any::class.java, HostTableRenderer())
+            columnModel.getColumn(HostTableModel.NAME_COLUMN).preferredWidth = 200
+            columnModel.getColumn(HostTableModel.HOST_COLUMN).preferredWidth = 170
+            columnModel.getColumn(HostTableModel.PORT_COLUMN).preferredWidth = 55
+            columnModel.getColumn(HostTableModel.USER_COLUMN).preferredWidth = 110
+            columnModel.getColumn(HostTableModel.AUTH_COLUMN).preferredWidth = 130
+            columnModel.getColumn(HostTableModel.GROUP_COLUMN).preferredWidth = 110
+        }
+        val search = JTextField().apply {
+            name = "hostCatalogSearch"
+            putClientProperty("JTextField.placeholderText", "Filter by name, host, user, or group")
+            toolTipText = "Filter saved hosts"
         }
         val status = JLabel("Loading...").apply { name = "hostCatalogStatus" }
         val add = JButton("Add...")
@@ -173,27 +180,30 @@ internal class HostCatalogController(
             defaultCloseOperation = JDialog.DISPOSE_ON_CLOSE
             contentPane = JPanel(BorderLayout(8, 8)).apply {
                 border = javax.swing.BorderFactory.createEmptyBorder(10, 10, 10, 10)
-                add(JScrollPane(tree), BorderLayout.CENTER)
-                add(status, BorderLayout.NORTH)
-                add(JPanel(FlowLayout(FlowLayout.TRAILING)).apply {
-                    add(add)
-                    add(edit)
-                    add(delete)
-                    add(connectButton)
-                    add(close)
+                add(search, BorderLayout.NORTH)
+                add(JScrollPane(table).apply { name = "hostCatalogScroll" }, BorderLayout.CENTER)
+                add(JPanel(BorderLayout()).apply {
+                    add(status, BorderLayout.WEST)
+                    add(JPanel(FlowLayout(FlowLayout.TRAILING, 6, 0)).apply {
+                        add(add)
+                        add(edit)
+                        add(delete)
+                        add(connectButton)
+                        add(close)
+                    }, BorderLayout.EAST)
                 }, BorderLayout.SOUTH)
             }
-            setSize(760, 420)
+            setSize(840, 460)
             setLocationRelativeTo(owner)
         }
-        val state = DialogState(dialog, tree, status, listOf(add, edit, delete, connectButton))
+        val state = DialogState(dialog, table, model, search, status, listOf(add, edit, delete, connectButton))
         fun updateSelectionActions() {
             val selected = selectedHost(state) != null && state.busy.not()
             edit.isEnabled = selected
             delete.isEnabled = selected
             connectButton.isEnabled = selected
         }
-        tree.addTreeSelectionListener { updateSelectionActions() }
+        table.selectionModel.addListSelectionListener { updateSelectionActions() }
         fun connectHost(host: SavedHost, closeOnStart: Boolean) {
             val hosts = currentHosts(state)
             val jumpProfileId = host.draft.jumpHostProfileId
@@ -218,6 +228,29 @@ internal class HostCatalogController(
                 )
             }
         }
+        table.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(event: MouseEvent) {
+                if (!SwingUtilities.isLeftMouseButton(event)) return
+                val rowIndex = table.rowAtPoint(event.point)
+                if (rowIndex < 0) return
+                when (val row = state.model.row(rowIndex)) {
+                    is HostRow.Group -> {
+                        state.toggleGroup(row.name)
+                        refreshRows(state)
+                        selectGroup(state, row.name)
+                    }
+                    is HostRow.Host -> if (event.clickCount >= 2) connectHost(row.host, closeOnStart = true)
+                    null -> Unit
+                }
+            }
+        })
+        search.document.addDocumentListener(object : DocumentListener {
+            override fun insertUpdate(event: DocumentEvent) = refreshRows(state)
+
+            override fun removeUpdate(event: DocumentEvent) = refreshRows(state)
+
+            override fun changedUpdate(event: DocumentEvent) = refreshRows(state)
+        })
         add.addActionListener {
             val editor = showHostEditor(dialog, null, currentHosts(state), selectedGroup(state)) ?: return@addActionListener
             val warning = AtomicReference<String?>()
@@ -301,7 +334,7 @@ internal class HostCatalogController(
             operation = catalog::listHosts,
             success = { hosts ->
                 if (!state.dialog.isDisplayable) return@submit
-                rebuildTree(state, hosts)
+                rebuildTable(state, hosts)
                 setBusy(state, false, if (hosts.isEmpty()) "No saved hosts." else "${hosts.size} saved hosts")
             },
             failure = { showCatalogFailure(state, it) },
@@ -322,7 +355,7 @@ internal class HostCatalogController(
             },
             success = { hosts ->
                 if (!state.dialog.isDisplayable) return@submit
-                rebuildTree(state, hosts)
+                rebuildTable(state, hosts)
                 setBusy(state, false, if (hosts.isEmpty()) "No saved hosts." else "${hosts.size} saved hosts")
                 afterSave?.invoke()
             },
@@ -367,6 +400,7 @@ internal class HostCatalogController(
         if (!busy) {
             val selected = selectedHost(state) != null
             state.buttons.drop(1).forEach { it.isEnabled = selected }
+            updateStatus(state)
         }
     }
 
@@ -388,59 +422,52 @@ internal class HostCatalogController(
     private fun currentHosts(state: DialogState): List<SavedHost> = state.hosts
 
     private fun selectedHost(state: DialogState): SavedHost? =
-        (state.tree.lastSelectedPathComponent as? DefaultMutableTreeNode)?.userObject as? SavedHost
+        (state.model.row(state.table.selectedRow) as? HostRow.Host)?.host
 
     private fun selectedGroup(state: DialogState): String? =
-        ((state.tree.lastSelectedPathComponent as? DefaultMutableTreeNode)?.userObject as? HostGroupNode)?.name
+        (state.model.row(state.table.selectedRow) as? HostRow.Group)?.name
 
-    private fun rebuildTree(state: DialogState, hosts: List<SavedHost>) {
-        val expanded = captureExpandedGroups(state)
-        val selectedProfileId = selectedHost(state)?.profileId
-        val firstLoad = state.firstLoad
-        val model = state.tree.model as DefaultTreeModel
-        val root = HostCatalogTree.rootNode(hosts)
-        model.setRoot(root)
+    private fun refreshRows(state: DialogState) {
+        val profileId = selectedHost(state)?.profileId
+        state.model.setRows(HostTableRows.build(state.hosts, state.expandedGroups, state.search.text))
+        updateStatus(state)
+        restoreSelection(state, profileId)
+    }
+
+    private fun rebuildTable(state: DialogState, hosts: List<SavedHost>) {
+        val profileId = selectedHost(state)?.profileId
         state.hosts = hosts
-        state.firstLoad = false
-        for (index in 0 until root.childCount) {
-            val groupNode = root.getChildAt(index) as DefaultMutableTreeNode
-            val group = groupNode.userObject as? HostGroupNode ?: continue
-            if (firstLoad || group.name in expanded) {
-                state.tree.expandPath(TreePath(arrayOf(root, groupNode)))
-            }
+        if (state.firstLoad) {
+            state.expandedGroups = hosts.mapNotNull { host -> host.draft.group }.toSet()
+            state.firstLoad = false
         }
-        val target = selectedProfileId?.let { profileId -> findHostNode(root, profileId) }
-        if (target != null) {
-            val path = TreePath(target.path)
-            path.parentPath?.let(state.tree::expandPath)
-            state.tree.selectionPath = path
-        } else {
-            state.tree.clearSelection()
-        }
-        state.expandedGroups = captureExpandedGroups(state)
+        state.model.setRows(HostTableRows.build(hosts, state.expandedGroups, state.search.text))
+        updateStatus(state)
+        restoreSelection(state, profileId)
     }
 
-    private fun captureExpandedGroups(state: DialogState): Set<String> {
-        val tree = state.tree
-        val groups = mutableSetOf<String>()
-        for (row in 0 until tree.rowCount) {
-            val path = tree.getPathForRow(row) ?: continue
-            val node = path.lastPathComponent as? DefaultMutableTreeNode ?: continue
-            val group = node.userObject as? HostGroupNode ?: continue
-            if (group.name != null && tree.isExpanded(path)) groups.add(group.name)
+    private fun restoreSelection(state: DialogState, profileId: UUID?) {
+        if (profileId == null) {
+            state.table.clearSelection()
+            return
         }
-        return groups
+        val index = state.model.rows().indexOfFirst { row -> (row as? HostRow.Host)?.host?.profileId == profileId }
+        if (index >= 0) state.table.setRowSelectionInterval(index, index) else state.table.clearSelection()
     }
 
-    private fun findHostNode(root: DefaultMutableTreeNode, profileId: UUID): DefaultMutableTreeNode? {
-        val pending = ArrayDeque<DefaultMutableTreeNode>()
-        pending.add(root)
-        while (pending.isNotEmpty()) {
-            val node = pending.removeLast()
-            if ((node.userObject as? SavedHost)?.profileId == profileId) return node
-            for (index in 0 until node.childCount) pending.add(node.getChildAt(index) as DefaultMutableTreeNode)
+    private fun selectGroup(state: DialogState, name: String) {
+        val index = state.model.rows().indexOfFirst { row -> (row as? HostRow.Group)?.name == name }
+        if (index >= 0) state.table.setRowSelectionInterval(index, index)
+    }
+
+    private fun updateStatus(state: DialogState) {
+        val total = state.hosts.size
+        val shown = state.model.rows().count { it is HostRow.Host }
+        state.status.text = when {
+            total == 0 -> "No saved hosts."
+            state.search.text.isBlank() -> "$total saved hosts"
+            else -> "$shown of $total saved hosts"
         }
-        return null
     }
 
     private fun showHostEditor(
@@ -685,7 +712,9 @@ internal class HostCatalogController(
 
     private class DialogState(
         val dialog: JDialog,
-        val tree: JTree,
+        val table: JTable,
+        val model: HostTableModel,
+        val search: JTextField,
         val status: JLabel,
         val buttons: List<JButton>,
     ) {
@@ -693,6 +722,10 @@ internal class HostCatalogController(
         var hosts: List<SavedHost> = emptyList()
         var expandedGroups: Set<String> = emptySet()
         var firstLoad = true
+
+        fun toggleGroup(name: String) {
+            expandedGroups = if (name in expandedGroups) expandedGroups - name else expandedGroups + name
+        }
     }
 
     companion object {
@@ -766,3 +799,87 @@ private fun SavedAuthenticationMethod.toConnectionMethod(): ConnectionAuthentica
 
 private fun ConnectionAuthenticationMethod.toSavedMethod(): SavedAuthenticationMethod =
     SavedAuthenticationMethod.valueOf(name)
+
+/**
+ * Renders every Saved hosts column. Folder rows get a disclosure triangle, bold name, and muted
+ * text; host rows are indented so the hierarchy stays readable in a flat table.
+ */
+private class HostTableRenderer : DefaultTableCellRenderer() {
+    override fun getTableCellRendererComponent(
+        table: JTable,
+        value: Any?,
+        isSelected: Boolean,
+        hasFocus: Boolean,
+        row: Int,
+        column: Int,
+    ): Component {
+        super.getTableCellRendererComponent(table, value, isSelected, hasFocus, row, column)
+        val rowData = (table.model as? HostTableModel)?.row(row)
+        icon = when {
+            column != HostTableModel.NAME_COLUMN -> null
+            rowData is HostRow.Group -> DisclosureIcon(rowData.expanded)
+            rowData is HostRow.Host -> HostIndentIcon
+            else -> null
+        }
+        font = if (rowData is HostRow.Group && column == HostTableModel.NAME_COLUMN) {
+            table.font.deriveFont(Font.BOLD)
+        } else {
+            table.font
+        }
+        if (!isSelected) {
+            foreground = if (rowData is HostRow.Group) {
+                UIManager.getColor("Label.disabledForeground") ?: Color.GRAY
+            } else {
+                table.foreground
+            }
+        }
+        toolTipText = if (rowData is HostRow.Group && column == HostTableModel.NAME_COLUMN) {
+            "Click to expand or collapse ${rowData.name}"
+        } else {
+            null
+        }
+        return this
+    }
+}
+
+/** Small triangle that shows whether a folder row is expanded. */
+private class DisclosureIcon(private val expanded: Boolean) : Icon {
+    override fun getIconWidth(): Int = INDENT
+
+    override fun getIconHeight(): Int = INDENT
+
+    override fun paintIcon(component: Component?, graphics: Graphics, x: Int, y: Int) {
+        val g = graphics.create() as Graphics2D
+        try {
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            g.color = component?.foreground ?: Color.GRAY
+            val triangle = Path2D.Double()
+            if (expanded) {
+                triangle.moveTo(x + 2.0, y + 4.0)
+                triangle.lineTo(x + 10.0, y + 4.0)
+                triangle.lineTo(x + 6.0, y + 9.0)
+            } else {
+                triangle.moveTo(x + 4.0, y + 2.0)
+                triangle.lineTo(x + 9.0, y + 6.0)
+                triangle.lineTo(x + 4.0, y + 10.0)
+            }
+            triangle.closePath()
+            g.fill(triangle)
+        } finally {
+            g.dispose()
+        }
+    }
+
+    private companion object {
+        const val INDENT = 12
+    }
+}
+
+/** Transparent spacer that keeps host names aligned with the folder disclosure triangle. */
+private object HostIndentIcon : Icon {
+    override fun getIconWidth(): Int = 12
+
+    override fun getIconHeight(): Int = 12
+
+    override fun paintIcon(component: Component?, graphics: Graphics, x: Int, y: Int) = Unit
+}
