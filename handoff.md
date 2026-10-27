@@ -562,3 +562,9 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Test environment: Microsoft Windows 10 IoT Enterprise LTSC 10.0.19044 x64, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 under `.local/gradle-home`, Kotlin 2.4.10. Fonts: Sarasa Mono TC 1.0.43 (vendor SHA-256 `4e5fe59e2437f5de25e745565904e46a915d368d3fef8f1285f4032b239193df` for the archive) and Maple Mono NF 7.9 (vendor SHA-256 `59098b87c895d871635d37680e88000ae2b2b25b55428195b228ec589e35fb89`), both SIL OFL 1.1, installed per-user only.
 - Test report: `build\reports\tests\test\index.html`; XML results under `build\test-results\test\`; render proofs at `build\reports\font-fallback-latin-primary.png` and `build\reports\font-fallback-default.png`.
 - Remaining unverified scope: the Windows console reported the boxes in a live SSH session and that exact fastfetch/MOTD output was not reproduced here (no credentials are used by the agent), so the evidence is the offscreen render plus the font-coverage measurements; a fallback run keeps its own ascent/descent and can sit a pixel or two off the primary baseline; per-user font persistence across a logoff/logon was not re-checked; and no Nerd Font is bundled with the application, so another machine still needs one installed for icons.
+
+### 2026-10-27 font fallback push
+
+- Commands: `git push origin main`.
+- Result: pushed `d598acf..fcb7521` (2 commits: `f9e57a1` per-run terminal font fallback, `fcb7521` handoff) to `origin/main`; the working tree is clean and `main` is in sync with `origin/main` afterwards at 2026-10-27T15:39+08:00.
+- Not re-run for the push: no code changed after the validated `243 tests / 0 failures / 16 skipped` run recorded above; only documentation was added.
