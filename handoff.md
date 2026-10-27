@@ -669,3 +669,9 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Test environment: Microsoft Windows 10 IoT Enterprise LTSC 10.0.19044 x64, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 under `.local/gradle-home`, Kotlin 2.4.10.
 - Artifacts: `build\reports\tests\test\index.html`; XML results under `build\test-results\test\`; dialog render at `build\reports\hosts-dialog.png`.
 - Remaining unverified scope: the Remark field is single-line and has no length limit beyond SQLite's TEXT; the migration test simulates a v4 database by dropping the column rather than restoring a real v4 file; the real `%LOCALAPPDATA%\eyeShell\eyeshell.db` (currently v4) has not been opened by the new build yet, so its in-place upgrade will happen on the owner's next launch.
+
+### 2026-10-27 host remark push
+
+- Commands: `git push origin main`.
+- Result: pushed `893d36b..12090ae` (2 commits: `bd22a4d` Remark column and schema v5, `12090ae` handoff) to `origin/main`; the working tree is clean and `main` is in sync with `origin/main` afterwards at 2026-10-27T20:47+08:00.
+- Not re-run for the push: no code changed after the validated `268 tests / 0 failures / 17 skipped` run; only documentation was added.
