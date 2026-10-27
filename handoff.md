@@ -537,3 +537,10 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Commands: `git add build.gradle.kts src/test/kotlin/... handoff.md`; `git commit`.
 - Result: committed the two test-isolation fixes, the `jar`-based Windows portable ZIP, and these handoff updates on top of `42302de`; the working tree is clean afterwards and `main` is ahead of `origin/main`.
 - Not re-run for the commit: no runtime behaviour changed after the validated `232 tests / 0 failures / 15 skipped` run and `jpackagePortable` recorded above.
+
+### 2026-10-27 Windows session push
+
+- Commands: `git push origin main`.
+- Result: pushed `42302de..4773478` (2 commits: `111bd14` test isolation and the `jar`-based portable ZIP, `4773478` handoff) to `origin/main`; the working tree is clean and `main` is in sync with `origin/main` afterwards at 2026-10-27T11:54+08:00.
+- Not re-run for the push: no code changed after the validated `232 tests / 0 failures / 15 skipped` run recorded above; only documentation was added.
+- Windows packaging on this push: only the app image and the portable ZIP were built. MSI generation was not attempted because it requires the WiX toolset.
