@@ -3,6 +3,7 @@ package io.github.sawaichi9527.eyeshell.terminal
 import com.jediterm.terminal.util.CharUtils
 import java.awt.Font
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -27,12 +28,24 @@ class TerminalFontFallbackTest {
     fun `Linux and macOS keep their own CJK and emoji families`() {
         val linux = TerminalFallbackFonts.fallbackFamilies("Linux")
         assertTrue(linux.indexOf("Maple Mono NF") < linux.indexOf("Noto Sans Mono CJK TC"))
-        assertTrue(linux.indexOf("Noto Sans Mono CJK TC") < linux.indexOf("Noto Color Emoji"))
-        assertTrue(linux.indexOf("Noto Sans Symbols 2") < linux.indexOf("DejaVu Sans"))
+        assertTrue(linux.indexOf("Noto Sans Mono CJK TC") < linux.indexOf("Noto Sans Symbols2"))
+        assertTrue(linux.indexOf("Noto Sans Symbols2") < linux.indexOf("DejaVu Sans"))
 
         val mac = TerminalFallbackFonts.fallbackFamilies("Mac OS X")
         assertTrue(mac.indexOf("Maple Mono NF") < mac.indexOf("Hiragino Sans"))
         assertTrue(mac.indexOf("Hiragino Sans") < mac.indexOf("Apple Color Emoji"))
+    }
+
+    @Test
+    fun `Linux never offers a color bitmap emoji font that Java2D cannot paint`() {
+        // Noto Color Emoji is CBDT: Java2D reports canDisplay for it but draws zero pixels, so
+        // choosing it would make emoji disappear instead of falling through to a monochrome font.
+        val linux = TerminalFallbackFonts.fallbackFamilies("Linux")
+
+        assertFalse(linux.contains("Noto Color Emoji"))
+        assertFalse(linux.contains("Noto Color Emoji "), "family names must match the installed spelling")
+        assertTrue(linux.contains("Noto Sans Symbols2"))
+        assertFalse(linux.contains("Noto Sans Symbols 2"), "the installed family name has no space")
     }
 
     @Test

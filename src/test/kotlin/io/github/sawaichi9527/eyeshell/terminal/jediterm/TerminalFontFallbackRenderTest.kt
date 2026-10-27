@@ -20,19 +20,24 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable
 /**
  * Opt-in render proof that the per-run fallback fonts actually paint glyphs the primary font lacks.
  *
- * Two images are produced: one with a deliberately Latin-only primary font (Consolas) and one with
- * the application's resolved default font. Run with `EYESHELL_TEST_FONT_RENDER=1`; the PNGs land in
+ * Two images are produced: one with a deliberately Latin-only primary font and one with the
+ * application's resolved default font. Run with `EYESHELL_TEST_FONT_RENDER=1`; the PNGs land in
  * `build/reports/` for visual inspection because "the box is gone" is a pixel question, not an
  * assertion.
+ *
+ * The Latin-only primary font is looked up per platform (Consolas on Windows, DejaVu Sans Mono or
+ * Liberation Mono elsewhere) so the diagnostic does not abort merely because the build host is not
+ * Windows.
  */
 class TerminalFontFallbackRenderTest {
     @Test
     @EnabledIfEnvironmentVariable(named = "EYESHELL_TEST_FONT_RENDER", matches = "1")
     fun `renders CJK, emoji, and Nerd Font icons through fallback fonts`() {
         val installed = GraphicsEnvironment.getLocalGraphicsEnvironment().availableFontFamilyNames.toSet()
-        assumeTrue(installed.contains("Consolas"), "Consolas is required to model a Latin-only primary font")
+        val latinOnly = LATIN_ONLY_PRIMARY_FONTS.firstOrNull(installed::contains)
+        assumeTrue(latinOnly != null, "A Latin-only monospace font is required to model font fallback")
 
-        render(Font("Consolas", Font.PLAIN, 16), Path.of("build", "reports", "font-fallback-latin-primary.png"))
+        render(Font(latinOnly, Font.PLAIN, 16), Path.of("build", "reports", "font-fallback-latin-primary.png"))
         render(TerminalTypography.defaultFont(), Path.of("build", "reports", "font-fallback-default.png"))
     }
 
@@ -99,6 +104,9 @@ class TerminalFontFallbackRenderTest {
     }
 
     private companion object {
+        /** Latin-only monospace families, in the order a build host is likely to have them. */
+        val LATIN_ONLY_PRIMARY_FONTS = listOf("Consolas", "DejaVu Sans Mono", "Liberation Mono", "Menlo")
+
         const val SCRIPT = "ASCII Applications\r\n" +
             "\uF015 \uF17C \uF303 \uE0B0 \uE0A0\r\n" +
             "CJK 中文測試 臺裡\r\n" +

@@ -55,9 +55,13 @@ internal object TerminalFallbackFonts {
         "Noto Sans Mono CJK SC",
         "Noto Sans CJK TC",
         "Noto Sans CJK SC",
-        "Noto Color Emoji",
+        // Emoji coverage must come from a monochrome font. Java2D cannot rasterize color bitmap
+        // fonts, and `Noto Color Emoji` is CBDT, so selecting it paints no pixels at all — worse
+        // than leaving the glyph uncovered. `Noto Emoji` and `Noto Sans Symbols2` are the
+        // monochrome alternatives, and their family names are exactly as installed (`Symbols2`
+        // has no space, unlike the fontconfig display name).
         "Noto Emoji",
-        "Noto Sans Symbols 2",
+        "Noto Sans Symbols2",
         "Noto Sans Symbols",
         "Symbola",
         "DejaVu Sans",
