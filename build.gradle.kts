@@ -58,6 +58,14 @@ tasks.test {
     useJUnitPlatform()
 }
 
+tasks.processResources {
+    val buildVersion = version.toString()
+    inputs.property("eyeshellBuildVersion", buildVersion)
+    filesMatching("eyeshell-build.properties") {
+        expand("version" to buildVersion)
+    }
+}
+
 val jpackageTool = "${System.getProperty("java.home")}/bin/jpackage"
 val jarTool = "${System.getProperty("java.home")}/bin/jar"
 val packageVersion = version.toString().substringBefore('-')

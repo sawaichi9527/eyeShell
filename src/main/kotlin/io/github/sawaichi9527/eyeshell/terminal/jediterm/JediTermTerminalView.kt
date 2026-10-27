@@ -28,11 +28,8 @@ class JediTermTerminalView(
     maxRefreshRate: Int = EyeShellTerminalSettings.MAX_REFRESH_RATE,
     font: java.awt.Font = TerminalTypography.defaultFont(),
 ) : TerminalView {
-    private val widget = EyeShellTerminalWidget(
-        columns,
-        rows,
-        EyeShellTerminalSettings(scrollbackLines, maxRefreshRate, font),
-    )
+    private val settings = EyeShellTerminalSettings(scrollbackLines, maxRefreshRate, font)
+    private val widget = EyeShellTerminalWidget(columns, rows, settings)
     private val searchController = JediTermSearchController(widget)
     private val highlightController = JediTermHighlightController(widget)
     private val contextActionProvider = ContextActionProvider(widget, searchController::show)
@@ -121,6 +118,9 @@ class JediTermTerminalView(
     internal val selection
         get() = widget.terminalPanel.selection
 
+    internal val fontSize: Float
+        get() = settings.font.size2D
+
     internal val isRetainedMainSelection: Boolean
         get() = widget.terminalPanel.isRetainedMainSelection
 
@@ -135,6 +135,13 @@ class JediTermTerminalView(
 
     internal fun awaitHighlightTermination(timeout: Long, unit: java.util.concurrent.TimeUnit): Boolean =
         highlightController.awaitTermination(timeout, unit)
+
+    override fun setFontSize(size: Float) {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal font changes must happen on the Swing EDT" }
+        require(size > 0f) { "Terminal font size must be positive" }
+        settings.font = settings.font.deriveFont(size)
+        (widget.terminalPanel as EyeShellTerminalPanel).refreshFont()
+    }
 
     override fun close() {
         highlightController.close()
@@ -228,8 +235,11 @@ private class SessionTtyConnector(
 internal class EyeShellTerminalSettings(
     private val scrollbackLines: Int = MAX_SCROLLBACK_LINES,
     private val refreshRate: Int = MAX_REFRESH_RATE,
-    private val font: java.awt.Font = TerminalTypography.defaultFont(),
+    font: java.awt.Font = TerminalTypography.defaultFont(),
 ) : DefaultSettingsProvider() {
+    /** Mutable so the Settings dialog can change the size of a live terminal. */
+    var font: java.awt.Font = font
+
     override fun audibleBell(): Boolean = false
 
     override fun getTerminalFont(): java.awt.Font = font

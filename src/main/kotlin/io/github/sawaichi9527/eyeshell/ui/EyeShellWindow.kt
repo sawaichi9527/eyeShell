@@ -2,6 +2,8 @@ package io.github.sawaichi9527.eyeshell.ui
 
 import io.github.sawaichi9527.eyeshell.monitor.MonitorSampler
 import io.github.sawaichi9527.eyeshell.monitor.MonitorSnapshot
+import io.github.sawaichi9527.eyeshell.platform.AppInfo
+import io.github.sawaichi9527.eyeshell.platform.AppSettings
 import io.github.sawaichi9527.eyeshell.ssh.HostSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
@@ -46,15 +48,18 @@ class EyeShellWindow(
     hostsAction: ((EyeShellWindow) -> Unit)? = null,
     commandsController: CommandsController? = null,
     private val closeAction: () -> Unit = {},
-) : JFrame("eyeShell") {
+    appSettings: AppSettings = AppSettings.inMemory(),
+) : JFrame(AppInfo.windowTitle) {
     private val closed = AtomicBoolean()
     private val pagesByComponent = mutableMapOf<JComponent, TerminalSessionPage>()
+    private val settingsController = SettingsController(appSettings) { size -> applyTerminalFontSize(size) }
     private val workbench: WorkbenchPanel = WorkbenchPanel(
         connectAction = connectAction?.let { action -> { action(this) } },
         hostsAction = hostsAction?.let { action -> { action(this) } },
         commandsController = commandsController,
         monitorSelectionChanged = { component -> bindMonitorFor(component) },
         sftpSelectionChanged = { component -> bindSftpFor(component) },
+        onOpenSettings = { settingsController.open(this) },
     )
     private var initialized = false
 
@@ -195,13 +200,24 @@ class EyeShellWindow(
         workbench.setConnectionState(message, connecting)
     }
 
+    /** Applies the Settings font size to every open session; new sessions read it from the factory. */
+    private fun applyTerminalFontSize(size: Float) {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal font changes must happen on the Swing EDT" }
+        pagesByComponent.values.toList().forEach { page -> page.applyFontSize(size) }
+    }
+
     override fun dispose() {
         if (!closed.compareAndSet(false, true)) return
         var failure: Throwable? = null
         try {
-            workbench.closeSessions()
+            settingsController.close()
         } catch (error: Throwable) {
             failure = error
+        }
+        try {
+            workbench.closeSessions()
+        } catch (error: Throwable) {
+            failure = accumulateFailure(failure, error)
         }
         try {
             closeAction()
@@ -244,6 +260,8 @@ internal class TerminalSessionPage(
         getAccessibleContext().accessibleName = "Terminal workspace"
         add(terminalView.component, BorderLayout.CENTER)
     }
+
+    fun applyFontSize(size: Float) = terminalView.setFontSize(size)
 
     /**
      * Opens the SFTP subsystem off the EDT and reports either the controller or the reason it
@@ -440,6 +458,7 @@ class WorkbenchPanel(
     commandsController: CommandsController? = null,
     monitorSelectionChanged: ((Component) -> Unit)? = null,
     sftpSelectionChanged: ((Component?) -> Unit)? = null,
+    onOpenSettings: (() -> Unit)? = null,
 ) : JPanel(BorderLayout()) {
     private val canConnect = connectAction != null
     private val sessionTabs = JTabbedPane(JTabbedPane.TOP).apply {
@@ -449,7 +468,7 @@ class WorkbenchPanel(
     private val sessions = linkedMapOf<Component, SessionTab>()
     private val emptySession = createEmptySession()
     private var connecting = false
-    private val monitorPanel = MonitorPanel()
+    private val monitorPanel = MonitorPanel(onOpenSettings = onOpenSettings)
     private val onMonitorSelectionChanged = monitorSelectionChanged
     private val onSftpSelectionChanged = sftpSelectionChanged
     private val connectionStatus = JLabel("Not connected").apply {

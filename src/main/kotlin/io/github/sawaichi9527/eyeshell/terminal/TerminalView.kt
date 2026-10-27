@@ -36,6 +36,12 @@ interface TerminalView : AutoCloseable {
     fun setHighlightRules(rules: List<TerminalHighlightRule>)
 
     fun clearScrollback()
+
+    /**
+     * Applies a new terminal font size in points. Views that cannot re-flow their cell grid keep
+     * their current size; the JediTerm view reinitialises its metrics and resizes the PTY.
+     */
+    fun setFontSize(size: Float) = Unit
 }
 
 fun interface TerminalOutputSnapshot {

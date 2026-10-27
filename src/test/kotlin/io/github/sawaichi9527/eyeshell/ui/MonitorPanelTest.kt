@@ -282,6 +282,37 @@ class MonitorPanelTest {
         }
     }
 
+    @Test
+    fun `the monitor header exposes a right-aligned settings entry point`() {
+        SwingUtilities.invokeAndWait {
+            var opened = 0
+            val panel = MonitorPanel(onOpenSettings = { opened++ })
+            val button = findByName(panel, "monitorSettingsButton") as javax.swing.JButton
+
+            assertTrue(button.isEnabled)
+            assertNotNull(button.icon)
+            assertEquals("Settings", button.toolTipText)
+
+            val header = button.parent as Container
+            val layout = header.layout as java.awt.BorderLayout
+            assertTrue(layout.getLayoutComponent(java.awt.BorderLayout.EAST) === button)
+            assertTrue(layout.getLayoutComponent(java.awt.BorderLayout.WEST) is javax.swing.JLabel)
+
+            button.doClick()
+            assertEquals(1, opened)
+        }
+    }
+
+    @Test
+    fun `the settings entry point stays disabled when nothing is wired`() {
+        SwingUtilities.invokeAndWait {
+            val panel = MonitorPanel()
+            val button = findByName(panel, "monitorSettingsButton") as javax.swing.JButton
+
+            assertFalse(button.isEnabled)
+        }
+    }
+
     private fun collectLabelSizes(container: Container): Map<String, Float> {
         val sizes = mutableMapOf<String, Float>()
         container.components.forEach { component ->

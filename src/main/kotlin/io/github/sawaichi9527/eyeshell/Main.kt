@@ -7,6 +7,8 @@ import io.github.sawaichi9527.eyeshell.platform.DesktopSession
 import io.github.sawaichi9527.eyeshell.platform.EyeShellPaths
 import io.github.sawaichi9527.eyeshell.platform.LaunchStrategy
 import io.github.sawaichi9527.eyeshell.platform.SafeMode
+import io.github.sawaichi9527.eyeshell.platform.AppSettings
+import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
 import io.github.sawaichi9527.eyeshell.secrets.SystemPasswordCredentialStore
 import io.github.sawaichi9527.eyeshell.secrets.ProfileCredentialGuard
 import io.github.sawaichi9527.eyeshell.secrets.SessionPasswordCache
@@ -47,6 +49,7 @@ fun main(arguments: Array<String>) {
             sessionPasswords = sessionPasswords,
         )
         val catalog = SqliteHostCatalog(EyeShellPaths.catalogDatabaseFile())
+        val appSettings = AppSettings.load(EyeShellPaths.settingsFile())
         val commandsController = CommandsController(catalog)
         val hostCatalogController = HostCatalogController(
             catalog,
@@ -60,11 +63,13 @@ fun main(arguments: Array<String>) {
                 JediTermTerminalView(
                     scrollbackLines = safeMode.scrollbackLines,
                     maxRefreshRate = safeMode.maxRefreshRate,
+                    font = TerminalTypography.resolveFont(size = appSettings.terminalFontSize.toFloat()),
                 )
             },
             connectAction = { owner -> connectionController.connect(owner) },
             hostsAction = hostCatalogController::open,
             commandsController = commandsController,
+            appSettings = appSettings,
             closeAction = {
                 commandsController.close()
                 hostCatalogController.close()

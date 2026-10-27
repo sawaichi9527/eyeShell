@@ -16,6 +16,10 @@ class EyeShellPathsTest {
             temporaryDirectory.resolve("eyeShell/known_hosts"),
             EyeShellPaths.resolveKnownHostsFile("Linux", "/home/user", null, temporaryDirectory.toString()),
         )
+        assertEquals(
+            temporaryDirectory.resolve("eyeShell/settings.properties"),
+            EyeShellPaths.resolveSettingsFile("Linux", "/home/user", null, temporaryDirectory.toString()),
+        )
     }
 
     @Test

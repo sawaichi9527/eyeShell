@@ -17,7 +17,28 @@ object EyeShellPaths {
         xdgDataHome = System.getenv("XDG_DATA_HOME"),
     )
 
+    fun settingsFile(): Path = resolveSettingsFile(
+        osName = System.getProperty("os.name"),
+        userHome = System.getProperty("user.home"),
+        appData = System.getenv("APPDATA"),
+        xdgConfigHome = System.getenv("XDG_CONFIG_HOME"),
+    )
+
+    internal fun resolveSettingsFile(
+        osName: String,
+        userHome: String,
+        appData: String?,
+        xdgConfigHome: String?,
+    ): Path = configDirectory(osName, userHome, appData, xdgConfigHome).resolve("settings.properties")
+
     internal fun resolveKnownHostsFile(
+        osName: String,
+        userHome: String,
+        appData: String?,
+        xdgConfigHome: String?,
+    ): Path = configDirectory(osName, userHome, appData, xdgConfigHome).resolve("known_hosts")
+
+    private fun configDirectory(
         osName: String,
         userHome: String,
         appData: String?,
@@ -30,7 +51,7 @@ object EyeShellPaths {
             xdgConfigHome?.takeIf(String::isNotBlank)?.let(Path::of)?.takeIf(Path::isAbsolute)
                 ?: Path.of(userHome, ".config")
         }
-        return baseDirectory.resolve(APP_DIRECTORY).resolve("known_hosts")
+        return baseDirectory.resolve(APP_DIRECTORY)
     }
 
     internal fun resolveCatalogDatabaseFile(

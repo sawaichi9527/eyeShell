@@ -11,17 +11,25 @@ import java.awt.Component
 import java.awt.Cursor
 import java.awt.Dimension
 import java.awt.Font
+import java.awt.Graphics
+import java.awt.Graphics2D
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
 import java.awt.Rectangle
+import java.awt.RenderingHints
 import java.awt.Toolkit
 import java.awt.datatransfer.StringSelection
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.awt.geom.Area
+import java.awt.geom.Ellipse2D
+import java.awt.geom.Path2D
 import java.text.DecimalFormat
 import javax.swing.BorderFactory
 import javax.swing.Box
+import javax.swing.Icon
+import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JLabel
@@ -46,7 +54,9 @@ import javax.swing.table.DefaultTableModel
  * filesystem, and process sections. Every update rebuilds the grid so no stale value can survive
  * a snapshot that no longer carries that metric.
  */
-class MonitorPanel : JPanel(BorderLayout()) {
+class MonitorPanel(
+    private val onOpenSettings: (() -> Unit)? = null,
+) : JPanel(BorderLayout()) {
     private val content = ScrollableContent()
     private val contentScroll = JScrollPane(content).apply {
         name = "monitorScroll"
@@ -387,13 +397,68 @@ class MonitorPanel : JPanel(BorderLayout()) {
     }
 
     private fun addTitle(row: Int): Int {
-        content.add(
+        val header = JPanel(BorderLayout()).apply {
+            name = "monitorHeader"
+            isOpaque = false
+        }
+        header.add(
             JLabel("Monitor").apply {
                 font = titleFont()
             },
+            BorderLayout.WEST,
+        )
+        header.add(createSettingsButton(), BorderLayout.EAST)
+        content.add(
+            header,
             constraints(gridx = 0, gridy = row, gridwidth = 2, weightx = 1.0, fill = GridBagConstraints.HORIZONTAL),
         )
         return row + 1
+    }
+
+    private fun createSettingsButton(): JButton = JButton(GearIcon(GEAR_ICON_SIZE)).apply {
+        name = "monitorSettingsButton"
+        toolTipText = "Settings"
+        accessibleContext.accessibleName = "Settings"
+        isFocusable = false
+        isContentAreaFilled = false
+        isBorderPainted = false
+        isOpaque = false
+        margin = Insets(0, 2, 0, 0)
+        cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+        isEnabled = onOpenSettings != null
+        addActionListener { onOpenSettings?.invoke() }
+    }
+
+    private class GearIcon(private val diameter: Int) : Icon {
+        override fun getIconWidth(): Int = diameter
+
+        override fun getIconHeight(): Int = diameter
+
+        override fun paintIcon(component: Component?, graphics: Graphics, x: Int, y: Int) {
+            val g = graphics.create() as Graphics2D
+            try {
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g.color = component?.foreground ?: Color.GRAY
+                val centerX = x + diameter / 2.0
+                val centerY = y + diameter / 2.0
+                val outer = diameter * 0.48
+                val root = diameter * 0.34
+                val teeth = Path2D.Double()
+                repeat(TEETH * 2) { index ->
+                    val angle = Math.PI * index / TEETH
+                    val radius = if (index % 2 == 0) outer else root
+                    val pointX = centerX + radius * Math.cos(angle)
+                    val pointY = centerY + radius * Math.sin(angle)
+                    if (index == 0) teeth.moveTo(pointX, pointY) else teeth.lineTo(pointX, pointY)
+                }
+                teeth.closePath()
+                val hole = Ellipse2D.Double(centerX - diameter * 0.16, centerY - diameter * 0.16, diameter * 0.32, diameter * 0.32)
+                val shape = Area(teeth).apply { subtract(Area(hole)) }
+                g.fill(shape)
+            } finally {
+                g.dispose()
+            }
+        }
     }
 
     private fun addSeparator(row: Int): Int {
@@ -705,6 +770,8 @@ class MonitorPanel : JPanel(BorderLayout()) {
         private const val THIN_SCROLLBAR_WIDTH = 9
         private const val COPY_FEEDBACK_MILLIS = 1200
         private const val EMPTY_VALUE = "—"
+        private const val GEAR_ICON_SIZE = 14
+        private const val TEETH = 8
         private const val TOP_SPACER_HEIGHT = 6
         private val CPU_COLOR = Color(0x4C9AFF)
         private val MEMORY_COLOR = Color(0xB08CFF)

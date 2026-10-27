@@ -42,6 +42,21 @@ class JediTermTerminalViewTest {
     }
 
     @Test
+    fun `font size changes re-flow the terminal on the EDT only`() {
+        val view = onEdt { JediTermTerminalView(columns = 80, rows = 24) }
+
+        try {
+            assertEquals(TerminalTypography.DEFAULT_FONT_SIZE, view.fontSize)
+
+            onEdt { view.setFontSize(20f) }
+
+            assertEquals(20f, view.fontSize)
+        } finally {
+            onEdt { view.close() }
+        }
+    }
+
+    @Test
     fun `safe mode lowers the scrollback and max refresh rate`() {
         val settings = EyeShellTerminalSettings(
             scrollbackLines = SafeMode.SAFE_SCROLLBACK_LINES,

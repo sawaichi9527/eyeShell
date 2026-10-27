@@ -37,6 +37,9 @@ internal class EyeShellTerminalPanel(
 ) : TerminalPanel(settingsProvider, terminalTextBuffer, styleState) {
     private val fallback = TerminalFontFallback()
 
+    /** Re-reads the terminal font from the settings provider and re-flows the cell grid. */
+    internal fun refreshFont() = reinitFontAndResize()
+
     override fun getFontToDisplay(text: CharArray, start: Int, end: Int, style: TextStyle): Font =
         fallback.resolve(super.getFontToDisplay(text, start, end, style), text, start, end)
 }
