@@ -6,6 +6,7 @@ import io.github.sawaichi9527.eyeshell.terminal.jediterm.JediTermTerminalView
 import io.github.sawaichi9527.eyeshell.platform.DesktopSession
 import io.github.sawaichi9527.eyeshell.platform.EyeShellPaths
 import io.github.sawaichi9527.eyeshell.platform.LaunchStrategy
+import io.github.sawaichi9527.eyeshell.platform.LoggingSetup
 import io.github.sawaichi9527.eyeshell.platform.SafeMode
 import io.github.sawaichi9527.eyeshell.platform.AppSettings
 import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
@@ -20,6 +21,7 @@ import io.github.sawaichi9527.eyeshell.ui.SshConnectionController
 import javax.swing.SwingUtilities
 
 fun main(arguments: Array<String>) {
+    LoggingSetup.apply()
     val safeMode = SafeMode.detect(
         arguments,
         EyeShellTerminalSettings.MAX_SCROLLBACK_LINES,
