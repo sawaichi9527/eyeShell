@@ -604,6 +604,12 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Result: The packaged build connected to a real SSH host and the owner exercised the terminal, the Monitor sidebar, SFTP, and reconnect (exit followed by Enter). This closes the "the package only launches" gap recorded for the 0.1.0/0.1.1 builds: the bundled `runtime/` and the `app/` classpath are sufficient for a real session on Windows, not just for starting the window.
 - Not covered by this report: the saved-password path through Windows Credential Manager (the packaged run used the existing host profile), jump hosts, keyboard-interactive prompts, and MSI installation. Those remain listed under Known Issues / Deferred.
 
+### 2026-10-27 packaged-build live-session record push
+
+- Commands: `git push origin main`.
+- Result: pushed `6b95d8c..275a5ac` (`275a5ac` records the owner's live session on the packaged 0.1.1 build) to `origin/main`; the working tree is clean and `main` is in sync with `origin/main` afterwards at 2026-10-27T17:11+08:00.
+- Not re-run: documentation only; no code changed since the validated `243 tests / 0 failures / 16 skipped` run.
+
 ### 2026-10-27 0.1.1 package push
 
 - Commands: `git push origin main`; `Remove-Item build\package\eyeShell-0.1.0.zip`.
