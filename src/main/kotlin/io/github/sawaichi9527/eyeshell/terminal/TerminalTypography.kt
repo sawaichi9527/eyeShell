@@ -26,7 +26,10 @@ object TerminalTypography {
 
     private val COMMON_FAMILIES = listOf(
         "Sarasa Mono TC",
+        "等距更紗黑體 TC",
         "Sarasa Mono SC",
+        "等距更纱黑体 SC",
+        "Maple Mono NF CN",
         "Noto Sans Mono CJK TC",
         "Noto Sans Mono CJK SC",
     )
@@ -87,9 +90,14 @@ object TerminalTypography {
     /** One resolved font shared by every terminal view created without an explicit font. */
     fun defaultFont(): Font = sharedDefaultFont
 
-    fun installedFamilies(): Set<String> = try {
-        GraphicsEnvironment.getLocalGraphicsEnvironment().availableFontFamilyNames.toSet()
-    } catch (_: Throwable) {
-        emptySet()
+    /** Installed families, enumerated once: fonts installed while the app runs apply after a restart. */
+    fun installedFamilies(): Set<String> = installedFamiliesCache
+
+    private val installedFamiliesCache: Set<String> by lazy {
+        try {
+            GraphicsEnvironment.getLocalGraphicsEnvironment().availableFontFamilyNames.toSet()
+        } catch (_: Throwable) {
+            emptySet()
+        }
     }
 }

@@ -28,7 +28,7 @@ class JediTermTerminalView(
     maxRefreshRate: Int = EyeShellTerminalSettings.MAX_REFRESH_RATE,
     font: java.awt.Font = TerminalTypography.defaultFont(),
 ) : TerminalView {
-    private val widget = JediTermWidget(
+    private val widget = EyeShellTerminalWidget(
         columns,
         rows,
         EyeShellTerminalSettings(scrollbackLines, maxRefreshRate, font),
