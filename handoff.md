@@ -645,6 +645,12 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Artifacts: `build\reports\tests\test\index.html`; XML results under `build\test-results\test\`; probes under `%TEMP%\opencode\enc-default.txt` and `enc-fixed.txt`.
 - Remaining unverified scope: the fix covers the JUL prefix only; a message that itself contains non-ASCII text still depends on the console code page. The console was not re-checked inside the owner's own `cmd.exe` window (the probe reproduced the same code page instead). The MINA `Executor has been shut down` line printed when the window closes during an in-flight task is unrelated and still present.
 
+### 2026-10-27 console logging push
+
+- Commands: `git push origin main`.
+- Result: pushed `8395af8..4b2706e` (2 commits: `d419163` ASCII console log prefix, `4b2706e` handoff) to `origin/main`; the working tree is clean and `main` is in sync with `origin/main` afterwards at 2026-10-27T20:18+08:00.
+- Not re-run for the push: no code changed after the validated `267 tests / 0 failures / 17 skipped` run; only documentation was added.
+
 ### 2026-10-27 UI work push
 
 - Commands: `git push origin main`.
