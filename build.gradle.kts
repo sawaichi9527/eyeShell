@@ -59,6 +59,7 @@ tasks.test {
 }
 
 val jpackageTool = "${System.getProperty("java.home")}/bin/jpackage"
+val jarTool = "${System.getProperty("java.home")}/bin/jar"
 val packageVersion = version.toString().substringBefore('-')
 
 val preparePackageInput by tasks.registering(Sync::class) {
@@ -137,8 +138,9 @@ tasks.register<Exec>("jpackagePortable") {
     outputs.file(portable)
     val archivePath = portable.get().asFile.absolutePath
     if (isWindowsBuild) {
-        commandLine("powershell", "-NoProfile", "-Command",
-            "Compress-Archive -Path '${appImageDir}\\*' -DestinationPath '$archivePath' -Force")
+        // The project-local JDK's jar tool writes the ZIP directly: Windows PowerShell 5.1 is not
+        // permitted, and this keeps packaging free of an external pwsh or shell dependency.
+        commandLine(jarTool, "--create", "--no-manifest", "--file", archivePath, "-C", appImageDir.absolutePath, ".")
     } else {
         commandLine("tar", "-C", appImageDir.absolutePath, "-czf", archivePath, ".")
     }

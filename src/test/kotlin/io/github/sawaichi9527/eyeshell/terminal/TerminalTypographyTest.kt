@@ -63,13 +63,16 @@ class TerminalTypographyTest {
 
     @Test
     fun `resolves a plain font with the requested size`() {
-        val font = TerminalTypography.resolveFont(
-            size = 16f,
-            osName = "Linux",
-            available = setOf("Noto Sans Mono CJK TC"),
+        val available = setOf("Noto Sans Mono CJK TC")
+        assertEquals(
+            "Noto Sans Mono CJK TC",
+            TerminalTypography.resolveFamily(TerminalTypography.preferredFamilies("Linux"), available),
         )
 
-        assertEquals("Noto Sans Mono CJK TC", font.family)
+        val font = TerminalTypography.resolveFont(size = 16f, osName = "Linux", available = available)
+
+        // `Font` maps a family that is not installed on this host to a logical fallback, so the
+        // requested family is asserted through resolveFamily and the font only for style and size.
         assertEquals(Font.PLAIN, font.style)
         assertEquals(16f, font.size2D)
     }

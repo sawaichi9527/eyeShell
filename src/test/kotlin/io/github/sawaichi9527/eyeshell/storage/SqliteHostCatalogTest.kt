@@ -303,14 +303,19 @@ class SqliteHostCatalogTest {
         val created = SqliteHostCatalog(database).use { catalog ->
             catalog.createHost(draft("Windows host", "windows.example"))
         }
-        SqliteHostCatalog(database).use { catalog ->
-            assertEquals(created, catalog.listHosts().single())
-        }
-        assertTrue(Files.isRegularFile(database))
         try {
-            Files.deleteIfExists(database)
-            Files.deleteIfExists(database.resolveSibling("${database.fileName}-journal"))
-        } catch (_: Exception) {
+            SqliteHostCatalog(database).use { catalog ->
+                assertEquals(created, catalog.listHosts().firstOrNull { it.profileId == created.profileId })
+            }
+            assertTrue(Files.isRegularFile(database))
+        } finally {
+            // The Windows data path can hold real Saved Hosts: remove only the row created here and
+            // never delete the catalog file or its journal sidecars.
+            SqliteHostCatalog(database).use { catalog ->
+                catalog.listHosts()
+                    .filter { it.profileId == created.profileId }
+                    .forEach { catalog.deleteHost(it.id) }
+            }
         }
     }
 
