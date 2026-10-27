@@ -11,7 +11,10 @@ class MonitorCommandsTest {
         val command = MonitorCommands.sample()
 
         assertFalse(command.contains(MonitorCommands.SECTION_DELIMITER), "A raw form feed never survives the remote shell")
-        assertEquals(6, command.split(MonitorCommands.DELIMITER_COMMAND).size - 1)
+        assertEquals(
+            MonitorCommands.SAMPLE_SECTIONS.size - 1,
+            command.split(MonitorCommands.DELIMITER_COMMAND).size - 1,
+        )
     }
 
     @Test
@@ -22,6 +25,7 @@ class MonitorCommandsTest {
         listOf("/proc/stat", "/proc/meminfo", "/proc/loadavg", "/proc/net/dev", "df -P", "ps -eo", "ip -o -4 addr").forEach { section ->
             assertTrue(command.contains(section), "Missing sample section $section")
         }
+        assertTrue(command.contains("printf '# %s '"), "Missing the per-process CPU-time section")
     }
 
     @Test

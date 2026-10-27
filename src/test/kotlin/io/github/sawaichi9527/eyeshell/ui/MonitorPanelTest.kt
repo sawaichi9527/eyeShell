@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -96,6 +97,194 @@ class MonitorPanelTest {
             assertEquals("daemon", table.getValueAt(0, 0))
             assertEquals("512.0 MB", table.getValueAt(0, 1))
             assertEquals("4.5%", table.getValueAt(0, 2))
+        }
+    }
+
+    @Test
+    fun `long process names widen the table and expose a horizontal scrollbar`() {
+        SwingUtilities.invokeAndWait {
+            val panel = MonitorPanel()
+            val longName = "a-really-long-process-name-that-does-not-fit-the-sidebar"
+            panel.update(
+                MonitorSnapshot(
+                    processes = listOf(
+                        ProcessUsage(1, longName, 512L * 1024 * 1024, 4.5),
+                        ProcessUsage(2, "sshd", 12L * 1024 * 1024, 0.1),
+                    ),
+                ),
+            )
+
+            val table = findTable(panel) ?: error("No process table in the monitor panel")
+            assertEquals(
+                javax.swing.JTable.AUTO_RESIZE_OFF,
+                table.autoResizeMode,
+                "Content-sized columns require AUTO_RESIZE_OFF, otherwise Swing squeezes them back",
+            )
+            val nameWidth = table.columnModel.getColumn(0).preferredWidth
+            val longNameWidth = table.getFontMetrics(table.font).stringWidth(longName)
+            assertTrue(
+                nameWidth >= longNameWidth,
+                "The name column must grow to the longest name (was $nameWidth, needs $longNameWidth)",
+            )
+
+            val scroll = findByName(panel, "monitorProcessScroll") as javax.swing.JScrollPane
+            assertEquals(
+                javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED,
+                scroll.horizontalScrollBarPolicy,
+            )
+            assertEquals(
+                javax.swing.ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER,
+                scroll.verticalScrollBarPolicy,
+                "The whole sidebar still scrolls vertically; the table must not add a second bar",
+            )
+            val bar = findByName(panel, "monitorProcessHorizontalScrollBar") as javax.swing.JScrollBar
+            assertEquals(16, bar.unitIncrement)
+
+            // The rebuild after a sample must keep the same pane, so a horizontal position the user
+            // scrolled to is not thrown away every two seconds.
+            panel.update(MonitorSnapshot(processes = listOf(ProcessUsage(1, longName, 512L * 1024 * 1024, 4.5))))
+            assertSame(scroll, findByName(panel, "monitorProcessScroll"))
+        }
+    }
+
+    @Test
+    fun `a short process list keeps the table at its minimum widths`() {
+        SwingUtilities.invokeAndWait {
+            val panel = MonitorPanel()
+            panel.update(MonitorSnapshot(processes = listOf(ProcessUsage(1, "sshd", 12L * 1024 * 1024, 0.1))))
+
+            val table = findTable(panel) ?: error("No process table in the monitor panel")
+            assertEquals(108, table.columnModel.getColumn(0).preferredWidth)
+            assertEquals(74, table.columnModel.getColumn(1).preferredWidth)
+            assertEquals(48, table.columnModel.getColumn(2).preferredWidth)
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable(
+        named = "EYESHELL_TEST_MONITOR_RENDER",
+        matches = "1",
+    )
+    fun `renders the sidebar with a long process list for visual inspection`() {
+        com.formdev.flatlaf.FlatDarkLaf.setup()
+        SwingUtilities.invokeAndWait {
+            val panel = MonitorPanel()
+            panel.update(
+                MonitorSnapshot(
+                    system = SystemInfo("haruhi-vb1", "6.8.0-147-generic", "Ubuntu 24.04.5 LTS", 178),
+                    cpu = CpuUsage(3.4, 2),
+                    memory = MemoryUsage(8L * 1024 * 1024 * 1024, 1_700L * 1024 * 1024, 21.4),
+                    processes = listOf(
+                        ProcessUsage(1, "gnome-shell", 374L * 1024 * 1024, 2.7),
+                        ProcessUsage(2, "opencode-cli", 319L * 1024 * 1024, 1.1),
+                        ProcessUsage(3, "mutter-x11-frames", 128L * 1024 * 1024, 0.0),
+                        ProcessUsage(4, "xdg-desktop-portal-gnome", 110L * 1024 * 1024, 0.0),
+                        ProcessUsage(5, "MainThread", 106L * 1024 * 1024, 0.0),
+                        ProcessUsage(6, "kworker/u4:0-ext4-rsv-conversion", 101L * 1024 * 1024, 0.0),
+                    ),
+                ),
+            )
+
+            val frame = javax.swing.JFrame().apply {
+                isUndecorated = true
+                contentPane.add(panel)
+                size = java.awt.Dimension(240, 760)
+                addNotify()
+            }
+            try {
+                panel.size = java.awt.Dimension(240, 760)
+                layoutTree(panel)
+                val image = java.awt.image.BufferedImage(240, 760, java.awt.image.BufferedImage.TYPE_INT_RGB)
+                val graphics = image.createGraphics()
+                try {
+                    panel.printAll(graphics)
+                } finally {
+                    graphics.dispose()
+                }
+                val output = java.nio.file.Path.of("build", "reports", "monitor-processes.png")
+                java.nio.file.Files.createDirectories(output.parent)
+                javax.imageio.ImageIO.write(image, "png", output.toFile())
+            } finally {
+                frame.dispose()
+            }
+        }
+    }
+
+    private fun layoutTree(component: Component) {
+        component.doLayout()
+        if (component is Container) component.components.forEach(::layoutTree)
+    }
+
+    @Test
+    fun `a column width dragged by the user survives the next sample`() {
+        SwingUtilities.invokeAndWait {
+            val panel = MonitorPanel()
+            val longName = "a-really-long-process-name-that-does-not-fit-the-sidebar"
+            panel.update(MonitorSnapshot(processes = listOf(ProcessUsage(1, longName, 512L * 1024 * 1024, 4.5))))
+
+            val table = findTable(panel) ?: error("No process table in the monitor panel")
+            val nameColumn = table.columnModel.getColumn(0)
+            val memoryColumn = table.columnModel.getColumn(1)
+            val autoNameWidth = nameColumn.width
+            assertTrue(autoNameWidth > 200, "The first sample sizes the name column from the long name")
+
+            // What a header drag does: the column width changes without the table touching it.
+            memoryColumn.width = 40
+
+            panel.update(
+                MonitorSnapshot(
+                    processes = listOf(
+                        ProcessUsage(1, longName + "-and-even-longer", 512L * 1024 * 1024, 4.5),
+                    ),
+                ),
+            )
+
+            assertEquals(40, memoryColumn.width, "The dragged width must not be overwritten by the next sample")
+            assertEquals(40, memoryColumn.preferredWidth)
+            assertTrue(
+                nameColumn.width > autoNameWidth,
+                "A column the user did not touch keeps auto-fitting wider content",
+            )
+        }
+    }
+
+    @Test
+    fun `double-clicking a column header restores the content width`() {
+        SwingUtilities.invokeAndWait {
+            val panel = MonitorPanel()
+            val longName = "a-really-long-process-name-that-does-not-fit-the-sidebar"
+            panel.update(MonitorSnapshot(processes = listOf(ProcessUsage(1, longName, 512L * 1024 * 1024, 4.5))))
+
+            val table = findTable(panel) ?: error("No process table in the monitor panel")
+            val nameColumn = table.columnModel.getColumn(0)
+            val autoWidth = nameColumn.width
+            assertTrue(autoWidth > 200, "The column must start at its content width")
+
+            nameColumn.width = 80
+            panel.update(MonitorSnapshot(processes = listOf(ProcessUsage(1, longName, 512L * 1024 * 1024, 4.5))))
+            assertEquals(80, nameColumn.width, "The drag is remembered until the user asks for auto-fit")
+
+            val header = table.tableHeader
+            header.size = java.awt.Dimension(400, maxOf(header.preferredSize.height, 20))
+            header.dispatchEvent(
+                java.awt.event.MouseEvent(
+                    header,
+                    java.awt.event.MouseEvent.MOUSE_CLICKED,
+                    System.currentTimeMillis(),
+                    0,
+                    40,
+                    5,
+                    2,
+                    false,
+                    java.awt.event.MouseEvent.BUTTON1,
+                ),
+            )
+
+            assertEquals(autoWidth, nameColumn.width, "A header double-click auto-fits the column again")
+
+            // The override is gone, so the next sample may shrink the column along with the content.
+            panel.update(MonitorSnapshot(processes = listOf(ProcessUsage(1, "sshd", 12L * 1024 * 1024, 0.1))))
+            assertEquals(108, nameColumn.width, "Auto-fit must also clear the stored manual width")
         }
     }
 

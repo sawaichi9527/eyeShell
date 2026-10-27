@@ -43,6 +43,10 @@ import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 import javax.swing.Timer
 import javax.swing.UIManager
+import javax.swing.event.ChangeEvent
+import javax.swing.event.ListSelectionEvent
+import javax.swing.event.TableColumnModelEvent
+import javax.swing.event.TableColumnModelListener
 import javax.swing.table.DefaultTableCellRenderer
 import javax.swing.table.DefaultTableModel
 
@@ -72,11 +76,16 @@ class MonitorPanel(
         }
     }
     private var selectedInterface: String? = null
+    private var applyingProcessColumnWidths = false
+    private val userProcessColumnWidths = HashMap<Int, Int>()
+    private val lastProcessColumnWidths = IntArray(3)
     private var lastSnapshot: MonitorSnapshot? = null
     private val processModel = ReadOnlyTableModel(arrayOf("Name", "Mem", "CPU"))
     private val processTable = JTable(processModel).apply {
         name = "monitorProcessTable"
-        autoResizeMode = JTable.AUTO_RESIZE_ALL_COLUMNS
+        // Columns are measured from their content, so a long process name widens the table and the
+        // horizontal bar below can reveal it instead of the renderer truncating it.
+        autoResizeMode = JTable.AUTO_RESIZE_OFF
         tableHeader.reorderingAllowed = false
         rowSelectionAllowed = false
         cellSelectionEnabled = false
@@ -101,11 +110,66 @@ class MonitorPanel(
         }
     }
 
+    /**
+     * Built once and reused across snapshots: the content grid is rebuilt on every sample, and a
+     * fresh `JScrollPane` would reset the horizontal position while the user is reading a long row.
+     */
+    private val processScrollPane = JScrollPane(processTable).apply {
+        name = "monitorProcessScroll"
+        border = BorderFactory.createEmptyBorder()
+        isOpaque = false
+        viewport.isOpaque = false
+        horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_AS_NEEDED
+        verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER
+        horizontalScrollBar.apply {
+            name = "monitorProcessHorizontalScrollBar"
+            putClientProperty("JScrollBar.showButtons", false)
+            preferredSize = Dimension(0, THIN_SCROLLBAR_WIDTH)
+            unitIncrement = 16
+        }
+    }
+
+    /** Double-clicking a header auto-fits that column again. */
+    private val processHeaderDoubleClickListener = object : MouseAdapter() {
+        override fun mouseClicked(event: MouseEvent) {
+            if (event.clickCount != 2 || event.button != MouseEvent.BUTTON1) return
+            val column = processTable.columnModel.getColumnIndexAtX(event.x)
+            if (column < 0) return
+            autoFitProcessColumn(column)
+            event.consume()
+        }
+    }
+
+    /**
+     * Records a width the user dragged. Swing reports every column-width change as one event with
+     * no column identity, so the width that differs from the last applied value is the one the user
+     * grabbed; [applyingProcessColumnWidths] filters out the changes this class makes itself.
+     */
+    private val processColumnResizeListener = object : TableColumnModelListener {
+        override fun columnAdded(event: TableColumnModelEvent?) = Unit
+        override fun columnRemoved(event: TableColumnModelEvent?) = Unit
+        override fun columnMoved(event: TableColumnModelEvent?) = Unit
+        override fun columnSelectionChanged(event: ListSelectionEvent?) = Unit
+        override fun columnMarginChanged(event: ChangeEvent?) {
+            if (applyingProcessColumnWidths) return
+            for (column in 0 until processTable.columnModel.columnCount) {
+                val width = processTable.columnModel.getColumn(column).width
+                if (width != lastProcessColumnWidths[column]) {
+                    userProcessColumnWidths[column] = width
+                    lastProcessColumnWidths[column] = width
+                }
+            }
+        }
+    }
+
+
     init {
         name = "monitorPanel"
         getAccessibleContext().accessibleName = "Monitor"
         minimumSize = Dimension(190, 0)
         preferredSize = Dimension(230, 0)
+        processTable.columnModel.addColumnModelListener(processColumnResizeListener)
+        processTable.tableHeader.addMouseListener(processHeaderDoubleClickListener)
         content.border = BorderFactory.createEmptyBorder(12, 12, 12, 12)
         add(contentScroll, BorderLayout.CENTER)
         resetToIdle()
@@ -374,18 +438,72 @@ class MonitorPanel(
                 formatPercent(process.cpuPercent),
             ))
         }
+        measureProcessColumns()
         val headerHeight = processTable.tableHeader.preferredSize.height
-        val scrollPane = JScrollPane(processTable).apply {
-            border = BorderFactory.createEmptyBorder()
-            isOpaque = false
-            viewport.isOpaque = false
-            horizontalScrollBarPolicy = ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
-            verticalScrollBarPolicy = ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER
-            preferredSize = Dimension(0, processTable.rowHeight * processModel.rowCount + headerHeight + 2)
-        }.apply {
-            minimumSize = preferredSize
+        processScrollPane.preferredSize = Dimension(
+            0,
+            processTable.rowHeight * processModel.rowCount + headerHeight + THIN_SCROLLBAR_WIDTH + 2,
+        )
+        processScrollPane.minimumSize = processScrollPane.preferredSize
+        return addSpanning(row, processScrollPane, top = 0, bottom = 2)
+    }
+
+    /**
+     * Sizes each process column from the widest string it currently shows. `AUTO_RESIZE_OFF` keeps
+     * that width instead of squeezing the columns into the sidebar, which is what makes the
+     * horizontal scrollbar meaningful; the minimums keep the columns readable when every name is
+     * short.
+     *
+     * A column the user dragged is no longer measured: the width chosen by hand wins for the rest
+     * of the panel's life, otherwise the next sample (about every two seconds) would snap it back.
+     */
+    private fun measureProcessColumns() {
+        val minimums = intArrayOf(PROCESS_NAME_MIN_WIDTH, PROCESS_MEMORY_MIN_WIDTH, PROCESS_CPU_MIN_WIDTH)
+        applyingProcessColumnWidths = true
+        try {
+            for (column in 0 until processTable.columnModel.columnCount) {
+                val applied = userProcessColumnWidths[column] ?: measuredProcessColumnWidth(column, minimums[column])
+                applyProcessColumnWidth(column, applied)
+            }
+        } finally {
+            applyingProcessColumnWidths = false
         }
-        return addSpanning(row, scrollPane, top = 0, bottom = 2)
+    }
+
+    /** Width that fits the column header and every string the column currently shows. */
+    private fun measuredProcessColumnWidth(column: Int, minimum: Int): Int {
+        val metrics = processTable.getFontMetrics(processTable.font)
+        var widest = metrics.stringWidth(processTable.getColumnName(column))
+        for (row in 0 until processModel.rowCount) {
+            val value = processModel.getValueAt(row, column)?.toString().orEmpty()
+            widest = maxOf(widest, metrics.stringWidth(value))
+        }
+        return maxOf(minimum, widest + PROCESS_COLUMN_PADDING)
+    }
+
+    private fun applyProcessColumnWidth(column: Int, width: Int) {
+        processTable.columnModel.getColumn(column).apply {
+            preferredWidth = width
+            this.width = width
+        }
+        lastProcessColumnWidths[column] = width
+    }
+
+    /**
+     * Double-clicking a column header restores that column to its content width, which is the
+     * discoverable way back from a hand-dragged width without restarting the sidebar.
+     */
+    private fun autoFitProcessColumn(column: Int) {
+        val minimums = intArrayOf(PROCESS_NAME_MIN_WIDTH, PROCESS_MEMORY_MIN_WIDTH, PROCESS_CPU_MIN_WIDTH)
+        userProcessColumnWidths.remove(column)
+        applyingProcessColumnWidths = true
+        try {
+            applyProcessColumnWidth(column, measuredProcessColumnWidth(column, minimums[column]))
+        } finally {
+            applyingProcessColumnWidths = false
+        }
+        processScrollPane.revalidate()
+        processScrollPane.repaint()
     }
 
     private fun addTopSpacer(row: Int): Int {
@@ -764,6 +882,10 @@ class MonitorPanel(
         private const val MIB = 1024.0 * 1024.0
         private const val KIB = 1024.0
         private const val MAX_PROCESS_ROWS = 6
+        private const val PROCESS_NAME_MIN_WIDTH = 108
+        private const val PROCESS_MEMORY_MIN_WIDTH = 74
+        private const val PROCESS_CPU_MIN_WIDTH = 48
+        private const val PROCESS_COLUMN_PADDING = 18
         private const val MAX_FILESYSTEM_ROWS = 4
         private const val MAX_MOUNT_CHARS = 14
         private const val LOOPBACK_INTERFACE = "lo"

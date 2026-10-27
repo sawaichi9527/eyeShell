@@ -80,6 +80,43 @@ class MonitorSamplerTest {
         assertTrue(afterClose >= 1)
     }
 
+    @Test
+    fun `process cpu percent comes from the proc stat delta, not the lifetime average`() {
+        val session = ScriptedHostSession(
+            systemInfo = "Linux lab 6.8.0 x86_64 GNU/Linux\n1000\n",
+            samples = listOf(sampleOutputWithCpuTicks(utime = 100, stime = 0), sampleOutputWithCpuTicks(utime = 150, stime = 0)),
+        )
+        val sampler = MonitorSampler(session, interval = Duration.ofMillis(200), backoff = Duration.ofMillis(50))
+        val first = CountDownLatch(1)
+        val second = CountDownLatch(1)
+        val snapshots = mutableListOf<MonitorSnapshot>()
+
+        try {
+            sampler.start { snapshot ->
+                if (snapshot.processes.isNotEmpty()) {
+                    synchronized(snapshots) { snapshots += snapshot }
+                    if (snapshots.size == 1) first.countDown() else second.countDown()
+                }
+            }
+            assertTrue(first.await(5, TimeUnit.SECONDS), "no first snapshot")
+            assertTrue(second.await(5, TimeUnit.SECONDS), "no second snapshot")
+
+            val measured = synchronized(snapshots) { snapshots.take(2) }
+            assertEquals(
+                12.5,
+                measured[0].processes[0].cpuPercent,
+                0.001,
+                "The first sample has no previous CPU time, so the ps average is kept",
+            )
+            assertTrue(
+                measured[1].processes[0].cpuPercent > 100.0,
+                "0.5 s of CPU over a ~0.2 s interval must exceed one core: ${measured[1].processes[0].cpuPercent}",
+            )
+        } finally {
+            sampler.close()
+        }
+    }
+
     private fun sampleOutput(): String = """
         cpu  100 0 100 800 50 0 0 0 0 0
         cpu0 50 0 50 400 25 0 0 0 0 0
@@ -99,11 +136,17 @@ class MonitorSamplerTest {
         ${"\u000C"}1234 204800  12.5 some-daemon
     """.trimIndent()
 
+    /** Same sample as [sampleOutput] plus the per-pid CPU-time section used for instantaneous CPU. */
+    private fun sampleOutputWithCpuTicks(utime: Long, stime: Long): String =
+        sampleOutput() + "\n\u000C# 1234 1234 (some daemon) S 1 1234 1234 0 -1 4194304 300 0 0 0 $utime $stime 0 0 20 0 1 0 100 1000 100"
+
     private class ScriptedHostSession(
         private val systemInfo: String,
         private val sample: String = "",
         private val sampleFails: Boolean = false,
+        private val samples: List<String> = emptyList(),
     ) : HostSession {
+        private var sampleIndex = 0
         private val closed = AtomicBoolean()
 
         override val endpoint: SshEndpoint = SshEndpoint("127.0.0.1", 22, "test")
@@ -112,7 +155,13 @@ class MonitorSamplerTest {
 
         override fun execute(command: String): ExecResult {
             if (sampleFails) throw IllegalStateException("sample failed")
-            val output = if (command.contains("uname")) systemInfo else sample
+            val output = if (command.contains("uname")) {
+                systemInfo
+            } else if (samples.isNotEmpty()) {
+                samples[minOf(sampleIndex++, samples.size - 1)]
+            } else {
+                sample
+            }
             return ExecResult(0, output)
         }
 

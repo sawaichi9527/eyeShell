@@ -189,6 +189,28 @@ class MonitorParsersTest {
     }
 
     @Test
+    fun `parses per-process cpu time from proc stat dumps`() {
+        val output = """
+            # 1234 1234 (sshd: user@pts/0) S 1 1234 1234 0 -1 4194304 300 0 0 0 500 250 0 0 20 0 1 0 100 1000 100
+            # 5678 5678 (some process) R 1 5678 5678 0 -1 4194304 10 0 0 0 30 20 0 0 20 0 1 0 5 50 4
+            not a stat line
+        """.trimIndent()
+
+        val times = MonitorParsers.parseProcessCpuTimes(output)
+
+        assertEquals(2, times.size)
+        assertEquals(7.5, times[1234L]!!, 0.001)
+        assertEquals(0.5, times[5678L]!!, 0.001)
+    }
+
+    @Test
+    fun `a malformed proc stat dump yields no cpu times`() {
+        assertTrue(MonitorParsers.parseProcessCpuTimes("").isEmpty())
+        assertTrue(MonitorParsers.parseProcessCpuTimes("# 1234 broken").isEmpty())
+        assertTrue(MonitorParsers.parseProcessCpuTimes("1234 (pid) S 1").isEmpty())
+    }
+
+    @Test
     fun `parses swap from meminfo`() {
         val output = """
             SwapTotal:      2000000 kB

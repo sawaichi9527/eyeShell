@@ -1,5 +1,6 @@
 package io.github.sawaichi9527.eyeshell.monitor
 
+import java.util.LinkedHashMap
 import kotlin.math.roundToInt
 
 object MonitorParsers {
@@ -188,6 +189,33 @@ object MonitorParsers {
                 cpuPercent = cpu,
             )
         }
+
+    /**
+     * Parses the per-pid CPU-time section produced by
+     * [MonitorCommands.PROCESS_CPU_TIME_SECTION]. Each line is `# <pid> <contents of /proc/pid/stat>`.
+     *
+     * The stat line's command field is wrapped in parentheses and may itself contain spaces and
+     * parentheses, so the fields after the last `)` are the only reliable split point. `utime` and
+     * `stime` are then the 12th and 13th of those fields, expressed in `USER_HZ` ticks.
+     */
+    fun parseProcessCpuTimes(output: String): Map<Long, Double> {
+        val times = LinkedHashMap<Long, Double>()
+        output.lineSequence().forEach { line ->
+            val trimmed = line.trim()
+            if (!trimmed.startsWith("#")) return@forEach
+            val pid = trimmed.removePrefix("#").trim().substringBefore(' ').toLongOrNull() ?: return@forEach
+            val close = trimmed.lastIndexOf(')')
+            if (close < 0) return@forEach
+            val fields = trimmed.substring(close + 1).trim().split(Regex("\\s+"))
+            val utime = fields.getOrNull(11)?.toLongOrNull() ?: return@forEach
+            val stime = fields.getOrNull(12)?.toLongOrNull() ?: return@forEach
+            times[pid] = (utime + stime).toDouble() / USER_HZ
+        }
+        return times
+    }
+
+    /** `/proc/pid/stat` always reports CPU time in 100 Hz ticks regardless of the kernel's HZ. */
+    const val USER_HZ = 100.0
 
     fun splitSample(output: String): List<String> = output.split(SECTION_DELIMITER_REGEX)
         .map(String::trim)

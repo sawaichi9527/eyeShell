@@ -15,6 +15,8 @@ class MonitorSampler(
     private var thread: Thread? = null
     private var previousCpu: MonitorParsers.CpuRaw? = null
     private var previousNetwork: MonitorParsers.NetworkRaw? = null
+    private var previousProcessCpuSeconds: Map<Long, Double> = emptyMap()
+    private var previousProcessSampleNanos: Long = 0L
     private var currentBackoff = backoff
 
     fun start(onSnapshot: (MonitorSnapshot) -> Unit) {
@@ -62,7 +64,10 @@ class MonitorSampler(
         val swap = sections.getOrNull(1)?.let(MonitorParsers::parseSwap)
         val load = sections.getOrNull(2)?.let(MonitorParsers::parseLoad)
         val filesystems = sections.getOrNull(4)?.let(MonitorParsers::parseFilesystems).orEmpty()
-        val processes = sections.getOrNull(5)?.let(MonitorParsers::parseProcesses).orEmpty()
+        val processRows = sections.getOrNull(5)?.let(MonitorParsers::parseProcesses).orEmpty()
+        // The CPU-time section is last; an empty optional section earlier in the list is dropped
+        // by splitSample, so the last entry is the reliable place to look.
+        val processes = withInstantaneousCpu(processRows, sections.lastOrNull())
         val interfaceAddresses = sections.getOrNull(6)
             ?.let(MonitorParsers::parseInterfaceAddresses)
             .orEmpty()
@@ -81,6 +86,42 @@ class MonitorSampler(
             filesystems = filesystems.take(processLimit),
             processes = processes.take(processLimit),
         )
+    }
+
+    /**
+     * Replaces `ps`'s lifetime-average `%CPU` with the CPU used since the previous sample.
+     *
+     * The stat section reports cumulative CPU seconds per pid, so the delta over the elapsed wall
+     * time is the instantaneous share of one core (100% = one core, matching `ps`'s convention).
+     * A pid that was not present in the previous sample, or whose stat file could not be read,
+     * keeps the `ps` value instead of showing a fabricated zero.
+     */
+    private fun withInstantaneousCpu(
+        rows: List<ProcessUsage>,
+        cpuTimeSection: String?,
+    ): List<ProcessUsage> {
+        val cpuSeconds = cpuTimeSection?.let(MonitorParsers::parseProcessCpuTimes).orEmpty()
+        if (cpuSeconds.isEmpty()) return rows
+        val now = System.nanoTime()
+        val elapsedSeconds = if (previousProcessSampleNanos == 0L) {
+            0.0
+        } else {
+            (now - previousProcessSampleNanos) / 1_000_000_000.0
+        }
+        val previous = previousProcessCpuSeconds
+        val measured = rows.map { process ->
+            val currentCpu = cpuSeconds[process.pid]
+            val previousCpu = previous[process.pid]
+            if (currentCpu == null || previousCpu == null || elapsedSeconds <= 0.0) {
+                process
+            } else {
+                val percent = (currentCpu - previousCpu) / elapsedSeconds * 100.0
+                process.copy(cpuPercent = percent.coerceAtLeast(0.0))
+            }
+        }
+        previousProcessCpuSeconds = cpuSeconds
+        previousProcessSampleNanos = now
+        return measured
     }
 
     private fun rawNetwork(section: String?): MonitorParsers.NetworkRaw? {
