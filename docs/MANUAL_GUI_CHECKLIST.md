@@ -18,16 +18,20 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 
 ## 1. Launch and layout
 
-- The window titled `eyeShell` opens with the Monitor panel on the left, session tabs on the right, and the bottom dock collapsed.
+- The window titled `eyeShell v<version>` (for example `eyeShell v0.1.2`) opens with the Monitor panel on the left, session tabs on the right, and the bottom dock collapsed.
+- The Monitor header shows a settings gear at its right edge; clicking it opens the Settings dialog.
 - `+` on the tab strip behaves exactly like `Connect...`, is disabled while a connection is in progress, and sits immediately after the last tab.
 - Closing the last tab restores the `Start` tab.
 
 ## 2. Saved hosts and folders
 
-- `Hosts...` shows a folder tree; ungrouped hosts sit at the top level, folders are sorted, and folder labels show a count.
+- `Hosts...` shows a tree table with the columns Name, Host, Port, User, Authentication, Group, and Remark; ungrouped hosts sit at the top level, folders are sorted and labelled with a count, and folder rows expand/collapse on a single click.
+- The filter field above the table matches name, host, port, user, authentication, group, and remark, and keeps matching hosts under their folder; folders with no match are hidden.
+- Double-clicking a host row connects to it.
 - Selecting a folder enables only `Add...`, and `Add...` pre-fills that folder into the Group field.
 - Selecting a host enables `Edit...`, `Delete`, and `Connect`.
 - Expanding/collapsing folders survives an add or edit; the edited host stays selected (its folder expands if the host moved).
+- A Remark typed in the host editor is shown in the table's Remark column and is matched by the filter.
 - Saving a password works, `Clear saved password` removes it, and leaving the field blank keeps the previous password.
 - Editing an existing PASSWORD host opens with a blank Password field showing a `********` mask and the hint `A saved password is set. Leave the field blank to keep it; an entered password is used for this session only.` when a secret exists; the saved secret is never shown. Typing replaces the mask, and `Clear saved password` hides it.
 - `Save password in OS credential store` is checked by default for both Add and Edit, so a password typed in the editor is stored in the OS credential store (unless the box is cleared); `Clear saved password` removes a stored one.
@@ -70,6 +74,17 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 - `Clear Buffer` empties the visible screen and the scrollback, keeps the last line, and is disabled while an alternate-screen application is running.
 - Connecting to a Password host with nothing saved does not raise an OS keyring password prompt; connecting to a host with a saved password raises it only when the keyring must be unlocked to read the secret.
 - CJK and wide characters select and copy correctly.
+- The terminal uses the selected color scheme (`eyeShell Dark` by default); light text sits on the scheme background rather than white-on-black.
+- Switching the scheme in Settings recolors **already-printed** scrollback, not only new output, and no white boxes appear behind the text.
+- Emoji render as monochrome glyphs (Linux) and Nerd Font icons render when a patched font is installed; missing glyphs fall back per run instead of showing boxes.
+
+## 6a. Settings dialog
+
+- The dialog shows the categories General, Terminal, Colors, and About, with the content on the right.
+- `Terminal` changes the font size live for every open session (the PTY reflows) and the value survives a restart.
+- `Colors` lists the six schemes, updates the four-line preview and the WCAG contrast figure when a scheme is picked, and applies it to every open session immediately.
+- The color scheme survives a restart and is stored as `terminal.color.scheme` in `settings.properties`.
+- The language row is visibly disabled with a hint; no other setting is presented as working when it is not.
 
 ## 7. SFTP
 
@@ -92,6 +107,9 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 - The network section per-interface selector defaults to the interface that owns the connected address; switching it re-renders the Down/Up rates for that interface.
 - `Load` shows the 1/5/15-minute averages above CPU; hovering explains it, and it turns amber when the 1-minute value exceeds the CPU core count.
 - Switching tabs retargets monitoring; closing a tab stops it and resets the panel.
+- The Processes table measures its columns from the content, shows a thin horizontal scrollbar when it is wider than the sidebar, and a long process name can be read in full by scrolling.
+- Dragging a Processes column width keeps that width across the ~2 s refresh; double-clicking the header restores the content-measured width.
+- Process CPU% moves between refreshes (it is computed from `/proc/<pid>/stat` deltas); the first sample for a new pid may still show the `ps` lifetime average.
 - A host without `/proc` (or a non-Linux host) degrades gracefully with a clear message.
 
 ## 9. Commands
@@ -109,6 +127,10 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 
 - The DEB installs, launches from the desktop entry, and opens the same window.
 - The portable `tar.gz` runs from a directory without a system JDK.
+- The Windows portable ZIP (`eyeShell-<version>.zip`) extracts to a folder, and `eyeShell.exe` starts with `JAVA_HOME`/`JDK_HOME` cleared and no JDK on `PATH`.
+- The packaged window title carries the same version as the archive name.
+- Closing the window while a session is streaming output (for example after `yes` or a large `cat`) exits without printing `Exception in thread ... java.lang.IllegalStateException: Executor has been shut down` on the console.
+- MSI generation is deferred (it needs the WiX toolset), so there is no MSI item here.
 
 ## Recording results
 
