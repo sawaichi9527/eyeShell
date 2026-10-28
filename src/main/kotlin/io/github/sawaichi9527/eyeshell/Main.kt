@@ -8,6 +8,7 @@ import io.github.sawaichi9527.eyeshell.platform.EyeShellPaths
 import io.github.sawaichi9527.eyeshell.platform.LaunchStrategy
 import io.github.sawaichi9527.eyeshell.platform.LoggingSetup
 import io.github.sawaichi9527.eyeshell.platform.SafeMode
+import io.github.sawaichi9527.eyeshell.platform.ShutdownNoiseFilter
 import io.github.sawaichi9527.eyeshell.platform.AppSettings
 import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorSchemes
@@ -23,6 +24,7 @@ import javax.swing.SwingUtilities
 
 fun main(arguments: Array<String>) {
     LoggingSetup.apply()
+    ShutdownNoiseFilter.install()
     val safeMode = SafeMode.detect(
         arguments,
         EyeShellTerminalSettings.MAX_SCROLLBACK_LINES,
