@@ -88,6 +88,10 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 
 ## 7. SFTP
 
+- The listing shows `Name`, `Size`, `Type`, `Modified`, `Permissions`, and `Owner / Group`; folders carry a trailing `/` in Name and `Folder` in Type, files show `File` (or `Link` for a symlink).
+- Clicking `Size` or `Modified` sorts numerically/by time, not as text.
+- The path field sits flush with the left edge and fills everything except the `Refresh`/`Up` buttons; widening the window widens the field.
+- `Owner / Group` shows account names (for example `eye / eye`), falls back to numeric ids when the server's account database is unavailable, and shows `—` only when the listing carried neither.
 - Directory listing, upload, download, new folder, rename, and delete all succeed against the remote host.
 - `Download` is enabled only for a selected file and writes it to the chosen local path with progress; double-clicking a file does the same. Selecting a folder disables Download.
 - `Clear Transfers` empties the finished upload/download history and is disabled while nothing has finished; a running transfer keeps its row.

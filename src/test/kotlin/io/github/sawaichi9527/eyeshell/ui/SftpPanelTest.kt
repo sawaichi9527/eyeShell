@@ -366,6 +366,132 @@ class SftpPanelTest {
         }
     }
 
+    @Test
+    fun `the browser shows name size type modified permissions and owner columns`() {
+        val client = FakeSftpClient(
+            entries = listOf(
+                dir("logs"),
+                file("notes.txt").copy(modifiedTime = java.time.Instant.parse("2026-10-27T04:34:00Z")),
+            ),
+        )
+        val controller = SftpController(client)
+        lateinit var panel: SftpPanel
+        SwingUtilities.invokeAndWait {
+            panel = SftpPanel()
+            panel.bind(controller)
+        }
+
+        try {
+            assertTrue(await(5, TimeUnit.SECONDS) { onEdt(panel) { it.tableRowCount("notes.txt") } })
+            val headers = onEdt(panel) {
+                val table = panel.findByName("sftpTable") as javax.swing.JTable
+                (0 until table.columnCount).map { table.getColumnName(it) }
+            }
+            org.junit.jupiter.api.Assertions.assertEquals(
+                listOf("Name", "Size", "Type", "Modified", "Permissions", "Owner / Group"),
+                headers,
+            )
+
+            assertTrue(onEdt(panel) { it.tableRowCount("Folder") })
+            assertTrue(onEdt(panel) { it.tableRowCount("File") })
+            assertTrue(onEdt(panel) { it.tableRowCount("-rw-r--r--") })
+            assertTrue(onEdt(panel) { it.tableRowCount("u / g") })
+
+            val modifiedMillis = onEdt(panel) {
+                val table = panel.findByName("sftpTable") as javax.swing.JTable
+                val row = (0 until table.rowCount).first { table.getValueAt(it, 0)?.toString() == "notes.txt" }
+                table.getValueAt(row, 3) as Long
+            }
+            org.junit.jupiter.api.Assertions.assertEquals(
+                java.time.Instant.parse("2026-10-27T04:34:00Z").toEpochMilli(),
+                modifiedMillis,
+            )
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    fun `the path field starts at the left edge and fills the toolbar`() {
+        val client = FakeSftpClient(entries = listOf(file("notes.txt")))
+        val controller = SftpController(client)
+        lateinit var panel: SftpPanel
+        SwingUtilities.invokeAndWait {
+            panel = SftpPanel()
+            panel.bind(controller)
+        }
+
+        try {
+            assertTrue(await(5, TimeUnit.SECONDS) { onEdt(panel) { it.tableRowCount("notes.txt") } })
+            val metrics = onEdt(panel) {
+                panel.size = java.awt.Dimension(1040, 300)
+                layoutRecursively(panel)
+                val field = panel.findByName("sftpPath") as javax.swing.JTextField
+                Triple(field.x, field.width, field.parent.width)
+            }
+            org.junit.jupiter.api.Assertions.assertEquals(0, metrics.first, "The path field must align with the left edge")
+            assertTrue(
+                metrics.second > metrics.third / 2,
+                "The path field must consume the space left of Refresh/Up: field=${metrics.second} toolbar=${metrics.third}",
+            )
+        } finally {
+            controller.close()
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable(
+        named = "EYESHELL_TEST_SFTP_RENDER",
+        matches = "1",
+    )
+    fun `renders the file browser for visual inspection`() {
+        com.formdev.flatlaf.FlatDarkLaf.setup()
+        val entries = listOf(
+            RemoteFile("bin", true, 4096, "drwxr-xr-x", "root", "root", java.time.Instant.parse("2025-10-10T03:11:00Z")),
+            RemoteFile("home", true, 4096, "drwxr-xr-x", "root", "root", java.time.Instant.parse("2026-07-29T13:52:00Z")),
+            RemoteFile("var", true, 4096, "drwxr-xr-x", "root", "root", java.time.Instant.parse("2026-09-30T15:31:00Z")),
+            RemoteFile("bash_logout", false, 220, "-rw-r--r--", "eye", "eye", java.time.Instant.parse("2025-08-25T04:51:00Z")),
+            RemoteFile("cluster-bootstrap.log", false, 1_536_000, "-rw-r--r--", "eye", "eye", java.time.Instant.parse("2026-10-27T12:34:00Z")),
+            RemoteFile("notes.txt", false, 42, "-rw-r-----", "eye", "sudo", null),
+        )
+        val controller = SftpController(FakeSftpClient(entries = entries))
+        lateinit var panel: SftpPanel
+        SwingUtilities.invokeAndWait {
+            panel = SftpPanel()
+            panel.bind(controller)
+        }
+
+        try {
+            assertTrue(await(5, TimeUnit.SECONDS) { onEdt(panel) { it.tableRowCount("notes.txt") } })
+            SwingUtilities.invokeAndWait {
+                val frame = javax.swing.JFrame().apply {
+                    isUndecorated = true
+                    contentPane.add(panel)
+                    size = java.awt.Dimension(1040, 300)
+                    addNotify()
+                }
+                try {
+                    panel.size = java.awt.Dimension(1040, 300)
+                    layoutRecursively(panel)
+                    val image = java.awt.image.BufferedImage(1040, 300, java.awt.image.BufferedImage.TYPE_INT_RGB)
+                    val graphics = image.createGraphics()
+                    try {
+                        panel.printAll(graphics)
+                    } finally {
+                        graphics.dispose()
+                    }
+                    val output = Path.of("build", "reports", "sftp-browser.png")
+                    Files.createDirectories(output.parent)
+                    javax.imageio.ImageIO.write(image, "png", output.toFile())
+                } finally {
+                    frame.dispose()
+                }
+            }
+        } finally {
+            controller.close()
+        }
+    }
+
     private fun <T> onEdt(panel: SftpPanel, action: (SftpPanel) -> T): T {
         var result: Result<T>? = null
         SwingUtilities.invokeAndWait { result = runCatching { action(panel) } }

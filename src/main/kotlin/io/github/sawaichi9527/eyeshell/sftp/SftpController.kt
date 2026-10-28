@@ -11,6 +11,7 @@ private const val PROGRESS_INTERVAL_NANOS = 50_000_000L
 class SftpController(
     private val sftpClient: SftpClient,
     private val maxRetries: Int = 2,
+    private val ownerNames: OwnerNameResolver? = null,
 ) : AutoCloseable {
     private val closed = AtomicBoolean()
     private val executor = Executors.newVirtualThreadPerTaskExecutor()
@@ -21,7 +22,10 @@ class SftpController(
     fun list(path: String, onResult: (Result<List<RemoteFile>>) -> Unit) {
         requireOpen()
         executor.submit {
-            val result = runCatching { sftpClient.list(path) }
+            val result = runCatching {
+                val files = sftpClient.list(path)
+                ownerNames?.decorate(files) ?: files
+            }
             onResult(result)
         }
     }

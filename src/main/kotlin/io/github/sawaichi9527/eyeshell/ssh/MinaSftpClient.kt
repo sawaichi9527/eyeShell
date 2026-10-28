@@ -25,8 +25,9 @@ internal class MinaSftpClient(
                     isDirectory = attributes.isDirectory,
                     sizeBytes = attributes.size,
                     permissions = permissionsString(attributes),
-                    owner = attributes.owner,
-                    group = attributes.group,
+                    owner = ownerLabel(attributes),
+                    group = groupLabel(attributes),
+                    modifiedTime = attributes.modifyTime?.toInstant(),
                 )
             }
         }
@@ -45,8 +46,9 @@ internal class MinaSftpClient(
             isDirectory = attributes.isDirectory,
             sizeBytes = attributes.size,
             permissions = permissionsString(attributes),
-            owner = attributes.owner,
-            group = attributes.group,
+            owner = ownerLabel(attributes),
+            group = groupLabel(attributes),
+            modifiedTime = attributes.modifyTime?.toInstant(),
         )
     } catch (failure: IOException) {
         if (isNotFound(failure)) null else throw failure
@@ -160,3 +162,20 @@ internal class MinaSftpClient(
         failure.message?.contains("No such file", ignoreCase = true) == true
             || failure.message?.contains("not found", ignoreCase = true) == true
 }
+
+/**
+ * SFTP v3 directory listings carry the owner and group as numeric uid/gid ([SftpClient.Attribute.UidGid]),
+ * not as names; only v4+ servers send names ([SftpClient.Attribute.OwnerGroup]). Falling back to the
+ * numeric id keeps the column honest — it shows what the server actually sent instead of "—".
+ */
+internal fun ownerLabel(attributes: org.apache.sshd.sftp.client.SftpClient.Attributes): String? =
+    attributes.owner?.takeIf { it.isNotBlank() } ?: numericId(attributes, attributes.userId, org.apache.sshd.sftp.client.SftpClient.Attribute.UidGid)
+
+internal fun groupLabel(attributes: org.apache.sshd.sftp.client.SftpClient.Attributes): String? =
+    attributes.group?.takeIf { it.isNotBlank() } ?: numericId(attributes, attributes.groupId, org.apache.sshd.sftp.client.SftpClient.Attribute.UidGid)
+
+private fun numericId(
+    attributes: org.apache.sshd.sftp.client.SftpClient.Attributes,
+    id: Int,
+    flag: org.apache.sshd.sftp.client.SftpClient.Attribute,
+): String? = if (attributes.flags.contains(flag) && id >= 0) id.toString() else null

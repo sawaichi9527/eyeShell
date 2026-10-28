@@ -297,7 +297,14 @@ internal class TerminalSessionPage(
             hostSession
         }
         Thread.ofVirtual().name("sftp-open").start {
-            val outcome = runCatching { io.github.sawaichi9527.eyeshell.sftp.SftpController(host.sftp()) }
+            val outcome = runCatching {
+                io.github.sawaichi9527.eyeshell.sftp.SftpController(
+                    host.sftp(),
+                    ownerNames = io.github.sawaichi9527.eyeshell.sftp.OwnerNameResolver {
+                        host.execute(io.github.sawaichi9527.eyeshell.sftp.OwnerNames.COMMAND).output
+                    },
+                )
+            }
             synchronized(sftpLock) { sftpLoading = false }
             val controller = outcome.getOrNull()
             val failure = outcome.exceptionOrNull()?.let(::describeFailureChain)

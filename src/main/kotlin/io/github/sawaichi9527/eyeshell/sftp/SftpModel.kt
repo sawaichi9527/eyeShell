@@ -7,6 +7,8 @@ data class RemoteFile(
     val permissions: String,
     val owner: String?,
     val group: String?,
+    /** Server-reported modification time, or null when the server did not send one. */
+    val modifiedTime: java.time.Instant? = null,
 )
 
 data class SftpTransferRequest(

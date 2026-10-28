@@ -2,6 +2,7 @@ package io.github.sawaichi9527.eyeshell.ui
 
 import io.github.sawaichi9527.eyeshell.sftp.RemoteFile
 import io.github.sawaichi9527.eyeshell.sftp.SftpController
+import io.github.sawaichi9527.eyeshell.sftp.SftpFormatting
 import io.github.sawaichi9527.eyeshell.sftp.SftpTransferRequest
 import io.github.sawaichi9527.eyeshell.sftp.TransferDirection
 import io.github.sawaichi9527.eyeshell.sftp.TransferStatus
@@ -11,7 +12,6 @@ import java.awt.Dimension
 import java.awt.datatransfer.DataFlavor
 import java.io.File
 import java.nio.file.Files
-import java.text.DecimalFormat
 import javax.swing.JButton
 import javax.swing.JFileChooser
 import javax.swing.JLabel
@@ -74,13 +74,48 @@ class SftpPanel(
     private val loadingLabel = JLabel("Opening SFTP...", SwingConstants.CENTER).apply {
         name = "sftpLoading"
     }
-    private val tableModel = object : DefaultTableModel(arrayOf("Name", "Size", "Permissions"), 0) {
-        override fun isCellEditable(row: Int, column: Int): Boolean = false
+    private val sizeRenderer = object : javax.swing.table.DefaultTableCellRenderer() {
+        init { horizontalAlignment = SwingConstants.RIGHT }
+
+        override fun setValue(value: Any?) {
+            text = SftpFormatting.formatSize((value as? Long) ?: -1L)
+        }
     }
+    private val modifiedRenderer = object : javax.swing.table.DefaultTableCellRenderer() {
+        init { horizontalAlignment = SwingConstants.CENTER }
+
+        override fun setValue(value: Any?) {
+            val millis = (value as? Long) ?: -1L
+            text = if (millis < 0) SftpFormatting.UNKNOWN else SftpFormatting.formatModified(java.time.Instant.ofEpochMilli(millis))
+        }
+    }
+    private val tableModel = SftpFileTableModel()
     private val fileTable = JTable(tableModel).apply {
         name = "sftpTable"
         setRowHeight(20)
         autoCreateRowSorter = true
+        autoResizeMode = JTable.AUTO_RESIZE_SUBSEQUENT_COLUMNS
+        tableHeader.reorderingAllowed = false
+        setDefaultRenderer(Long::class.javaObjectType, sizeRenderer)
+        columnModel.getColumn(SftpFileTableModel.NAME_COLUMN).preferredWidth = 260
+        columnModel.getColumn(SftpFileTableModel.SIZE_COLUMN).apply {
+            preferredWidth = 90
+            maxWidth = 120
+        }
+        columnModel.getColumn(SftpFileTableModel.TYPE_COLUMN).apply {
+            preferredWidth = 80
+            maxWidth = 110
+        }
+        columnModel.getColumn(SftpFileTableModel.MODIFIED_COLUMN).apply {
+            preferredWidth = 130
+            maxWidth = 170
+            cellRenderer = modifiedRenderer
+        }
+        columnModel.getColumn(SftpFileTableModel.PERMISSIONS_COLUMN).apply {
+            preferredWidth = 110
+            maxWidth = 140
+        }
+        columnModel.getColumn(SftpFileTableModel.OWNER_GROUP_COLUMN).preferredWidth = 140
     }
     private val transferModel = object : DefaultTableModel(arrayOf("Direction", "Path", "Progress", "Status"), 0) {
         override fun isCellEditable(row: Int, column: Int): Boolean = false
@@ -145,7 +180,7 @@ class SftpPanel(
         controller.setListener { SwingUtilities.invokeLater { refreshTransfers() } }
         showConnected()
         if (!sameController) {
-            tableModel.setRowCount(0)
+            tableModel.setFiles(emptyList())
             updateActionEnablement()
             currentDirectory = "/"
             pathField.text = "/"
@@ -191,13 +226,10 @@ class SftpPanel(
     }
 
     private fun buildConnectedPanel(): JPanel = JPanel(BorderLayout()).apply {
-        val toolbar = JPanel(BorderLayout()).apply {
-            add(JPanel().apply {
-                add(pathField)
-                pathField.columns = 14
-                pathField.addActionListener { navigate(pathField.text) }
-            }, BorderLayout.CENTER)
-            add(JPanel().apply {
+        // The path field takes every pixel that Refresh/Up do not need, and starts at the left edge.
+        val toolbar = JPanel(BorderLayout(6, 0)).apply {
+            add(pathField, BorderLayout.CENTER)
+            add(JPanel(java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 0)).apply {
                 add(refreshButton)
                 add(upButton)
             }, BorderLayout.EAST)
@@ -212,6 +244,7 @@ class SftpPanel(
         }
         refreshButton.addActionListener { refresh() }
         upButton.addActionListener { navigateUp() }
+        pathField.addActionListener { navigate(pathField.text) }
         uploadButton.addActionListener { upload() }
         downloadButton.addActionListener { downloadSelected() }
         newFolderButton.addActionListener { newFolder() }
@@ -260,14 +293,7 @@ class SftpPanel(
             SwingUtilities.invokeLater {
                 if (controller !== active) return@invokeLater
                 result.onSuccess { files ->
-                    tableModel.setRowCount(0)
-                    files.forEach { file ->
-                        tableModel.addRow(arrayOf<Any>(
-                            if (file.isDirectory) "${file.name}/" else file.name,
-                            formatSize(file.sizeBytes),
-                            file.permissions,
-                        ))
-                    }
+                    tableModel.setFiles(files)
                     pathField.text = currentDirectory
                     statusLabel.text = if (files.isEmpty()) {
                         "$currentDirectory is empty."
@@ -276,7 +302,7 @@ class SftpPanel(
                     }
                     updateActionEnablement()
                 }.onFailure { failure ->
-                    tableModel.setRowCount(0)
+                    tableModel.setFiles(emptyList())
                     updateActionEnablement()
                     statusLabel.text = "Could not list $currentDirectory: ${failure.message ?: failure.javaClass.simpleName}"
                 }
@@ -432,17 +458,7 @@ class SftpPanel(
     private fun selectedFile(): RemoteFile? {
         val row = fileTable.selectedRow
         if (row < 0) return null
-        val modelRow = fileTable.convertRowIndexToModel(row)
-        val nameCell = tableModel.getValueAt(modelRow, 0).toString()
-        val isDirectory = nameCell.endsWith("/")
-        return RemoteFile(
-            name = nameCell.removeSuffix("/"),
-            isDirectory = isDirectory,
-            sizeBytes = parseSize(tableModel.getValueAt(modelRow, 1).toString()),
-            permissions = tableModel.getValueAt(modelRow, 2).toString(),
-            owner = null,
-            group = null,
-        )
+        return tableModel.fileAt(fileTable.convertRowIndexToModel(row))
     }
 
     private fun normalize(path: String): String {
@@ -452,23 +468,4 @@ class SftpPanel(
 
     private fun remotePathFor(name: String): String =
         if (currentDirectory == "/") "/$name" else "${currentDirectory.trimEnd('/')}/$name"
-
-    private fun formatSize(bytes: Long): String {
-        if (bytes < 1024) return "$bytes B"
-        if (bytes < 1024 * 1024) return SIZE_FORMAT.format(bytes / 1024.0) + " KB"
-        if (bytes < 1024L * 1024 * 1024) return SIZE_FORMAT.format(bytes / 1024.0 / 1024.0) + " MB"
-        return SIZE_FORMAT.format(bytes / 1024.0 / 1024.0 / 1024.0) + " GB"
-    }
-
-    private fun parseSize(text: String): Long {
-        if (text.endsWith("B")) return text.removeSuffix("B").trim().toLongOrNull() ?: 0L
-        if (text.endsWith("KB")) return (text.removeSuffix("KB").trim().toDoubleOrNull() ?: 0.0).times(1024).toLong()
-        if (text.endsWith("MB")) return (text.removeSuffix("MB").trim().toDoubleOrNull() ?: 0.0).times(1024 * 1024).toLong()
-        if (text.endsWith("GB")) return (text.removeSuffix("GB").trim().toDoubleOrNull() ?: 0.0).times(1024 * 1024 * 1024).toLong()
-        return 0L
-    }
-
-    private companion object {
-        private val SIZE_FORMAT = DecimalFormat("#,##0.0")
-    }
 }
