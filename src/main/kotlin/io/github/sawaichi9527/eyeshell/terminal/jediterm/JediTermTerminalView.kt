@@ -15,13 +15,14 @@ import com.jediterm.terminal.ui.TerminalActionProvider
 import com.jediterm.terminal.ui.JediTermWidget
 import com.jediterm.terminal.ui.settings.DefaultSettingsProvider
 import com.jediterm.terminal.util.CharUtils
-import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
-import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
+import io.github.sawaichi9527.eyeshell.terminal.TerminalBackgroundImage
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorScheme
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorSchemes
 import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
 import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
 import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputSnapshot
+import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
+import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
 import java.io.Writer
 import javax.swing.JComponent
@@ -40,6 +41,7 @@ class JediTermTerminalView(
     private val searchController = JediTermSearchController(widget)
     private val highlightController = JediTermHighlightController(widget)
     private val contextActionProvider = ContextActionProvider(widget, searchController::show)
+    private var activeConnector: SessionTtyConnector? = null
 
     init {
         widget.terminalPanel.setPopupMenuActionProvider(contextActionProvider)
@@ -56,11 +58,34 @@ class JediTermTerminalView(
         check(SwingUtilities.isEventDispatchThread()) { "Terminal sessions must be attached on the Swing EDT" }
         check(widget.canOpenSession()) { "A terminal session is already attached" }
         contextActionProvider.hasSession = true
-        widget.setTtyConnector(SessionTtyConnector(session))
+        val connector = SessionTtyConnector(session)
+        activeConnector = connector
+        widget.setTtyConnector(connector)
         widget.start()
     }
 
     override fun canAttach(): Boolean = widget.canOpenSession()
+
+    /**
+     * Stops the emulator thread without closing the session, so [attach] can replay output into the
+     * same widget. The connector polls, so the emulator thread observes the detach within a few
+     * milliseconds; a session that does not yield inside [DETACH_TIMEOUT] is resumed instead.
+     */
+    override fun detachSession(): Boolean {
+        val connector = activeConnector ?: return false
+        connector.detach()
+        val deadline = System.nanoTime() + DETACH_TIMEOUT.toNanos()
+        while (widget.isSessionRunning) {
+            if (System.nanoTime() >= deadline) {
+                connector.resume()
+                return false
+            }
+            Thread.sleep(2)
+        }
+        activeConnector = null
+        contextActionProvider.hasSession = false
+        return true
+    }
 
     override fun resetForReattach() {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal reattach preparation must run on the Swing EDT" }
@@ -167,10 +192,28 @@ class JediTermTerminalView(
         widget.applyColorScheme(scheme)
     }
 
+    override fun setBackgroundImage(image: TerminalBackgroundImage?) {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal background changes must happen on the Swing EDT" }
+        widget.applyBackgroundImage(image)
+    }
+
+    /** Test hook: loads the image inline instead of on a background thread. */
+    internal fun setBackgroundImageForTest(image: TerminalBackgroundImage?) {
+        widget.applyBackgroundImage(image, loadSynchronously = true)
+    }
+
+    internal val terminalPanel: EyeShellTerminalPanel
+        get() = widget.terminalPanel as EyeShellTerminalPanel
+
     override fun close() {
         highlightController.close()
         searchController.close()
         widget.close()
+    }
+
+    private companion object {
+        /** How long a detach may take before the view gives up and keeps the session attached. */
+        val DETACH_TIMEOUT: java.time.Duration = java.time.Duration.ofSeconds(2)
     }
 }
 
@@ -237,7 +280,32 @@ private class ContextActionProvider(
 private class SessionTtyConnector(
     private val session: TerminalSession,
 ) : TtyConnector {
-    override fun read(buffer: CharArray, offset: Int, length: Int): Int = session.read(buffer, offset, length)
+    @Volatile
+    private var detached = false
+
+    fun detach() {
+        detached = true
+    }
+
+    fun resume() {
+        detached = false
+    }
+
+    /**
+     * Polls instead of blocking so [detach] can stop the emulator thread without closing the SSH
+     * session; a terminal that would otherwise wait forever in a read must be interruptible for the
+     * encoding replay to work.
+     */
+    override fun read(buffer: CharArray, offset: Int, length: Int): Int {
+        while (true) {
+            if (detached) return -1
+            // Drain buffered output before reporting the end of a closed session, so the last chunk
+            // is not lost when a stream reports closed while its reader still has characters.
+            if (session.ready()) return session.read(buffer, offset, length)
+            if (!session.isOpen) return -1
+            Thread.sleep(READ_POLL_MILLIS)
+        }
+    }
 
     override fun write(bytes: ByteArray) = session.write(bytes)
 
@@ -253,7 +321,14 @@ private class SessionTtyConnector(
 
     override fun getName(): String = session.name
 
-    override fun close() = session.close()
+    /** A detached connector must not end the connection the tab still owns. */
+    override fun close() {
+        if (!detached) session.close()
+    }
+
+    private companion object {
+        const val READ_POLL_MILLIS = 5L
+    }
 }
 
 internal class EyeShellTerminalSettings(

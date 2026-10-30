@@ -1,8 +1,13 @@
 package io.github.sawaichi9527.eyeshell.ssh
 
 import io.github.sawaichi9527.eyeshell.sftp.SftpClient
+import io.github.sawaichi9527.eyeshell.terminal.RawOutputLog
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
-import java.io.InputStreamReader
+import java.nio.ByteBuffer
+import java.nio.CharBuffer
+import java.nio.charset.Charset
+import java.nio.charset.CharsetDecoder
+import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.security.KeyPair
@@ -390,15 +395,69 @@ private fun accumulateFailure(current: Throwable?, next: Throwable): Throwable {
 private class MinaSshTerminalSession(
     override val name: String,
     private val channel: ChannelShell,
+    initialCharset: Charset = StandardCharsets.UTF_8,
 ) : TerminalSession {
     private val closed = AtomicBoolean()
-    private val reader = InputStreamReader(channel.invertedOut, StandardCharsets.UTF_8)
+    private val input = channel.invertedOut
     private val output = channel.invertedIn
+    private val rawLog = RawOutputLog()
+
+    /** Guards the decoder state so a Settings change can land between two reads. */
+    private val stateLock = Any()
+    private var activeCharset: Charset = initialCharset
+    private var decoder: CharsetDecoder = newDecoder(initialCharset)
+
+    /** Bytes read from the channel but not yet decoded (kept in write mode). */
+    private val undecoded = ByteBuffer.allocate(DECODE_BUFFER_SIZE)
+    private val decodeScratch = CharBuffer.allocate(DECODE_BUFFER_SIZE)
+    private val source = ByteArray(READ_BUFFER_SIZE)
+
+    /** Decoded characters not yet handed to the terminal. */
+    private val decoded = CharArray(DECODE_BUFFER_SIZE)
+    private var decodedOffset = 0
+    private var decodedLimit = 0
+    private var endOfStream = false
 
     override val isOpen: Boolean
         get() = !closed.get() && channel.isOpen
 
-    override fun read(buffer: CharArray, offset: Int, length: Int): Int = reader.read(buffer, offset, length)
+    override val charset: Charset
+        get() = synchronized(stateLock) { activeCharset }
+
+    override fun setCharset(charset: Charset) {
+        synchronized(stateLock) {
+            if (charset == activeCharset) return
+            activeCharset = charset
+            decoder = newDecoder(charset)
+            // Undecoded bytes stay in the buffer, so they are reinterpreted with the new charset.
+        }
+    }
+
+    override fun read(buffer: CharArray, offset: Int, length: Int): Int {
+        require(offset >= 0 && length >= 0 && offset + length <= buffer.size)
+        if (length == 0) return 0
+        while (true) {
+            val taken = takeDecoded(buffer, offset, length)
+            if (taken != 0) return taken
+            val count = input.read(source)
+            synchronized(stateLock) {
+                if (count < 0) {
+                    endOfStream = true
+                    decodeLocked(endOfStream = true)
+                } else if (count > 0) {
+                    rawLog.append(source, 0, count)
+                    appendLocked(count)
+                    decodeLocked(endOfStream = false)
+                }
+            }
+        }
+    }
+
+    /**
+     * Bytes already handed to the decoder, excluding the tail that is still undecoded: those bytes
+     * continue through the live decoder, so replaying them as well would duplicate characters.
+     */
+    override fun rawOutput(): ByteArray? = synchronized(stateLock) { rawLog.snapshot(undecoded.position()) }
 
     @Synchronized
     override fun write(bytes: ByteArray) {
@@ -407,7 +466,8 @@ private class MinaSshTerminalSession(
     }
 
     override fun write(text: String) {
-        write(text.toByteArray(StandardCharsets.UTF_8))
+        val charset = synchronized(stateLock) { activeCharset }
+        write(text.toByteArray(charset))
     }
 
     override fun resize(columns: Int, rows: Int) {
@@ -415,7 +475,16 @@ private class MinaSshTerminalSession(
         channel.sendWindowChange(columns, rows)
     }
 
-    override fun ready(): Boolean = reader.ready()
+    override fun ready(): Boolean = synchronized(stateLock) {
+        if (decodedLimit - decodedOffset > 0) {
+            true
+        } else if (endOfStream) {
+            false
+        } else {
+            if (undecoded.position() > 0) decodeLocked(endOfStream = false)
+            if (decodedLimit - decodedOffset > 0) true else input.available() > 0
+        }
+    }
 
     override fun awaitExit(): Int {
         channel.waitFor(EnumSet.of(ClientChannelEvent.CLOSED), 0L)
@@ -425,5 +494,82 @@ private class MinaSshTerminalSession(
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         channel.close(false)
+    }
+
+    /**
+     * Copies already decoded characters. Returns `-1` at end of stream and `0` when more bytes are
+     * needed before a character can be produced.
+     */
+    private fun takeDecoded(buffer: CharArray, offset: Int, length: Int): Int = synchronized(stateLock) {
+        if (decodedOffset == decodedLimit) {
+            if (endOfStream) {
+                if (undecoded.position() > 0) {
+                    // A truncated multi-byte tail cannot be completed; report it once as U+FFFD.
+                    undecoded.clear()
+                    decoded[0] = '\uFFFD'
+                    decodedOffset = 0
+                    decodedLimit = 1
+                } else {
+                    return@synchronized -1
+                }
+            } else if (undecoded.position() > 0) {
+                decodeLocked(endOfStream = false)
+            }
+        }
+        takeInto(buffer, offset, length)
+    }
+
+    private fun takeInto(buffer: CharArray, offset: Int, length: Int): Int {
+        val available = decodedLimit - decodedOffset
+        if (available <= 0) return 0
+        val count = minOf(available, length)
+        decoded.copyInto(buffer, offset, decodedOffset, decodedOffset + count)
+        decodedOffset += count
+        return count
+    }
+
+    private fun appendLocked(count: Int) {
+        var copied = 0
+        while (copied < count) {
+            if (!undecoded.hasRemaining()) {
+                // The buffer only fills up when a charset cannot make progress; decoding first
+                // shrinks it, and clearing it keeps a pathological stream from stalling forever.
+                decodeLocked(endOfStream = false)
+                if (!undecoded.hasRemaining()) undecoded.clear()
+            }
+            val chunk = minOf(count - copied, undecoded.remaining())
+            undecoded.put(source, copied, chunk)
+            copied += chunk
+        }
+    }
+
+    private fun decodeLocked(endOfStream: Boolean) {
+        undecoded.flip()
+        decodeScratch.clear()
+        val result = decoder.decode(undecoded, decodeScratch, endOfStream)
+        if (endOfStream && !result.isError && !result.isOverflow) decoder.flush(decodeScratch)
+        undecoded.compact()
+        decodeScratch.flip()
+        val count = decodeScratch.remaining()
+        if (count > 0) {
+            decodeScratch.get(decoded, 0, count)
+            decodedOffset = 0
+            decodedLimit = count
+        }
+        if (result.isError) {
+            // Malformed input is configured as REPLACE, so this only guards against a decoder that
+            // refuses to make progress at all.
+            decoder.reset()
+            undecoded.clear()
+        }
+    }
+
+    private companion object {
+        const val READ_BUFFER_SIZE = 8 * 1024
+        const val DECODE_BUFFER_SIZE = 16 * 1024
+
+        fun newDecoder(charset: Charset): CharsetDecoder = charset.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPLACE)
+            .onUnmappableCharacter(CodingErrorAction.REPLACE)
     }
 }

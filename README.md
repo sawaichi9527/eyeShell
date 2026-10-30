@@ -18,6 +18,7 @@
 - 使用者自訂 Regex 顏色與樣式標記
 - SSH Terminal、SFTP、Jump Host 與 Port Forwarding
 - Linux Agentless Monitoring
+- Terminal 背景圖片與可切換字元編碼（UTF-8／GB18030／GBK／BIG5 等）
 - Windows 10/11 x64 與 Ubuntu 24.04/26.04 x86_64
 - Linux Wayland 優先，XWayland／X11 fallback
 
@@ -30,6 +31,8 @@
 - Password／Public Key／`ssh-agent`
 - Known Hosts／Host Key 驗證
 - Terminal Search／Scrollback／Copy／Export
+- Terminal 背景圖片（內建 `bg1`–`bg5` 預設，預設 `bg1`）
+- Terminal 字元編碼（預設 UTF-8，可切換 GB18030／GBK／BIG5 等）
 - Regex Highlight
 - Jump Host／Proxy／Port Forwarding
 - Linux Agentless Monitoring

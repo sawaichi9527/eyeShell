@@ -1,6 +1,7 @@
 package io.github.sawaichi9527.eyeshell.terminal
 
 import java.io.ByteArrayOutputStream
+import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
 
 class SyntheticTerminalSession private constructor(
@@ -10,7 +11,17 @@ class SyntheticTerminalSession private constructor(
     private var position = 0
     private var open = true
 
+    @Volatile
+    private var activeCharset: Charset = StandardCharsets.UTF_8
+
     override val name: String = "eyeShell M1A synthetic terminal"
+
+    override val charset: Charset
+        get() = activeCharset
+
+    override fun setCharset(charset: Charset) {
+        activeCharset = charset
+    }
 
     override val isOpen: Boolean
         @Synchronized get() = open
@@ -36,7 +47,7 @@ class SyntheticTerminalSession private constructor(
     }
 
     override fun write(text: String) {
-        write(text.toByteArray(StandardCharsets.UTF_8))
+        write(text.toByteArray(activeCharset))
     }
 
     override fun resize(columns: Int, rows: Int) {
@@ -44,7 +55,7 @@ class SyntheticTerminalSession private constructor(
     }
 
     @Synchronized
-    override fun ready(): Boolean = open && position < input.size
+    override fun ready(): Boolean = open
 
     override fun awaitExit(): Int = 0
 
@@ -54,7 +65,7 @@ class SyntheticTerminalSession private constructor(
     }
 
     @Synchronized
-    fun writtenText(): String = output.toString(StandardCharsets.UTF_8)
+    fun writtenText(): String = output.toString(activeCharset)
 
     companion object {
         private const val ESC = '\u001B'

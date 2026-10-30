@@ -2,11 +2,16 @@ package io.github.sawaichi9527.eyeshell.ui
 
 import io.github.sawaichi9527.eyeshell.platform.AppInfo
 import io.github.sawaichi9527.eyeshell.platform.AppSettings
+import io.github.sawaichi9527.eyeshell.platform.BackgroundImages
+import io.github.sawaichi9527.eyeshell.terminal.TerminalBackgroundImage
+import io.github.sawaichi9527.eyeshell.terminal.TerminalCharsets
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorScheme
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorSchemes
 import java.awt.Component
 import java.awt.Container
+import java.nio.charset.Charset
 import java.util.concurrent.atomic.AtomicReference
+import javax.swing.JButton
 import javax.swing.JComboBox
 import javax.swing.JDialog
 import javax.swing.JFrame
@@ -36,6 +41,161 @@ class SettingsControllerTest {
 
             assertEquals(20, settings.terminalFontSize)
             assertEquals(listOf(20f), applied)
+        } finally {
+            onEdt { dialog.dispose() }
+        }
+    }
+
+    @Test
+    fun `the terminal encoding is persisted and applied to open sessions`() {
+        val settings = AppSettings.inMemory()
+        val applied = mutableListOf<Charset>()
+        val controller = SettingsController(
+            settings,
+            applyFontSize = {},
+            applyCharset = { charset -> applied += charset },
+        )
+        val dialog = onEdt { controller.createDialog(JFrame()) }
+
+        try {
+            val combo = onEdt { findComponent(dialog, "settingsCharset") as JComboBox<*> }
+            assertEquals(TerminalCharsets.fromId(""), onEdt { combo.selectedItem })
+
+            onEdt { combo.selectedItem = TerminalCharsets.fromId("GBK") }
+
+            assertEquals("GBK", settings.terminalCharsetId)
+            assertEquals(listOf(Charset.forName("GBK")), applied)
+        } finally {
+            onEdt { dialog.dispose() }
+        }
+    }
+
+    @Test
+    fun `choosing a background image imports it, persists it, and applies it`(
+        @org.junit.jupiter.api.io.TempDir directory: java.nio.file.Path,
+    ) {
+        val settings = AppSettings.inMemory()
+        val applied = mutableListOf<TerminalBackgroundImage?>()
+        val picked = directory.resolve("wallpaper.png")
+        java.nio.file.Files.writeString(picked, "image")
+        val backgrounds = directory.resolve("backgrounds")
+        val controller = SettingsController(
+            settings,
+            applyFontSize = {},
+            applyBackgroundImage = { image -> applied += image },
+            chooseBackgroundImage = { picked },
+            backgroundDirectory = backgrounds,
+        )
+        val dialog = onEdt { controller.createDialog(JFrame()) }
+
+        try {
+            val choose = onEdt { findComponent(dialog, "settingsBackgroundChoose") as JButton }
+            onEdt { choose.doClick() }
+
+            val stored = backgrounds.toAbsolutePath().normalize().resolve("wallpaper.png")
+            assertTrue(settings.terminalBackgroundEnabled)
+            assertEquals(stored.toString(), settings.terminalBackgroundImage)
+            assertTrue(java.nio.file.Files.exists(stored))
+            assertEquals(TerminalBackgroundImage(stored), applied.last())
+
+            val current = onEdt { findComponent(dialog, "settingsBackgroundCurrent") as JLabel }
+            assertTrue(onEdt { current.text }.contains("wallpaper.png"), onEdt { current.text })
+        } finally {
+            onEdt { dialog.dispose() }
+        }
+    }
+
+    @Test
+    fun `clearing the background image disables it again`(
+        @org.junit.jupiter.api.io.TempDir directory: java.nio.file.Path,
+    ) {
+        val settings = AppSettings.inMemory()
+        val applied = mutableListOf<TerminalBackgroundImage?>()
+        val picked = directory.resolve("wallpaper.png")
+        java.nio.file.Files.writeString(picked, "image")
+        val controller = SettingsController(
+            settings,
+            applyFontSize = {},
+            applyBackgroundImage = { image -> applied += image },
+            chooseBackgroundImage = { picked },
+            backgroundDirectory = directory.resolve("backgrounds"),
+        )
+        val dialog = onEdt { controller.createDialog(JFrame()) }
+
+        try {
+            onEdt { (findComponent(dialog, "settingsBackgroundChoose") as JButton).doClick() }
+            onEdt { (findComponent(dialog, "settingsBackgroundClear") as JButton).doClick() }
+
+            assertFalse(settings.terminalBackgroundEnabled)
+            assertEquals("", settings.terminalBackgroundImage)
+            assertEquals(null, applied.last())
+        } finally {
+            onEdt { dialog.dispose() }
+        }
+    }
+
+    @Test
+    fun `background opacity is persisted and re-applied to the current image`(
+        @org.junit.jupiter.api.io.TempDir directory: java.nio.file.Path,
+    ) {
+        val settings = AppSettings.inMemory()
+        settings.terminalBackgroundEnabled = true
+        val picked = directory.resolve("wallpaper.png")
+        java.nio.file.Files.writeString(picked, "image")
+        settings.terminalBackgroundImage = picked.toString()
+        val applied = mutableListOf<TerminalBackgroundImage?>()
+        val controller = SettingsController(
+            settings,
+            applyFontSize = {},
+            applyBackgroundImage = { image -> applied += image },
+            backgroundDirectory = directory.resolve("backgrounds"),
+        )
+        val dialog = onEdt { controller.createDialog(JFrame()) }
+
+        try {
+            val opacity = onEdt { findComponent(dialog, "settingsBackgroundOpacity") as JSpinner }
+            onEdt { opacity.value = 40 }
+
+            assertEquals(40, settings.terminalBackgroundOpacity)
+            assertEquals(40, applied.last()?.opacityPercent)
+        } finally {
+            onEdt { dialog.dispose() }
+        }
+    }
+
+    @Test
+    fun `the bundled presets are listed and selecting one applies it`(
+        @org.junit.jupiter.api.io.TempDir directory: java.nio.file.Path,
+    ) {
+        val settings = AppSettings.inMemory()
+        val applied = mutableListOf<TerminalBackgroundImage?>()
+        val backgrounds = directory.resolve("backgrounds")
+        val controller = SettingsController(
+            settings,
+            applyFontSize = {},
+            applyBackgroundImage = { image -> applied += image },
+            backgroundDirectory = backgrounds,
+        )
+        val dialog = onEdt { controller.createDialog(JFrame()) }
+
+        try {
+            val images = onEdt { findComponent(dialog, "settingsBackgroundImages") as JList<*> }
+            val names = onEdt {
+                (0 until images.model.size).map { (images.model.getElementAt(it) as java.nio.file.Path).fileName.toString() }
+            }
+            assertEquals(
+                listOf("bg1.jpg", "bg2.jpg", "bg3.jpg", "bg4.jpg", "bg5.jpg"),
+                names.take(5),
+            )
+            assertEquals("bg1.jpg", BackgroundImages.DEFAULT_PRESET)
+
+            onEdt { images.selectedIndex = 1 }
+
+            val stored = backgrounds.toAbsolutePath().normalize().resolve("bg2.jpg")
+            assertTrue(settings.terminalBackgroundEnabled)
+            assertEquals(stored.toString(), settings.terminalBackgroundImage)
+            assertTrue(java.nio.file.Files.exists(stored))
+            assertEquals(TerminalBackgroundImage(stored), applied.last())
         } finally {
             onEdt { dialog.dispose() }
         }
@@ -77,7 +237,7 @@ class SettingsControllerTest {
         try {
             val categories = onEdt { findComponent(dialog, "settingsCategories") as JList<*> }
             val pages = onEdt { (0 until categories.model.size).map { categories.model.getElementAt(it) } }
-            assertEquals(listOf("General", "Terminal", "Colors", "About"), pages)
+            assertEquals(listOf("General", "Terminal", "Colors", "Background", "About"), pages)
             assertEquals(0, onEdt { categories.selectedIndex })
 
             val generalPage = onEdt { pageOf(findComponent(dialog, "settingsLanguage")) }
@@ -139,11 +299,15 @@ class SettingsControllerTest {
         named = "EYESHELL_TEST_SETTINGS_RENDER",
         matches = "1",
     )
-    fun `renders the settings dialog for visual inspection`() {
+    fun `renders the settings dialog for visual inspection`(
+        @org.junit.jupiter.api.io.TempDir directory: java.nio.file.Path,
+    ) {
         com.formdev.flatlaf.FlatDarkLaf.setup()
+        val backgrounds = directory.resolve("backgrounds")
         val controller = SettingsController(
             AppSettings.inMemory().apply { terminalColorSchemeId = "dracula" },
             applyFontSize = {},
+            backgroundDirectory = backgrounds,
         )
         val dialog = onEdt { controller.createDialog(JFrame()) }
 
@@ -153,6 +317,12 @@ class SettingsControllerTest {
             onEdt { writeDialogRender(dialog, "settings-dialog.png") }
             onEdt { categories.selectedIndex = 1 }
             onEdt { writeDialogRender(dialog, "settings-terminal.png") }
+            onEdt { categories.selectedIndex = 3 }
+            onEdt {
+                val images = findComponent(dialog, "settingsBackgroundImages") as JList<*>
+                images.selectedIndex = 0
+            }
+            onEdt { writeDialogRender(dialog, "settings-background.png") }
         } finally {
             onEdt { dialog.dispose() }
         }

@@ -24,6 +24,14 @@ object EyeShellPaths {
         xdgConfigHome = System.getenv("XDG_CONFIG_HOME"),
     )
 
+    /** Directory holding imported terminal background images (non-secret preferences). */
+    fun backgroundDirectory(): Path = configDirectory(
+        osName = System.getProperty("os.name"),
+        userHome = System.getProperty("user.home"),
+        appData = System.getenv("APPDATA"),
+        xdgConfigHome = System.getenv("XDG_CONFIG_HOME"),
+    ).resolve("backgrounds")
+
     internal fun resolveSettingsFile(
         osName: String,
         userHome: String,

@@ -77,13 +77,21 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 - The terminal uses the selected color scheme (`eyeShell Dark` by default); light text sits on the scheme background rather than white-on-black.
 - Switching the scheme in Settings recolors **already-printed** scrollback, not only new output, and no white boxes appear behind the text.
 - Emoji render as monochrome glyphs (Linux) and Nerd Font icons render when a patched font is installed; missing glyphs fall back per run instead of showing boxes.
+- Choosing a non-UTF-8 encoding (for example GBK or BIG5) on a host that prints those bytes turns previously garbled output into readable text, and typed Chinese text reaches the shell intact.
+- Switching the encoding while connected re-decodes the existing screen and scrollback in place without reconnecting, and new output continues immediately.
+- Only output beyond the retained 8 MiB window keeps its old decoding; `Clear Buffer` still empties everything.
+- With a background image enabled, the image is visible behind the text; ANSI-colored lines, selection, search hits, highlights, and the cursor still draw their own opaque colors.
 
 ## 6a. Settings dialog
 
-- The dialog shows the categories General, Terminal, Colors, and About, with the content on the right.
+- The dialog shows the categories General, Terminal, Colors, Background, and About, with the content on the right.
 - `Terminal` changes the font size live for every open session (the PTY reflows) and the value survives a restart.
+- `Terminal` also lists the character encodings with UTF-8 selected by default; the choice applies to every open session immediately and survives a restart as `terminal.charset`.
 - `Colors` lists the six schemes, updates the four-line preview and the WCAG contrast figure when a scheme is picked, and applies it to every open session immediately.
 - The color scheme survives a restart and is stored as `terminal.color.scheme` in `settings.properties`.
+- `Background` offers `Enable background image`, `Choose image...`, `Clear`, the opacity spinner, and an image list that always starts with the five bundled presets (`bg1`–`bg5`, marked `(preset)`) followed by imported files. A fresh profile has `bg1` selected and applied; choosing any entry applies it to every open session at once. A missing or corrupt file falls back to the plain scheme background without an error dialog.
+- A preset is copied into `backgrounds/` the first time it is used; replacing that file by hand is preserved (the bundled copy is never silently overwritten).
+- The background image and its opacity survive a restart as `terminal.background.enabled`, `terminal.background.image`, and `terminal.background.opacity`; resizing the window rescales the image without freezing the UI.
 - The language row is visibly disabled with a hint; no other setting is presented as working when it is not.
 
 ## 7. SFTP

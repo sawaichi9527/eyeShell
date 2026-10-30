@@ -1,5 +1,14 @@
 # Third-Party Notices
 
+## Bundled terminal background presets
+
+- Files: `src/main/resources/backgrounds/bg1.jpg` … `bg5.jpg`
+- Origin: extracted from the FinalShell 4.6.5 installation on the project owner's machine (`finalshell.jar` → `resources/images/`)
+- Copyright: hostbuf.com / FinalShell authors
+- License: **not covered by eyeShell's MIT license**
+- Status: bundled as the default terminal background presets (`bg1.jpg` is the default) at the project owner's explicit request on 2026-10-30
+- Removal path: delete the five files, then adjust `BackgroundImages.BUNDLED_PRESETS` / `DEFAULT_PRESET` and the `Preset` row in `SettingsController` if redistribution ever has to stop
+
 ## JediTerm
 
 - Project: JediTerm

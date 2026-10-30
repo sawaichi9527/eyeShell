@@ -50,6 +50,53 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `the terminal charset id survives a reload`() {
+        val file = directory.resolve("settings.properties")
+        assertEquals("", AppSettings.load(file).terminalCharsetId)
+
+        AppSettings.load(file).terminalCharsetId = "GBK"
+
+        assertEquals("GBK", AppSettings.load(file).terminalCharsetId)
+    }
+
+    @Test
+    fun `terminal background settings survive a reload`() {
+        val file = directory.resolve("settings.properties")
+        val settings = AppSettings.load(file)
+        assertEquals(true, settings.terminalBackgroundEnabled)
+        assertEquals("", settings.terminalBackgroundImage)
+        assertEquals(AppSettings.DEFAULT_BACKGROUND_OPACITY, settings.terminalBackgroundOpacity)
+
+        settings.terminalBackgroundEnabled = false
+        settings.terminalBackgroundImage = "/tmp/bg.png"
+        settings.terminalBackgroundOpacity = 40
+
+        val reloaded = AppSettings.load(file)
+        assertEquals(false, reloaded.terminalBackgroundEnabled)
+        assertEquals("/tmp/bg.png", reloaded.terminalBackgroundImage)
+        assertEquals(40, reloaded.terminalBackgroundOpacity)
+    }
+
+    @Test
+    fun `a fresh profile enables the bundled background preset`() {
+        val file = directory.resolve("settings.properties")
+
+        assertEquals(true, AppSettings.load(file).terminalBackgroundEnabled)
+    }
+
+    @Test
+    fun `background opacity is clamped to the supported range`() {
+        val file = directory.resolve("settings.properties")
+        val settings = AppSettings.load(file)
+
+        settings.terminalBackgroundOpacity = 0
+        assertEquals(AppSettings.MIN_BACKGROUND_OPACITY, AppSettings.load(file).terminalBackgroundOpacity)
+
+        settings.terminalBackgroundOpacity = 500
+        assertEquals(AppSettings.MAX_BACKGROUND_OPACITY, AppSettings.load(file).terminalBackgroundOpacity)
+    }
+
+    @Test
     fun `a damaged file falls back to defaults instead of failing`() {
         val file = directory.resolve("settings.properties")
         Files.writeString(file, "terminal.font.size=not-a-number\n")

@@ -49,6 +49,22 @@ interface TerminalView : AutoCloseable {
      * their current scheme.
      */
     fun setColorScheme(scheme: TerminalColorScheme) = Unit
+
+    /**
+     * Draws a background image behind the terminal grid, or clears it when [image] is `null`.
+     * Default-colored cells stay transparent so the image shows through; explicit ANSI colors,
+     * selection, search, highlights, and the cursor remain opaque.
+     */
+    fun setBackgroundImage(image: TerminalBackgroundImage?) = Unit
+
+    /**
+     * Stops consuming the attached session without closing it, so the same widget can replay
+     * retained output and then continue with the live session.
+     *
+     * Returns false when the view cannot detach (for example when it has no running session);
+     * implementations that do not support replay keep the current session attached.
+     */
+    fun detachSession(): Boolean = false
 }
 
 fun interface TerminalOutputSnapshot {

@@ -5,9 +5,12 @@ import io.github.sawaichi9527.eyeshell.monitor.MonitorSnapshot
 import io.github.sawaichi9527.eyeshell.platform.AppInfo
 import io.github.sawaichi9527.eyeshell.platform.AppSettings
 import io.github.sawaichi9527.eyeshell.ssh.HostSession
+import io.github.sawaichi9527.eyeshell.terminal.ReplayTerminalSession
+import io.github.sawaichi9527.eyeshell.terminal.TerminalBackgroundImage
+import io.github.sawaichi9527.eyeshell.terminal.TerminalCharsets
+import io.github.sawaichi9527.eyeshell.terminal.TerminalColorScheme
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
-import io.github.sawaichi9527.eyeshell.terminal.TerminalColorScheme
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Component
@@ -18,6 +21,7 @@ import java.awt.Insets
 import java.awt.KeyboardFocusManager
 import java.awt.KeyEventDispatcher
 import java.awt.event.KeyEvent
+import java.nio.charset.Charset
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.BorderFactory
@@ -53,10 +57,18 @@ class EyeShellWindow(
 ) : JFrame(AppInfo.windowTitle) {
     private val closed = AtomicBoolean()
     private val pagesByComponent = mutableMapOf<JComponent, TerminalSessionPage>()
+    private var terminalCharset: Charset = TerminalCharsets.charsetFromId(appSettings.terminalCharsetId)
+    private var terminalBackgroundImage: TerminalBackgroundImage? = TerminalBackgroundImage.fromSettings(
+        enabled = appSettings.terminalBackgroundEnabled,
+        storedPath = appSettings.terminalBackgroundImage,
+        opacityPercent = appSettings.terminalBackgroundOpacity,
+    )
     private val settingsController = SettingsController(
         appSettings,
         applyFontSize = { size -> applyTerminalFontSize(size) },
         applyColorScheme = { scheme -> applyTerminalColorScheme(scheme) },
+        applyCharset = { charset -> applyTerminalCharset(charset) },
+        applyBackgroundImage = { image -> applyTerminalBackgroundImage(image) },
     )
     private val workbench: WorkbenchPanel = WorkbenchPanel(
         connectAction = connectAction?.let { action -> { action(this) } },
@@ -84,7 +96,9 @@ class EyeShellWindow(
         reconnect: ((HostConnectionPreset, JComponent) -> Boolean)? = null,
     ) {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal sessions must be attached on the Swing EDT" }
+        terminal.setCharset(terminalCharset)
         val terminalView = terminalViewFactory()
+        terminalView.setBackgroundImage(terminalBackgroundImage)
         val page = try {
             TerminalSessionPage(this, terminalView, hostSession, terminal)
         } catch (failure: Throwable) {
@@ -139,6 +153,7 @@ class EyeShellWindow(
     ): Boolean {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal sessions must reconnect on the Swing EDT" }
         val page = pagesByComponent[component] ?: return false
+        terminal.setCharset(terminalCharset)
         if (!page.reconnect(hostSession, terminal, preset)) return false
         val title = hostSession.endpoint.displayName
         workbench.updateSessionTitle(component, title)
@@ -217,6 +232,26 @@ class EyeShellWindow(
         pagesByComponent.values.toList().forEach { page -> page.applyColorScheme(scheme) }
     }
 
+    /**
+     * Applies the Settings encoding to every open session and remembers it for new ones. Existing
+     * output keeps its old decoding; only bytes not yet decoded are reinterpreted (§9.6).
+     */
+    internal fun applyTerminalCharset(charset: Charset) {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal encoding changes must happen on the Swing EDT" }
+        terminalCharset = charset
+        pagesByComponent.values.toList().forEach { page -> page.applyCharset(charset) }
+    }
+
+    /**
+     * Applies the Settings background image to every open session and remembers it for new ones.
+     * A `null` image restores the plain scheme background (§9.5).
+     */
+    internal fun applyTerminalBackgroundImage(image: TerminalBackgroundImage?) {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal background changes must happen on the Swing EDT" }
+        terminalBackgroundImage = image
+        pagesByComponent.values.toList().forEach { page -> page.applyBackgroundImage(image) }
+    }
+
     override fun dispose() {
         if (!closed.compareAndSet(false, true)) return
         var failure: Throwable? = null
@@ -266,6 +301,7 @@ internal class TerminalSessionPage(
     private var reconnectDispatcher: KeyEventDispatcher? = null
     private var reconnectPreset: HostConnectionPreset? = null
     private var reconnectRequest: ((HostConnectionPreset) -> Boolean)? = null
+    private val redecodeLock = Any()
     val component: JComponent = JPanel(BorderLayout()).apply {
         name = "terminalWorkspace"
         getAccessibleContext().accessibleName = "Terminal workspace"
@@ -275,6 +311,41 @@ internal class TerminalSessionPage(
     fun applyFontSize(size: Float) = terminalView.setFontSize(size)
 
     fun applyColorScheme(scheme: TerminalColorScheme) = terminalView.setColorScheme(scheme)
+
+    /** Switches the encoding of the live session; the view only sees already decoded characters. */
+    fun applyCharset(charset: Charset) {
+        if (session.charset == charset) return
+        session.setCharset(charset)
+
+        // Without retained raw bytes only new output follows the new encoding.
+        val raw = runCatching { session.rawOutput() }.getOrNull() ?: return
+        if (raw.isEmpty()) return
+
+        Thread.ofVirtual().name("eyeshell-redecode").start {
+            val prefix = REDECODE_RESET + String(raw, charset)
+            // Serialize replays so two quick Settings changes cannot attach at the same time; each
+            // run replays the bytes it snapshotted, and the last one wins.
+            synchronized(redecodeLock) {
+                if (closed.get()) return@start
+                if (!terminalView.detachSession()) {
+                    logger.warning("Could not detach the terminal for re-decoding; new output uses $charset")
+                    return@start
+                }
+                runCatching {
+                    SwingUtilities.invokeAndWait {
+                        if (!closed.get()) {
+                            terminalView.attach(ReplayTerminalSession(prefix.toCharArray(), session))
+                        }
+                    }
+                }.onFailure { failure ->
+                    logger.log(java.util.logging.Level.WARNING, "Could not replay re-decoded output", failure)
+                }
+            }
+        }
+    }
+
+    /** Paints or clears the background image without recreating the view. */
+    fun applyBackgroundImage(image: TerminalBackgroundImage?) = terminalView.setBackgroundImage(image)
 
     /**
      * Opens the SFTP subsystem off the EDT and reports either the controller or the reason it
@@ -469,6 +540,13 @@ internal class TerminalSessionPage(
         } finally {
             hostSession.close()
         }
+    }
+
+    private companion object {
+        val logger: java.util.logging.Logger = java.util.logging.Logger.getLogger(TerminalSessionPage::class.java.name)
+
+        /** Clears the visible screen and the scrollback before the re-decoded history replays. */
+        const val REDECODE_RESET = "\u001B[3J\u001B[H"
     }
 }
 

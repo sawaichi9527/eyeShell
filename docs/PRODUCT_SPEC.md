@@ -76,6 +76,8 @@
 
 ### 3.3 中優先功能
 
+- Terminal 背景圖片
+- Terminal 字元編碼（UTF-8／GB18030／GBK／BIG5 等）
 - 多主機批次命令
 - Session Log
 - Log Analyzer View
@@ -390,7 +392,7 @@ M1B 先完成以下最小 vertical slice：
 - 每次連線顯示並確認 Host Key Algorithm 與 SHA-256 Fingerprint
 - Session-only Host Key acceptance；尚未宣告為持久化 Known Hosts
 - 單一 authenticated transport 上的 interactive PTY shell
-- UTF-8 雙向 I/O 與 terminal resize
+- Terminal I/O 使用可設定的字元編碼（預設 UTF-8，見 §9.6）與 terminal resize
 - connect、host-key confirmation wait 與 authentication 不阻塞 Swing EDT
 
 M1C 增加：
@@ -499,6 +501,11 @@ Fork 原則：
 - 不直接追蹤 upstream master。
 - Buffer、Selection、Copy 與 Highlight patch 需獨立紀錄。
 
+Background-image patch：
+
+- Commit：`4ab49e9`
+- 內容：`TerminalPanel.paintComponent` 的底色填滿改走可覆寫的 `paintTerminalBackground`；`drawCharacters` 與 `drawMargins` 依 `isDefaultBackgroundPainted` 決定是否填滿預設背景，使嵌入端可在預設背景色儲存格後方繪製圖片，同時保留 ANSI 色彩、Selection、Search、Highlight 與 Cursor 的不透明底色。
+
 ### 9.2 Terminal 抽象介面
 
 UI 不得直接依賴 JediTerm 具體實作。M1A 先建立目前 vertical slice 所需的最小邊界：
@@ -515,10 +522,13 @@ interface TerminalView : AutoCloseable {
     fun showSearch()
     fun clearScrollback()
     fun setColorScheme(scheme: TerminalColorScheme)
+    fun setBackgroundImage(image: TerminalBackgroundImage?)
 }
 ```
 
 Phase 1 依功能實作進度擴充 `selectVisible`、`selectAllOutput`、`copySelection`、`copyAllOutput` 與 `applyHighlightRules`，不預先加入空實作。第一版實作為 `JediTermTerminalView`。未來若有足夠效益，才評估 Skia 或 WebGL Renderer。
+
+字元編碼屬於 Session 而非 View：`TerminalSession` 提供 `charset` 與 `setCharset(charset)`，View 只消費已解碼的字元。
 
 ### 9.3 Buffer 分離
 
@@ -542,7 +552,36 @@ Terminal 的 background、foreground 與 16 色 ANSI palette 由使用者選擇�
 - 選擇即時套用到所有已開啟 Session，不重建 `TerminalView`、不影響 scrollback、Search、Selection 或 Highlight 規則。
 - 預設文字顏色的儲存格必須以「未指定顏色」保存，繪製時才解析為目前主題，因此切換主題時既有 scrollback 一併重新著色。
 - 選擇保存在非機密的 `settings.properties`（`terminal.color.scheme`）；未知或已移除的 id 回退到預設主題。
-- Settings 對話框採左側分類、右側內容的 layout；顏色頁面提供主題下拉選單、即時預覽與對比數值。
+- Settings 對話框採左側分類、右側內容的 layout；顏色頁面提供主題下拉選單、即時預覽與對比數值；Terminal 頁面提供字型大小與字元編碼；Background 頁面提供背景圖片開關、圖片選擇與預覽（§9.5）。
+
+### 9.5 Terminal 背景圖片
+
+Terminal 可選擇內建預設圖片或一張本機圖片作為背景，文字繪製於圖片之上（仿 FinalShell 的「啟用背景圖片」）。
+
+- 內建預設圖片：`bg1.jpg`～`bg5.jpg`，隨應用程式打包於 classpath `backgrounds/`；啟動時會複製到 `backgrounds/`，Settings 的圖片清單以 `(preset)` 標記排在最前面，`bg1.jpg` 為預設值。
+- 首次啟動且尚未儲存任何背景選擇時，自動啟用 `bg1.jpg`；`Clear` 會寫入「停用 + 空路徑」，因此不會在下次啟動時又恢復預設圖。
+- 選取預設或自訂圖片時，檔案會複製到應用程式設定目錄的 `backgrounds/`（`%APPDATA%\eyeShell\backgrounds`、`$XDG_CONFIG_HOME/eyeShell/backgrounds`），避免原檔移動後失效；同名檔案已存在時不覆寫，保留使用者自行替換的版本。
+- 使用者圖片由 `JFileChooser` 選取（`png`／`jpg`／`gif`／`bmp`），同樣複製到 `backgrounds/`。
+- 單一全域設定，不支援 per-host／per-workspace 圖片。
+- 圖片以 cover 方式縮放並置中；縮放結果必須快取，Resize 或主題切換才重新計算，repaint 不得重新解碼或縮放。
+- 解碼在背景執行緒完成並限制像素上限；缺檔、毀損或非圖片檔一律回退為純配色背景，不阻塞 EDT、不使啟動失敗。
+- 預設背景色的儲存格不再填色，讓圖片透出；具有明確顏色的儲存格（ANSI 色彩、Selection、Search、Highlight、Cursor）仍保留自身底色。
+- 可設定圖片透明度（10–100%），透明度越低圖片越淡、文字越易閱讀；淺色主題搭配圖片時以 Settings 的提示文字說明對比風險。
+- 選擇保存在非機密的 `settings.properties`（`terminal.background.enabled`、`terminal.background.image`、`terminal.background.opacity`）。
+- 內建預設圖片的權利歸屬與散布條件記錄於 `THIRD_PARTY_NOTICES.md`，**不屬於 eyeShell 的 MIT 授權範圍**；若不再允許散布，替換這五個檔案並調整 `BackgroundImages.BUNDLED_PRESETS`／`DEFAULT_PRESET` 即可。
+
+### 9.6 Terminal 字元編碼
+
+Terminal 輸出解碼與輸入編碼使用使用者選定的 charset（仿 FinalShell 的「字符編碼」）。
+
+- 內建清單：`UTF-8`（預設）、`GB18030`、`GBK`、`BIG5`、`BIG5-HKSCS`、`Shift_JIS`、`EUC-JP`、`EUC-KR`、`ISO-8859-1`、`windows-1252`；id 以 JVM `Charset` 名稱正規化，未知或不受支援的 id 回退為 UTF-8。
+- 解碼採增量 `CharsetDecoder`（malformed／unmappable 一律 REPLACE）；未解碼位元組保留在緩衝區，因此切換 charset 後接續內容以新 charset 解讀。
+- Session 保留最近 8 MiB 原始輸出位元組（`RawOutputLog`）。切換編碼時，既有畫面與 scrollback 會以新編碼重新解碼，並透過 terminal emulator 重播，因此已顯示的亂碼會立即變成正確文字，SSH 連線不中斷、也不需要重連。
+- 重播會保留 ANSI 色彩、換行與 alternate screen 行為；重播期間暫停讀取，完成後由同一連線繼續輸出。
+- 超出保留範圍（8 MiB）的最舊輸出維持原解碼；切換點若正好落在一個多位元組序列中間，最多可能遺失該序列的字元。
+- 輸入端 `write(String)` 使用同一 charset 編碼；`write(ByteArray)`（按鍵序列）維持原始位元組不動。
+- 匯出（Copy All／Save All）固定使用 UTF-8（§10.4），不受此設定影響。
+- 選擇保存在非機密的 `settings.properties`（`terminal.charset`）。
 
 ---
 
@@ -599,6 +638,7 @@ M1E-A 增加：
 - Main／alternate screen 都從 immutable retained-main-buffer text snapshot 輸出；snapshot 後的 Writer／檔案 I/O 不持有 terminal model lock
 - Copy All 在背景組合文字，不建立視覺 Selection；上限為 8,388,608 UTF-16 code units，超限時提示改用 Save All
 - Save All 使用 UTF-8、同目錄 temporary file 與 atomic replace；檔案系統不支援 atomic move 時 fail closed 並保留既有目標檔
+- 匯出編碼固定為 UTF-8，不受 `terminal.charset` 設定影響（§9.6）
 - Window close 取消背景工作；若 snapshot capture 正在進行，只延後 `TerminalView.close` 至 capture 完成，不阻塞 EDT
 - 完整 context-menu 排序、全選可見、全選所有輸出與 Search hardening 留在 M1E-B
 
@@ -946,6 +986,8 @@ Repaint
 - 合併短時間內多個 SSH Packet。
 - Terminal 更新率設上限。
 - 只 repaint Dirty Region。
+- 背景圖片只在載入與視窗尺寸變更時解碼／縮放並快取，repaint 不得重新解碼或縮放圖片。
+- Terminal 解碼採增量 `CharsetDecoder`，不得每個字元重建 decoder 或每次讀取重新配置大型緩衝區。
 - Regex 只分析新增或修改行。
 - 匯出使用串流。
 - Session Log 使用背景磁碟寫入。
@@ -1044,6 +1086,8 @@ Repaint
 
 ### Phase 3：進階效率工具
 
+- Terminal 背景圖片
+- Terminal 字元編碼
 - 多主機批次命令
 - Session Log
 - Log Analyzer

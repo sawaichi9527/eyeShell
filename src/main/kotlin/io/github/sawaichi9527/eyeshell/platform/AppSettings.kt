@@ -43,6 +43,47 @@ class AppSettings private constructor(
             save()
         }
 
+    /**
+     * Id of the selected terminal character encoding (`UTF-8` by default). Resolution lives in the
+     * terminal package; an unknown or removed id falls back to UTF-8.
+     */
+    var terminalCharsetId: String
+        get() = properties.getProperty(KEY_TERMINAL_CHARSET).orEmpty()
+        set(value) {
+            properties.setProperty(KEY_TERMINAL_CHARSET, value)
+            save()
+        }
+
+    /** Whether the selected terminal background image is drawn; bundled `bg1` is on by default. */
+    var terminalBackgroundEnabled: Boolean
+        get() = properties.getProperty(KEY_TERMINAL_BACKGROUND_ENABLED)?.toBooleanStrictOrNull() ?: true
+        set(value) {
+            properties.setProperty(KEY_TERMINAL_BACKGROUND_ENABLED, value.toString())
+            save()
+        }
+
+    /** Absolute path of the selected background image, or an empty string when none is chosen. */
+    var terminalBackgroundImage: String
+        get() = properties.getProperty(KEY_TERMINAL_BACKGROUND_IMAGE).orEmpty()
+        set(value) {
+            properties.setProperty(KEY_TERMINAL_BACKGROUND_IMAGE, value)
+            save()
+        }
+
+    /** Background image opacity in percent, clamped to the supported range. */
+    var terminalBackgroundOpacity: Int
+        get() = properties.getProperty(KEY_TERMINAL_BACKGROUND_OPACITY)
+            ?.toIntOrNull()
+            ?.coerceIn(MIN_BACKGROUND_OPACITY, MAX_BACKGROUND_OPACITY)
+            ?: DEFAULT_BACKGROUND_OPACITY
+        set(value) {
+            properties.setProperty(
+                KEY_TERMINAL_BACKGROUND_OPACITY,
+                value.coerceIn(MIN_BACKGROUND_OPACITY, MAX_BACKGROUND_OPACITY).toString(),
+            )
+            save()
+        }
+
     private fun save() {
         val target = file ?: return
         try {
@@ -63,9 +104,16 @@ class AppSettings private constructor(
         const val DEFAULT_TERMINAL_FONT_SIZE = 16
         const val MIN_TERMINAL_FONT_SIZE = 10
         const val MAX_TERMINAL_FONT_SIZE = 28
+        const val DEFAULT_BACKGROUND_OPACITY = 100
+        const val MIN_BACKGROUND_OPACITY = 10
+        const val MAX_BACKGROUND_OPACITY = 100
 
         private const val KEY_TERMINAL_FONT_SIZE = "terminal.font.size"
         private const val KEY_TERMINAL_COLOR_SCHEME = "terminal.color.scheme"
+        private const val KEY_TERMINAL_CHARSET = "terminal.charset"
+        private const val KEY_TERMINAL_BACKGROUND_ENABLED = "terminal.background.enabled"
+        private const val KEY_TERMINAL_BACKGROUND_IMAGE = "terminal.background.image"
+        private const val KEY_TERMINAL_BACKGROUND_OPACITY = "terminal.background.opacity"
 
         fun load(file: Path): AppSettings {
             val properties = Properties()

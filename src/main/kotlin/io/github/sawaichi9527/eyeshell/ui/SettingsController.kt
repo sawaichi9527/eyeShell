@@ -2,6 +2,10 @@ package io.github.sawaichi9527.eyeshell.ui
 
 import io.github.sawaichi9527.eyeshell.platform.AppInfo
 import io.github.sawaichi9527.eyeshell.platform.AppSettings
+import io.github.sawaichi9527.eyeshell.platform.BackgroundImages
+import io.github.sawaichi9527.eyeshell.terminal.TerminalBackgroundImage
+import io.github.sawaichi9527.eyeshell.terminal.TerminalCharset
+import io.github.sawaichi9527.eyeshell.terminal.TerminalCharsets
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorScheme
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorSchemes
 import java.awt.BorderLayout
@@ -9,6 +13,7 @@ import java.awt.CardLayout
 import java.awt.Color
 import java.awt.Component
 import java.awt.Dimension
+import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.Frame
 import java.awt.Graphics
@@ -17,15 +22,21 @@ import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Insets
 import java.awt.RenderingHints
+import java.awt.event.ItemEvent
+import java.nio.charset.Charset
+import java.nio.file.Files
+import java.nio.file.Path
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
 import javax.swing.JButton
+import javax.swing.JCheckBox
 import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JDialog
+import javax.swing.JFileChooser
 import javax.swing.JLabel
 import javax.swing.JList
 import javax.swing.JPanel
@@ -51,6 +62,10 @@ internal class SettingsController(
     private val settings: AppSettings,
     private val applyFontSize: (Float) -> Unit,
     private val applyColorScheme: (TerminalColorScheme) -> Unit = {},
+    private val applyCharset: (Charset) -> Unit = {},
+    private val applyBackgroundImage: (TerminalBackgroundImage?) -> Unit = {},
+    private val chooseBackgroundImage: (Component) -> Path? = ::chooseBackgroundImageFile,
+    private val backgroundDirectory: Path = BackgroundImages.defaultDirectory(),
 ) {
     private val activeDialog = AtomicReference<JDialog>()
 
@@ -78,6 +93,7 @@ internal class SettingsController(
         cards.add(generalPage(), CATEGORY_GENERAL)
         cards.add(terminalPage(), CATEGORY_TERMINAL)
         cards.add(colorsPage(), CATEGORY_COLORS)
+        cards.add(backgroundPage(dialog), CATEGORY_BACKGROUND)
         cards.add(aboutPage(), CATEGORY_ABOUT)
         (cards.layout as CardLayout).show(cards, CATEGORY_GENERAL)
 
@@ -111,7 +127,7 @@ internal class SettingsController(
      */
     private fun categoryList(cards: JPanel): JScrollPane {
         val list = JList(
-            arrayOf(CATEGORY_GENERAL, CATEGORY_TERMINAL, CATEGORY_COLORS, CATEGORY_ABOUT),
+            arrayOf(CATEGORY_GENERAL, CATEGORY_TERMINAL, CATEGORY_COLORS, CATEGORY_BACKGROUND, CATEGORY_ABOUT),
         ).apply {
             name = "settingsCategories"
             selectionMode = ListSelectionModel.SINGLE_SELECTION
@@ -163,6 +179,21 @@ internal class SettingsController(
             }
         }
         addRow(this, "Font size", fontSpinner, "pt · applies to every open session")
+
+        val encoding = JComboBox(TerminalCharsets.ALL.toTypedArray()).apply {
+            name = "settingsCharset"
+            toolTipText = "Character encoding used to decode output and encode typed text"
+            selectedItem = TerminalCharsets.fromId(settings.terminalCharsetId)
+            preferredSize = Dimension(200, preferredSize.height)
+            addActionListener {
+                val selected = selectedItem as? TerminalCharset ?: return@addActionListener
+                if (selected.id != settings.terminalCharsetId) {
+                    settings.terminalCharsetId = selected.id
+                    applyCharset(selected.charset)
+                }
+            }
+        }
+        addRow(this, "Encoding", encoding, "applies to every open session")
     }
 
     private fun colorsPage(): JPanel = page().apply {
@@ -204,8 +235,160 @@ internal class SettingsController(
         show(combo.selectedItem as TerminalColorScheme)
     }
 
-    private fun aboutPage(): JPanel = page().apply {
-        addHeading(this, "About")
+    /**
+     * Background image page: enable switch, image list (bundled `bg1`–`bg5` first, then imported
+     * files), choose/clear actions, and opacity. Every change applies to open sessions at once,
+     * matching the Colors page. The list is populated even before a selection exists, because the
+     * bundled presets are materialised when the page opens.
+     */
+    private fun backgroundPage(dialog: JDialog): JPanel = page().apply {
+        addHeading(this, "Background")
+
+        BackgroundImages.materializePresets(backgroundDirectory)
+
+        var updating = false
+
+        val enabled = JCheckBox("Enable background image", settings.terminalBackgroundEnabled).apply {
+            name = "settingsBackgroundEnabled"
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+        add(enabled)
+
+        val current = JLabel().apply {
+            name = "settingsBackgroundCurrent"
+            foreground = mutedColor()
+            alignmentX = Component.LEFT_ALIGNMENT
+            border = BorderFactory.createEmptyBorder(8, 0, 6, 0)
+        }
+        add(current)
+
+        val choose = JButton("Choose image...").apply { name = "settingsBackgroundChoose" }
+        val clear = JButton("Clear").apply { name = "settingsBackgroundClear" }
+        add(
+            JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
+                isOpaque = false
+                alignmentX = Component.LEFT_ALIGNMENT
+                add(choose)
+                add(clear)
+            },
+        )
+
+        val opacity = JSpinner(
+            SpinnerNumberModel(
+                settings.terminalBackgroundOpacity,
+                AppSettings.MIN_BACKGROUND_OPACITY,
+                AppSettings.MAX_BACKGROUND_OPACITY,
+                5,
+            ),
+        ).apply {
+            name = "settingsBackgroundOpacity"
+            toolTipText = "How strongly the image shows through the terminal background"
+        }
+        add(Box.createVerticalStrut(6).apply { setAlignmentX(Component.LEFT_ALIGNMENT) })
+        addRow(this, "Opacity", opacity, "% · lower values keep text easier to read")
+
+        val images = JList<Path>().apply {
+            name = "settingsBackgroundImages"
+            selectionMode = ListSelectionModel.SINGLE_SELECTION
+            visibleRowCount = 5
+            cellRenderer = ImagePathRenderer()
+        }
+        add(
+            JLabel("Images (bg1–bg5 are bundled presets; bg1 is the default)").apply {
+                foreground = mutedColor()
+                alignmentX = Component.LEFT_ALIGNMENT
+                border = BorderFactory.createEmptyBorder(10, 0, 4, 0)
+            },
+        )
+        add(
+            JScrollPane(images).apply {
+                name = "settingsBackgroundImagesScroll"
+                alignmentX = Component.LEFT_ALIGNMENT
+                preferredSize = Dimension(320, 120)
+                maximumSize = Dimension(Int.MAX_VALUE, 140)
+            },
+        )
+        add(
+            JLabel("Painted behind the terminal text; default-colored cells stay transparent.").apply {
+                foreground = mutedColor()
+                font = font.deriveFont(font.size2D - 1f)
+                alignmentX = Component.LEFT_ALIGNMENT
+                border = BorderFactory.createEmptyBorder(8, 0, 0, 0)
+            },
+        )
+
+        fun refresh() {
+            updating = true
+            try {
+                val selection = currentBackgroundImage()
+                enabled.isSelected = settings.terminalBackgroundEnabled
+                enabled.isEnabled = selection != null || settings.terminalBackgroundImage.isNotBlank()
+                clear.isEnabled = enabled.isEnabled
+                current.text = selection?.let { selected ->
+                    val missing = if (Files.isRegularFile(selected.file)) "" else " (missing)"
+                    "Current: ${selected.file.fileName}$missing"
+                } ?: "Current: none"
+
+                val available = BackgroundImages.listWithPresets(backgroundDirectory)
+                images.setListData(available.toTypedArray())
+                val stored = selection?.file?.toAbsolutePath()?.normalize()
+                images.setSelectedValue(
+                    available.firstOrNull { it.toAbsolutePath().normalize() == stored },
+                    true,
+                )
+            } finally {
+                updating = false
+            }
+        }
+
+        fun applySelection() {
+            applyBackgroundImage(currentBackgroundImage())
+            refresh()
+        }
+
+        enabled.addItemListener { event ->
+            if (updating) return@addItemListener
+            settings.terminalBackgroundEnabled = event.stateChange == ItemEvent.SELECTED
+            applySelection()
+        }
+        clear.addActionListener {
+            settings.terminalBackgroundEnabled = false
+            settings.terminalBackgroundImage = ""
+            applySelection()
+        }
+        choose.addActionListener {
+            val picked = chooseBackgroundImage(dialog) ?: return@addActionListener
+            val stored = runCatching { BackgroundImages.import(picked, backgroundDirectory) }.getOrNull()
+                ?: return@addActionListener
+            settings.terminalBackgroundImage = stored.toString()
+            settings.terminalBackgroundEnabled = true
+            applySelection()
+        }
+        opacity.addChangeListener {
+            val value = (opacity.value as Number).toInt()
+            if (value == settings.terminalBackgroundOpacity) return@addChangeListener
+            settings.terminalBackgroundOpacity = value
+            if (settings.terminalBackgroundEnabled) applySelection()
+        }
+        images.addListSelectionListener { event ->
+            if (updating || event.valueIsAdjusting) return@addListSelectionListener
+            val picked = images.selectedValue ?: return@addListSelectionListener
+            settings.terminalBackgroundImage = picked.toString()
+            settings.terminalBackgroundEnabled = true
+            applySelection()
+        }
+
+        refresh()
+    }
+
+    private fun currentBackgroundImage(): TerminalBackgroundImage? = TerminalBackgroundImage.fromSettings(
+        enabled = settings.terminalBackgroundEnabled,
+        storedPath = settings.terminalBackgroundImage,
+        opacityPercent = settings.terminalBackgroundOpacity,
+    )
+
+    private fun aboutPage(): JPanel = page().apply {        addHeading(this, "About")
         addRow(this, "Version", JLabel(AppInfo.windowTitle), null)
         addRow(this, "Java", JLabel(System.getProperty("java.version").orEmpty()), null)
         addRow(
@@ -341,10 +524,57 @@ internal class SettingsController(
         }
     }
 
-    private companion object {
+    internal companion object {
         const val CATEGORY_GENERAL = "General"
         const val CATEGORY_TERMINAL = "Terminal"
         const val CATEGORY_COLORS = "Colors"
+        const val CATEGORY_BACKGROUND = "Background"
         const val CATEGORY_ABOUT = "About"
+    }
+}
+
+/** File names only, so the list shows the imported image rather than its absolute path. */
+private class ImagePathRenderer : JLabel(), javax.swing.ListCellRenderer<Path> {
+    override fun getListCellRendererComponent(
+        list: JList<out Path>,
+        value: Path?,
+        index: Int,
+        isSelected: Boolean,
+        cellHasFocus: Boolean,
+    ): Component {
+        val name = value?.fileName?.toString().orEmpty()
+        text = if (BackgroundImages.presetNameOf(value) != null) "$name   (preset)" else name
+        toolTipText = value?.toString()
+        isOpaque = true
+        background = if (isSelected) {
+            list.selectionBackground ?: UIManager.getColor("List.selectionBackground")
+        } else {
+            list.background
+        }
+        foreground = if (isSelected) {
+            list.selectionForeground ?: UIManager.getColor("List.selectionForeground")
+        } else {
+            list.foreground
+        }
+        border = BorderFactory.createEmptyBorder(3, 8, 3, 8)
+        return this
+    }
+}
+
+/** Default picker used by the Background page; tests inject their own chooser. */
+private fun chooseBackgroundImageFile(parent: Component): Path? {
+    val chooser = JFileChooser().apply {
+        dialogTitle = "Choose background image"
+        fileSelectionMode = JFileChooser.FILES_ONLY
+        isMultiSelectionEnabled = false
+        fileFilter = javax.swing.filechooser.FileNameExtensionFilter(
+            "Images (${BackgroundImages.SUPPORTED_EXTENSIONS.joinToString(", ")})",
+            *BackgroundImages.SUPPORTED_EXTENSIONS.toTypedArray(),
+        )
+    }
+    return if (chooser.showOpenDialog(parent) == JFileChooser.APPROVE_OPTION) {
+        chooser.selectedFile?.toPath()
+    } else {
+        null
     }
 }

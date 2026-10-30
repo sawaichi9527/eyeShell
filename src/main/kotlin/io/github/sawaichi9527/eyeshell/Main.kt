@@ -10,6 +10,7 @@ import io.github.sawaichi9527.eyeshell.platform.LoggingSetup
 import io.github.sawaichi9527.eyeshell.platform.SafeMode
 import io.github.sawaichi9527.eyeshell.platform.ShutdownNoiseFilter
 import io.github.sawaichi9527.eyeshell.platform.AppSettings
+import io.github.sawaichi9527.eyeshell.platform.BackgroundImages
 import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorSchemes
 import io.github.sawaichi9527.eyeshell.secrets.SystemPasswordCredentialStore
@@ -55,6 +56,7 @@ fun main(arguments: Array<String>) {
         )
         val catalog = SqliteHostCatalog(EyeShellPaths.catalogDatabaseFile())
         val appSettings = AppSettings.load(EyeShellPaths.settingsFile())
+        applyDefaultBackground(appSettings)
         val commandsController = CommandsController(catalog)
         val hostCatalogController = HostCatalogController(
             catalog,
@@ -84,4 +86,26 @@ fun main(arguments: Array<String>) {
             },
         ).isVisible = true
     }
+}
+
+/**
+ * Turns on the bundled `bg1` preset for a fresh profile, and restores a bundled preset whose file was
+ * deleted. A stored image path (including the empty string written by `Clear`) is otherwise
+ * respected, so this never overrides a deliberate choice.
+ */
+internal fun applyDefaultBackground(
+    settings: AppSettings,
+    directory: java.nio.file.Path = BackgroundImages.defaultDirectory(),
+) {
+    // Keep the bundled presets on disk so the Settings list always shows bg1–bg5.
+    BackgroundImages.materializePresets(directory)
+    if (!settings.terminalBackgroundEnabled) return
+    val stored = settings.terminalBackgroundImage
+    if (stored.isBlank()) {
+        val default = BackgroundImages.ensureDefaultPreset(directory) ?: return
+        settings.terminalBackgroundImage = default.toString()
+        return
+    }
+    val resolved = BackgroundImages.resolveStored(stored, directory) ?: return
+    if (resolved.toString() != stored) settings.terminalBackgroundImage = resolved.toString()
 }
