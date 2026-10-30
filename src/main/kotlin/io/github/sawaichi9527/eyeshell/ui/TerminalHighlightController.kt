@@ -21,6 +21,7 @@ import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JScrollPane
 import javax.swing.JSpinner
+import io.github.sawaichi9527.eyeshell.platform.I18n
 import javax.swing.JTextField
 import javax.swing.ListSelectionModel
 import javax.swing.SpinnerNumberModel
@@ -55,14 +56,14 @@ internal class TerminalHighlightController(
         }
         refresh()
         val content = JPanel(GridBagLayout()).apply {
-            add(JLabel("Current Session rules"), constraints(0, 0))
+            add(JLabel(I18n.t("highlight.currentSession")), constraints(0, 0))
             add(JScrollPane(list), constraints(0, 1, fill = GridBagConstraints.BOTH, weightY = 1.0))
         }
         while (true) {
             when (JOptionPane.showOptionDialog(
                 owner,
                 content,
-                "Manage color highlight rules",
+                I18n.t("highlight.manage"),
                 JOptionPane.DEFAULT_OPTION,
                 JOptionPane.PLAIN_MESSAGE,
                 null,
@@ -86,8 +87,8 @@ internal class TerminalHighlightController(
                     val index = list.selectedIndex
                     if (index >= 0 && JOptionPane.showConfirmDialog(
                             owner,
-                            "Remove '${rules[index].name}'?",
-                            "Remove highlight rule",
+                            I18n.t("highlight.remove.message", rules[index].name),
+                            I18n.t("highlight.remove.title"),
                             JOptionPane.YES_NO_OPTION,
                             JOptionPane.WARNING_MESSAGE,
                         ) == JOptionPane.YES_OPTION
@@ -103,10 +104,10 @@ internal class TerminalHighlightController(
     }
 
     private fun editRule(owner: Component, existing: TerminalHighlightRule?): TerminalHighlightRule? {
-        val name = JTextField(existing?.name ?: "Rule ${rules.size + 1}", 24)
+        val name = JTextField(existing?.name ?: I18n.t("highlight.name") + " " + (rules.size + 1), 24)
         val pattern = JTextField(existing?.pattern ?: "", 24)
-        val matchCase = JCheckBox("Match case", existing?.matchCase ?: false)
-        val enabled = JCheckBox("Enabled", existing?.enabled ?: true)
+        val matchCase = JCheckBox(I18n.t("search.matchCase"), existing?.matchCase ?: false)
+        val enabled = JCheckBox(I18n.t("highlight.enabled"), existing?.enabled ?: true)
         val priority = JSpinner(SpinnerNumberModel(existing?.priority ?: 0, -10_000, 10_000, 1))
         val foreground = OptionalColorField("Foreground", existing?.foregroundRgb?.toAwtColor())
         val background = OptionalColorField(
@@ -114,9 +115,9 @@ internal class TerminalHighlightController(
             existing?.backgroundRgb?.toAwtColor() ?: DEFAULT_BACKGROUND,
             useDefault = existing != null && existing.backgroundRgb == null,
         )
-        val bold = JCheckBox("Bold", existing?.bold ?: false)
-        val italic = JCheckBox("Italic", existing?.italic ?: false)
-        val underline = JCheckBox("Underline", existing?.underline ?: false)
+        val bold = JCheckBox(I18n.t("highlight.bold"), existing?.bold ?: false)
+        val italic = JCheckBox(I18n.t("highlight.italic"), existing?.italic ?: false)
+        val underline = JCheckBox(I18n.t("highlight.underline"), existing?.underline ?: false)
         val mergeMode = JComboBox(HighlightMergeMode.entries.toTypedArray()).apply {
             selectedItem = existing?.mergeMode ?: HighlightMergeMode.MERGE
         }
@@ -140,7 +141,7 @@ internal class TerminalHighlightController(
         while (JOptionPane.showConfirmDialog(
                 owner,
                 form,
-                if (existing == null) "Add color highlight rule" else "Edit color highlight rule",
+                if (existing == null) I18n.t("highlight.add.title") else I18n.t("highlight.edit.title"),
                 JOptionPane.OK_CANCEL_OPTION,
                 JOptionPane.PLAIN_MESSAGE,
             ) == JOptionPane.OK_OPTION
@@ -148,17 +149,17 @@ internal class TerminalHighlightController(
             val ruleName = name.text.trim()
             val regex = pattern.text
             val failure = when {
-                ruleName.isEmpty() -> "Rule name must not be empty."
-                regex.isEmpty() -> "Regex must not be empty."
+                ruleName.isEmpty() -> I18n.t("highlight.error.name")
+                regex.isEmpty() -> I18n.t("highlight.error.regex")
                 else -> try {
                     Pattern.compile(regex)
                     null
                 } catch (error: PatternSyntaxException) {
-                    error.message ?: "Invalid RE2-compatible regex."
+                    error.message ?: I18n.t("highlight.error.invalid")
                 }
             }
             if (failure != null) {
-                JOptionPane.showMessageDialog(owner, failure, "Invalid highlight rule", JOptionPane.ERROR_MESSAGE)
+                JOptionPane.showMessageDialog(owner, failure, I18n.t("highlight.error.title"), JOptionPane.ERROR_MESSAGE)
                 continue
             }
             return TerminalHighlightRule(
@@ -190,7 +191,7 @@ internal class TerminalHighlightController(
             background = selectedColor
             foreground = contrastingText(selectedColor)
         }
-        private val terminalDefault = JCheckBox("Keep terminal color", useDefault)
+        private val terminalDefault = JCheckBox(I18n.t("highlight.keepColor"), useDefault)
 
         val rgb: Int?
             get() = if (terminalDefault.isSelected) null else selectedColor.rgb and 0xFFFFFF
@@ -198,7 +199,7 @@ internal class TerminalHighlightController(
         init {
             choose.isEnabled = !terminalDefault.isSelected
             choose.addActionListener {
-                JColorChooser.showDialog(this, "Choose $label color", selectedColor)?.let { color ->
+                JColorChooser.showDialog(this, I18n.t("highlight.chooseColor", label), selectedColor)?.let { color ->
                     selectedColor = color
                     choose.background = color
                     choose.foreground = contrastingText(color)

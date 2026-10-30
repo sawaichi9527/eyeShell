@@ -92,7 +92,9 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 - `Background` offers `Enable background image`, `Choose image...`, `Clear`, the opacity spinner, and an image list that always starts with the five bundled presets (`bg1`–`bg5`, marked `(preset)`) followed by imported files. A fresh profile has `bg1` selected and applied; choosing any entry applies it to every open session at once. A missing or corrupt file falls back to the plain scheme background without an error dialog.
 - A preset is copied into `backgrounds/` the first time it is used; replacing that file by hand is preserved (the bundled copy is never silently overwritten).
 - The background image and its opacity survive a restart as `terminal.background.enabled`, `terminal.background.image`, and `terminal.background.opacity`; resizing the window rescales the image without freezing the UI.
-- The language row is visibly disabled with a hint; no other setting is presented as working when it is not.
+- The language row switches between System default, English, Traditional Chinese, Simplified Chinese, and Japanese: the whole UI (Settings, workbench, Monitor, SFTP, Commands, table headers, terminal menus, search, and highlight dialogs) relocalizes immediately, and the choice survives a restart as `app.locale`.
+- `About` lists eyeShell's version, the Java runtime, the OS, and a table of the open-source components that are actually packaged (name, version, license, scope); `Third-party notices` opens the bundled notice text. A version in that table must match the packaged jar, so it comes from the build rather than being typed by hand.
+- The language row is enabled; Settings, the workbench buttons, the session status labels, the Monitor sidebar, the SFTP and Commands panels (including their dialogs and status lines), the table headers, the terminal context menu, search, and highlight dialogs are translated. The SSH connection dialog and the Saved Host editor are still English and will be translated next.
 
 ## 7. SFTP
 

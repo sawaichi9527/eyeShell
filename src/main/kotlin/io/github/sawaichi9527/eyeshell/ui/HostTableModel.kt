@@ -1,5 +1,6 @@
 package io.github.sawaichi9527.eyeshell.ui
 
+import io.github.sawaichi9527.eyeshell.platform.I18n
 import io.github.sawaichi9527.eyeshell.storage.SavedAuthenticationMethod
 import io.github.sawaichi9527.eyeshell.storage.SavedHost
 import java.util.Locale
@@ -54,10 +55,10 @@ internal object HostTableRows {
     }
 
     fun authLabel(method: SavedAuthenticationMethod): String = when (method) {
-        SavedAuthenticationMethod.PASSWORD -> "Password"
-        SavedAuthenticationMethod.PUBLIC_KEY -> "Public key"
-        SavedAuthenticationMethod.KEYBOARD_INTERACTIVE -> "Keyboard-interactive"
-        SavedAuthenticationMethod.SSH_AGENT -> "Agent"
+        SavedAuthenticationMethod.PASSWORD -> I18n.t("host.auth.password")
+        SavedAuthenticationMethod.PUBLIC_KEY -> I18n.t("host.auth.publicKey")
+        SavedAuthenticationMethod.KEYBOARD_INTERACTIVE -> I18n.t("host.auth.keyboardInteractive")
+        SavedAuthenticationMethod.SSH_AGENT -> I18n.t("host.auth.agent")
     }
 
     fun groupLabel(row: HostRow.Group): String = "${row.name} (${row.count})"
@@ -78,9 +79,9 @@ internal class HostTableModel : AbstractTableModel() {
 
     override fun getRowCount(): Int = rows.size
 
-    override fun getColumnCount(): Int = COLUMNS.size
+    override fun getColumnCount(): Int = COLUMN_KEYS.size
 
-    override fun getColumnName(column: Int): String = COLUMNS[column]
+    override fun getColumnName(column: Int): String = I18n.t(COLUMN_KEYS[column])
 
     override fun isCellEditable(rowIndex: Int, columnIndex: Int): Boolean = false
 
@@ -111,6 +112,14 @@ internal class HostTableModel : AbstractTableModel() {
         const val GROUP_COLUMN = 5
         const val REMARK_COLUMN = 6
 
-        val COLUMNS = listOf("Name", "Host", "Port", "User", "Authentication", "Group", "Remark")
+        val COLUMN_KEYS = listOf(
+            "host.column.name",
+            "host.column.host",
+            "host.column.port",
+            "host.column.user",
+            "host.column.auth",
+            "host.column.group",
+            "host.column.remark",
+        )
     }
 }

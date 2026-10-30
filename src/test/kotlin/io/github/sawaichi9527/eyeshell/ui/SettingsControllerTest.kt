@@ -3,6 +3,7 @@ package io.github.sawaichi9527.eyeshell.ui
 import io.github.sawaichi9527.eyeshell.platform.AppInfo
 import io.github.sawaichi9527.eyeshell.platform.AppSettings
 import io.github.sawaichi9527.eyeshell.platform.BackgroundImages
+import io.github.sawaichi9527.eyeshell.platform.I18n
 import io.github.sawaichi9527.eyeshell.terminal.TerminalBackgroundImage
 import io.github.sawaichi9527.eyeshell.terminal.TerminalCharsets
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorScheme
@@ -18,6 +19,7 @@ import javax.swing.JFrame
 import javax.swing.JLabel
 import javax.swing.JList
 import javax.swing.JSpinner
+import javax.swing.JTable
 import javax.swing.SwingUtilities
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -202,14 +204,45 @@ class SettingsControllerTest {
     }
 
     @Test
-    fun `language is visible but explicitly unavailable`() {
-        val controller = SettingsController(AppSettings.inMemory(), applyFontSize = {})
+    fun `language switches the bundle and is remembered`() {
+        val settings = AppSettings.inMemory()
+        val controller = SettingsController(settings, applyFontSize = {})
         val dialog = onEdt { controller.createDialog(JFrame()) }
 
         try {
             val language = onEdt { findComponent(dialog, "settingsLanguage") as JComboBox<*> }
-            assertFalse(onEdt { language.isEnabled })
-            assertEquals("English", onEdt { language.selectedItem })
+            assertTrue(onEdt { language.isEnabled })
+            assertEquals(5, onEdt { language.itemCount })
+
+            val traditional = onEdt {
+                (0 until language.itemCount)
+                    .map { language.getItemAt(it) as LanguageOption }
+                    .single { it.id == "zh-TW" }
+            }
+            onEdt { language.selectedItem = traditional }
+
+            assertEquals("zh-TW", settings.localeId)
+            assertEquals("zh-TW", I18n.localeId())
+            assertEquals("設定", I18n.t("settings.title"))
+        } finally {
+            I18n.setLocaleId("en")
+            onEdt { dialog.dispose() }
+        }
+    }
+
+    @Test
+    fun `the about page lists the open-source components`() {
+        val controller = SettingsController(AppSettings.inMemory(), applyFontSize = {})
+        val dialog = onEdt { controller.createDialog(JFrame()) }
+
+        try {
+            val table = onEdt { findComponent(dialog, "settingsAboutComponents") as JTable }
+            val names = onEdt {
+                (0 until table.model.rowCount).map { table.model.getValueAt(it, 0).toString() }
+            }
+            assertTrue(names.contains("FlatLaf"), names.toString())
+            assertTrue(names.contains("Apache MINA SSHD core"), names.toString())
+            assertTrue(onEdt { table.model.columnCount } == 4)
         } finally {
             onEdt { dialog.dispose() }
         }
@@ -236,8 +269,12 @@ class SettingsControllerTest {
 
         try {
             val categories = onEdt { findComponent(dialog, "settingsCategories") as JList<*> }
-            val pages = onEdt { (0 until categories.model.size).map { categories.model.getElementAt(it) } }
-            assertEquals(listOf("General", "Terminal", "Colors", "Background", "About"), pages)
+            val pages = onEdt {
+                (0 until categories.model.size).map {
+                    (categories.model.getElementAt(it) as SettingsCategory).key
+                }
+            }
+            assertEquals(listOf("general", "terminal", "colors", "background", "about"), pages)
             assertEquals(0, onEdt { categories.selectedIndex })
 
             val generalPage = onEdt { pageOf(findComponent(dialog, "settingsLanguage")) }
@@ -323,6 +360,24 @@ class SettingsControllerTest {
                 images.selectedIndex = 0
             }
             onEdt { writeDialogRender(dialog, "settings-background.png") }
+            onEdt { categories.selectedIndex = 4 }
+            onEdt { writeDialogRender(dialog, "settings-about.png") }
+
+            // Same dialog, rebuilt in Traditional Chinese, to verify the bundle and the language row.
+            onEdt { dialog.dispose() }
+            onEdt { I18n.setLocaleId("zh-TW") }
+            val localized = onEdt { controller.createDialog(JFrame()) }
+            try {
+                onEdt { writeDialogRender(localized, "settings-zh-TW.png") }
+                onEdt {
+                    val categories = findComponent(localized, "settingsCategories") as JList<*>
+                    categories.selectedIndex = 4
+                }
+                onEdt { writeDialogRender(localized, "settings-about-zh-TW.png") }
+            } finally {
+                onEdt { localized.dispose() }
+                onEdt { I18n.setLocaleId("en") }
+            }
         } finally {
             onEdt { dialog.dispose() }
         }

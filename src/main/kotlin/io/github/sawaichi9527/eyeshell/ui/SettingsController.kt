@@ -1,8 +1,11 @@
 package io.github.sawaichi9527.eyeshell.ui
 
+import io.github.sawaichi9527.eyeshell.platform.AboutComponents
 import io.github.sawaichi9527.eyeshell.platform.AppInfo
 import io.github.sawaichi9527.eyeshell.platform.AppSettings
 import io.github.sawaichi9527.eyeshell.platform.BackgroundImages
+import io.github.sawaichi9527.eyeshell.platform.I18n
+import io.github.sawaichi9527.eyeshell.platform.OpenSourceComponent
 import io.github.sawaichi9527.eyeshell.terminal.TerminalBackgroundImage
 import io.github.sawaichi9527.eyeshell.terminal.TerminalCharset
 import io.github.sawaichi9527.eyeshell.terminal.TerminalCharsets
@@ -18,9 +21,6 @@ import java.awt.Font
 import java.awt.Frame
 import java.awt.Graphics
 import java.awt.Graphics2D
-import java.awt.GridBagConstraints
-import java.awt.GridBagLayout
-import java.awt.Insets
 import java.awt.RenderingHints
 import java.awt.event.ItemEvent
 import java.nio.charset.Charset
@@ -42,21 +42,25 @@ import javax.swing.JList
 import javax.swing.JPanel
 import javax.swing.JScrollPane
 import javax.swing.JSpinner
+import javax.swing.JTable
+import javax.swing.JTextArea
 import javax.swing.ListSelectionModel
 import javax.swing.SpinnerNumberModel
 import javax.swing.SwingConstants
+import javax.swing.SwingUtilities
 import javax.swing.UIManager
+import javax.swing.table.AbstractTableModel
 
 /**
  * Settings entry point reachable from the gear button on the Monitor sidebar.
  *
  * The layout follows the left-category / right-content shape common to terminal tools: the list on
- * the left selects a page, and only the selected page is shown on the right. Categories exist only
- * for implemented preferences, so the language row is still shown disabled with an explicit hint
- * instead of implying a feature that does not exist.
+ * the left selects a page, and only the selected page is shown on the right. Every visible string
+ * comes from [I18n]; the language row switches the bundle and rebuilds this dialog immediately,
+ * while the main window picks the new language up after a restart.
  *
- * Terminal font size and color scheme are applied to every open session immediately and persisted
- * to `settings.properties`.
+ * Terminal font size, color scheme, encoding, and background image are applied to every open
+ * session immediately and persisted to `settings.properties`.
  */
 internal class SettingsController(
     private val settings: AppSettings,
@@ -64,12 +68,15 @@ internal class SettingsController(
     private val applyColorScheme: (TerminalColorScheme) -> Unit = {},
     private val applyCharset: (Charset) -> Unit = {},
     private val applyBackgroundImage: (TerminalBackgroundImage?) -> Unit = {},
+    private val applyLocale: () -> Unit = {},
     private val chooseBackgroundImage: (Component) -> Path? = ::chooseBackgroundImageFile,
     private val backgroundDirectory: Path = BackgroundImages.defaultDirectory(),
 ) {
     private val activeDialog = AtomicReference<JDialog>()
+    private var owner: Frame? = null
 
     fun open(owner: Frame) {
+        this.owner = owner
         activeDialog.get()?.takeIf(JDialog::isDisplayable)?.let { dialog ->
             dialog.toFront()
             dialog.requestFocus()
@@ -84,8 +91,18 @@ internal class SettingsController(
         activeDialog.getAndSet(null)?.dispose()
     }
 
+    /**
+     * Rebuilds the dialog after a language change so every label uses the new bundle. The caller
+     * keeps the same owner frame, so the dialog reappears in the same place.
+     */
+    private fun reopen() {
+        val frame = owner ?: return
+        activeDialog.getAndSet(null)?.dispose()
+        open(frame)
+    }
+
     internal fun createDialog(owner: Frame): JDialog {
-        val dialog = JDialog(owner, "Settings", false).apply { name = "settingsDialog" }
+        val dialog = JDialog(owner, I18n.t("settings.title"), false).apply { name = "settingsDialog" }
         dialog.defaultCloseOperation = JDialog.DISPOSE_ON_CLOSE
 
         val cards = JPanel(CardLayout()).apply { name = "settingsBody" }
@@ -103,7 +120,7 @@ internal class SettingsController(
             add(cards, BorderLayout.CENTER)
         }
 
-        val close = JButton("Close").apply {
+        val close = JButton(I18n.t("settings.close")).apply {
             name = "settingsClose"
             addActionListener { dialog.dispose() }
         }
@@ -115,8 +132,8 @@ internal class SettingsController(
         dialog.contentPane.add(content, BorderLayout.CENTER)
         dialog.contentPane.add(footer, BorderLayout.SOUTH)
         dialog.pack()
-        dialog.size = Dimension(maxOf(dialog.width, 640), maxOf(dialog.height, 420))
-        dialog.minimumSize = Dimension(560, 360)
+        dialog.size = Dimension(maxOf(dialog.width, 680), maxOf(dialog.height, 460))
+        dialog.minimumSize = Dimension(600, 380)
         dialog.setLocationRelativeTo(owner)
         return dialog
     }
@@ -126,40 +143,64 @@ internal class SettingsController(
      * list keeps focus so the arrow keys/page-down navigation works the way a category list should.
      */
     private fun categoryList(cards: JPanel): JScrollPane {
-        val list = JList(
-            arrayOf(CATEGORY_GENERAL, CATEGORY_TERMINAL, CATEGORY_COLORS, CATEGORY_BACKGROUND, CATEGORY_ABOUT),
-        ).apply {
+        val list = JList(CATEGORIES.toTypedArray()).apply {
             name = "settingsCategories"
             selectionMode = ListSelectionModel.SINGLE_SELECTION
-            fixedCellWidth = 140
+            fixedCellWidth = 150
             visibleRowCount = 6
             selectedIndex = 0
+            cellRenderer = javax.swing.DefaultListCellRenderer().let { base ->
+                javax.swing.ListCellRenderer<SettingsCategory> { owner, value, index, isSelected, cellHasFocus ->
+                    val label = base.getListCellRendererComponent(owner, value, index, isSelected, cellHasFocus) as JLabel
+                    label.text = if (value == null) "" else I18n.t(value.labelKey)
+                    label.border = BorderFactory.createEmptyBorder(3, 8, 3, 8)
+                    label
+                }
+            }
         }
         list.addListSelectionListener { event ->
             if (!event.valueIsAdjusting) {
                 val selected = list.selectedValue ?: return@addListSelectionListener
-                (cards.layout as CardLayout).show(cards, selected)
+                (cards.layout as CardLayout).show(cards, selected.key)
             }
         }
         return JScrollPane(list).apply {
             name = "settingsCategoriesScroll"
             border = BorderFactory.createMatteBorder(0, 0, 0, 1, mutedColor())
-            preferredSize = Dimension(152, 320)
+            preferredSize = Dimension(160, 340)
             viewportBorder = BorderFactory.createEmptyBorder(0, 0, 0, 0)
         }
     }
 
     private fun generalPage(): JPanel = page().apply {
-        addHeading(this, "General")
-        val language = JComboBox(arrayOf("English")).apply {
+        addHeading(this, I18n.t("settings.category.general"))
+
+        val options = LANGUAGE_OPTIONS.toTypedArray()
+        val language = JComboBox(options).apply {
             name = "settingsLanguage"
-            isEnabled = false
+            selectedItem = options.first { it.id == settings.localeId }
+            preferredSize = Dimension(200, preferredSize.height)
+            renderer = javax.swing.DefaultListCellRenderer().let { base ->
+                javax.swing.ListCellRenderer<LanguageOption> { owner, value, index, isSelected, cellHasFocus ->
+                    val label = base.getListCellRendererComponent(owner, value, index, isSelected, cellHasFocus) as JLabel
+                    label.text = if (value == null) "" else I18n.t(value.labelKey)
+                    label
+                }
+            }
+            addActionListener {
+                val chosen = selectedItem as? LanguageOption ?: return@addActionListener
+                if (chosen.id == settings.localeId) return@addActionListener
+                settings.localeId = chosen.id
+                I18n.setLocaleId(chosen.id)
+                applyLocale()
+                reopen()
+            }
         }
-        addRow(this, "Language", language, "More languages are not available yet")
+        addRow(this, I18n.t("settings.general.language"), language, I18n.t("settings.general.language.hint"))
     }
 
     private fun terminalPage(): JPanel = page().apply {
-        addHeading(this, "Terminal")
+        addHeading(this, I18n.t("settings.category.terminal"))
         val fontSpinner = JSpinner(
             SpinnerNumberModel(
                 settings.terminalFontSize,
@@ -169,7 +210,7 @@ internal class SettingsController(
             ),
         ).apply {
             name = "settingsFontSize"
-            toolTipText = "Terminal font size in points"
+            toolTipText = I18n.t("settings.terminal.fontSize")
             addChangeListener {
                 val size = (value as Number).toInt()
                 if (size != settings.terminalFontSize) {
@@ -178,11 +219,11 @@ internal class SettingsController(
                 }
             }
         }
-        addRow(this, "Font size", fontSpinner, "pt · applies to every open session")
+        addRow(this, I18n.t("settings.terminal.fontSize"), fontSpinner, I18n.t("settings.terminal.fontSize.hint"))
 
         val encoding = JComboBox(TerminalCharsets.ALL.toTypedArray()).apply {
             name = "settingsCharset"
-            toolTipText = "Character encoding used to decode output and encode typed text"
+            toolTipText = I18n.t("settings.terminal.encoding")
             selectedItem = TerminalCharsets.fromId(settings.terminalCharsetId)
             preferredSize = Dimension(200, preferredSize.height)
             addActionListener {
@@ -193,11 +234,11 @@ internal class SettingsController(
                 }
             }
         }
-        addRow(this, "Encoding", encoding, "applies to every open session")
+        addRow(this, I18n.t("settings.terminal.encoding"), encoding, I18n.t("settings.terminal.encoding.hint"))
     }
 
     private fun colorsPage(): JPanel = page().apply {
-        addHeading(this, "Colors")
+        addHeading(this, I18n.t("settings.category.colors"))
         val preview = ColorSchemePreview().apply {
             name = "settingsColorSchemePreview"
             alignmentX = Component.LEFT_ALIGNMENT
@@ -209,12 +250,13 @@ internal class SettingsController(
         }
         fun show(scheme: TerminalColorScheme) {
             preview.scheme = scheme
-            contrast.text = "Contrast ${String.format(Locale.ROOT, "%.1f", scheme.contrastRatio)}:1 · WCAG AA body text needs 4.5:1"
+            val ratio = String.format(Locale.ROOT, "%.1f", scheme.contrastRatio)
+            contrast.text = I18n.t("settings.colors.contrast", ratio)
         }
 
         val combo = JComboBox(TerminalColorSchemes.ALL.toTypedArray()).apply {
             name = "settingsColorScheme"
-            toolTipText = "Terminal background, text, and ANSI colors"
+            toolTipText = I18n.t("settings.colors.scheme")
             selectedItem = TerminalColorSchemes.fromId(settings.terminalColorSchemeId)
             renderer = schemeRenderer()
             preferredSize = Dimension(200, preferredSize.height)
@@ -227,7 +269,7 @@ internal class SettingsController(
                 }
             }
         }
-        addRow(this, "Scheme", combo, "applies to every open session")
+        addRow(this, I18n.t("settings.colors.scheme"), combo, I18n.t("settings.colors.scheme.hint"))
         add(Box.createVerticalStrut(10).apply { setAlignmentX(Component.LEFT_ALIGNMENT) })
         add(preview)
         add(Box.createVerticalStrut(6).apply { setAlignmentX(Component.LEFT_ALIGNMENT) })
@@ -242,13 +284,13 @@ internal class SettingsController(
      * bundled presets are materialised when the page opens.
      */
     private fun backgroundPage(dialog: JDialog): JPanel = page().apply {
-        addHeading(this, "Background")
+        addHeading(this, I18n.t("settings.category.background"))
 
         BackgroundImages.materializePresets(backgroundDirectory)
 
         var updating = false
 
-        val enabled = JCheckBox("Enable background image", settings.terminalBackgroundEnabled).apply {
+        val enabled = JCheckBox(I18n.t("settings.background.enabled"), settings.terminalBackgroundEnabled).apply {
             name = "settingsBackgroundEnabled"
             isOpaque = false
             alignmentX = Component.LEFT_ALIGNMENT
@@ -263,8 +305,8 @@ internal class SettingsController(
         }
         add(current)
 
-        val choose = JButton("Choose image...").apply { name = "settingsBackgroundChoose" }
-        val clear = JButton("Clear").apply { name = "settingsBackgroundClear" }
+        val choose = JButton(I18n.t("settings.background.choose")).apply { name = "settingsBackgroundChoose" }
+        val clear = JButton(I18n.t("settings.background.clear")).apply { name = "settingsBackgroundClear" }
         add(
             JPanel(FlowLayout(FlowLayout.LEFT, 8, 0)).apply {
                 isOpaque = false
@@ -283,10 +325,10 @@ internal class SettingsController(
             ),
         ).apply {
             name = "settingsBackgroundOpacity"
-            toolTipText = "How strongly the image shows through the terminal background"
+            toolTipText = I18n.t("settings.background.opacity")
         }
         add(Box.createVerticalStrut(6).apply { setAlignmentX(Component.LEFT_ALIGNMENT) })
-        addRow(this, "Opacity", opacity, "% · lower values keep text easier to read")
+        addRow(this, I18n.t("settings.background.opacity"), opacity, I18n.t("settings.background.opacity.hint"))
 
         val images = JList<Path>().apply {
             name = "settingsBackgroundImages"
@@ -295,7 +337,7 @@ internal class SettingsController(
             cellRenderer = ImagePathRenderer()
         }
         add(
-            JLabel("Images (bg1–bg5 are bundled presets; bg1 is the default)").apply {
+            JLabel(I18n.t("settings.background.images")).apply {
                 foreground = mutedColor()
                 alignmentX = Component.LEFT_ALIGNMENT
                 border = BorderFactory.createEmptyBorder(10, 0, 4, 0)
@@ -305,12 +347,12 @@ internal class SettingsController(
             JScrollPane(images).apply {
                 name = "settingsBackgroundImagesScroll"
                 alignmentX = Component.LEFT_ALIGNMENT
-                preferredSize = Dimension(320, 120)
-                maximumSize = Dimension(Int.MAX_VALUE, 140)
+                preferredSize = Dimension(340, 130)
+                maximumSize = Dimension(Int.MAX_VALUE, 150)
             },
         )
         add(
-            JLabel("Painted behind the terminal text; default-colored cells stay transparent.").apply {
+            JLabel(I18n.t("settings.background.hint")).apply {
                 foreground = mutedColor()
                 font = font.deriveFont(font.size2D - 1f)
                 alignmentX = Component.LEFT_ALIGNMENT
@@ -326,9 +368,9 @@ internal class SettingsController(
                 enabled.isEnabled = selection != null || settings.terminalBackgroundImage.isNotBlank()
                 clear.isEnabled = enabled.isEnabled
                 current.text = selection?.let { selected ->
-                    val missing = if (Files.isRegularFile(selected.file)) "" else " (missing)"
-                    "Current: ${selected.file.fileName}$missing"
-                } ?: "Current: none"
+                    val missing = if (Files.isRegularFile(selected.file)) "" else " " + I18n.t("settings.background.missing")
+                    I18n.t("settings.background.current", "${selected.file.fileName}$missing")
+                } ?: I18n.t("settings.background.currentNone")
 
                 val available = BackgroundImages.listWithPresets(backgroundDirectory)
                 images.setListData(available.toTypedArray())
@@ -388,15 +430,82 @@ internal class SettingsController(
         opacityPercent = settings.terminalBackgroundOpacity,
     )
 
-    private fun aboutPage(): JPanel = page().apply {        addHeading(this, "About")
-        addRow(this, "Version", JLabel(AppInfo.windowTitle), null)
-        addRow(this, "Java", JLabel(System.getProperty("java.version").orEmpty()), null)
+    /**
+     * About page: build/runtime facts plus the open-source components generated from the resolved
+     * runtime classpath, and the bundled third-party notices.
+     */
+    private fun aboutPage(): JPanel = page().apply {
+        addHeading(this, I18n.t("settings.category.about"))
+        addRow(this, I18n.t("settings.about.version"), JLabel(AppInfo.windowTitle), null)
         addRow(
             this,
-            "System",
+            I18n.t("settings.about.java"),
+            JLabel("${System.getProperty("java.vendor").orEmpty()} ${System.getProperty("java.version").orEmpty()}"),
+            null,
+        )
+        addRow(
+            this,
+            I18n.t("settings.about.system"),
             JLabel("${System.getProperty("os.name").orEmpty()} ${System.getProperty("os.arch").orEmpty()}"),
             null,
         )
+
+        addHeading(this, I18n.t("settings.about.components"))
+        val components = AboutComponents.load()
+        val table = JTable(AboutTableModel(components)).apply {
+            name = "settingsAboutComponents"
+            autoCreateRowSorter = true
+            rowHeight = 24
+            fillsViewportHeight = true
+            columnModel.apply {
+                getColumn(0).preferredWidth = 240
+                getColumn(1).preferredWidth = 80
+                getColumn(2).preferredWidth = 120
+                getColumn(3).preferredWidth = 80
+            }
+        }
+        add(
+            JScrollPane(table).apply {
+                name = "settingsAboutComponentsScroll"
+                alignmentX = Component.LEFT_ALIGNMENT
+                preferredSize = Dimension(560, 210)
+                maximumSize = Dimension(Int.MAX_VALUE, 260)
+            },
+        )
+        val notices = JButton(I18n.t("settings.about.notices")).apply {
+            name = "settingsAboutNotices"
+            alignmentX = Component.LEFT_ALIGNMENT
+            border = BorderFactory.createEmptyBorder(8, 0, 0, 0)
+        }
+        add(Box.createVerticalStrut(8).apply { setAlignmentX(Component.LEFT_ALIGNMENT) })
+        add(notices)
+        val page = this
+        notices.addActionListener { showNotices(page) }
+    }
+
+    private fun showNotices(parent: Component) {
+        val dialog = JDialog(
+            SwingUtilities.getWindowAncestor(parent) as? Frame,
+            I18n.t("settings.about.noticesTitle"),
+            true,
+        )
+        val text = JTextArea(AboutComponents.thirdPartyNotices()).apply {
+            name = "settingsAboutNoticesText"
+            isEditable = false
+            lineWrap = true
+            wrapStyleWord = true
+            font = Font(Font.MONOSPACED, Font.PLAIN, 12)
+            caretPosition = 0
+        }
+        val close = JButton(I18n.t("settings.close")).apply {
+            addActionListener { dialog.dispose() }
+        }
+        val footer = JPanel(FlowLayout(FlowLayout.RIGHT)).apply { add(close) }
+        dialog.contentPane.add(JScrollPane(text), BorderLayout.CENTER)
+        dialog.contentPane.add(footer, BorderLayout.SOUTH)
+        dialog.setSize(720, 560)
+        dialog.setLocationRelativeTo(parent)
+        dialog.isVisible = true
     }
 
     private fun page(): JPanel = JPanel().apply {
@@ -429,7 +538,7 @@ internal class SettingsController(
         row.add(
             JLabel(label, SwingConstants.LEFT).apply {
                 foreground = mutedColor()
-                preferredSize = Dimension(86, preferredSize.height)
+                preferredSize = Dimension(96, preferredSize.height)
             },
             BorderLayout.WEST,
         )
@@ -524,14 +633,70 @@ internal class SettingsController(
         }
     }
 
+    /** Read-only table model; headers are resolved once so a language change rebuilds the dialog. */
+    private class AboutTableModel(
+        private val components: List<OpenSourceComponent>,
+    ) : AbstractTableModel() {
+        private val headers = arrayOf(
+            I18n.t("settings.about.component"),
+            I18n.t("settings.about.versionColumn"),
+            I18n.t("settings.about.licenseColumn"),
+            I18n.t("settings.about.scopeColumn"),
+        )
+
+        override fun getRowCount(): Int = components.size
+
+        override fun getColumnCount(): Int = headers.size
+
+        override fun getColumnName(column: Int): String = headers[column]
+
+        override fun isCellEditable(rowIndex: Int, columnIndex: Int): Boolean = false
+
+        override fun getValueAt(rowIndex: Int, columnIndex: Int): Any {
+            val component = components[rowIndex]
+            return when (columnIndex) {
+                0 -> component.name
+                1 -> component.version
+                2 -> component.license
+                else -> I18n.t(
+                    when (component.scope) {
+                        OpenSourceComponent.Scope.TEST -> "settings.about.scope.test"
+                        OpenSourceComponent.Scope.ASSET -> "settings.about.scope.asset"
+                        OpenSourceComponent.Scope.RUNTIME -> "settings.about.scope.runtime"
+                    },
+                )
+            }
+        }
+    }
+
     internal companion object {
-        const val CATEGORY_GENERAL = "General"
-        const val CATEGORY_TERMINAL = "Terminal"
-        const val CATEGORY_COLORS = "Colors"
-        const val CATEGORY_BACKGROUND = "Background"
-        const val CATEGORY_ABOUT = "About"
+        const val CATEGORY_GENERAL = "general"
+        const val CATEGORY_TERMINAL = "terminal"
+        const val CATEGORY_COLORS = "colors"
+        const val CATEGORY_BACKGROUND = "background"
+        const val CATEGORY_ABOUT = "about"
+
+        internal val CATEGORIES = listOf(
+            SettingsCategory(CATEGORY_GENERAL, "settings.category.general"),
+            SettingsCategory(CATEGORY_TERMINAL, "settings.category.terminal"),
+            SettingsCategory(CATEGORY_COLORS, "settings.category.colors"),
+            SettingsCategory(CATEGORY_BACKGROUND, "settings.category.background"),
+            SettingsCategory(CATEGORY_ABOUT, "settings.category.about"),
+        )
+
+        internal val LANGUAGE_OPTIONS = listOf(
+            LanguageOption(I18n.SYSTEM_ID, "settings.language.system"),
+            LanguageOption("en", "settings.language.en"),
+            LanguageOption("zh-TW", "settings.language.zh_TW"),
+            LanguageOption("zh-CN", "settings.language.zh_CN"),
+            LanguageOption("ja", "settings.language.ja"),
+        )
     }
 }
+
+internal data class SettingsCategory(val key: String, val labelKey: String)
+
+internal data class LanguageOption(val id: String, val labelKey: String)
 
 /** File names only, so the list shows the imported image rather than its absolute path. */
 private class ImagePathRenderer : JLabel(), javax.swing.ListCellRenderer<Path> {
@@ -543,7 +708,11 @@ private class ImagePathRenderer : JLabel(), javax.swing.ListCellRenderer<Path> {
         cellHasFocus: Boolean,
     ): Component {
         val name = value?.fileName?.toString().orEmpty()
-        text = if (BackgroundImages.presetNameOf(value) != null) "$name   (preset)" else name
+        text = if (BackgroundImages.presetNameOf(value) != null) {
+            "$name   ${I18n.t("settings.background.preset")}"
+        } else {
+            name
+        }
         toolTipText = value?.toString()
         isOpaque = true
         background = if (isSelected) {
@@ -564,7 +733,7 @@ private class ImagePathRenderer : JLabel(), javax.swing.ListCellRenderer<Path> {
 /** Default picker used by the Background page; tests inject their own chooser. */
 private fun chooseBackgroundImageFile(parent: Component): Path? {
     val chooser = JFileChooser().apply {
-        dialogTitle = "Choose background image"
+        dialogTitle = I18n.t("settings.background.choose")
         fileSelectionMode = JFileChooser.FILES_ONLY
         isMultiSelectionEnabled = false
         fileFilter = javax.swing.filechooser.FileNameExtensionFilter(

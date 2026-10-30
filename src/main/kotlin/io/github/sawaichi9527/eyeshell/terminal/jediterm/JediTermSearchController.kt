@@ -18,6 +18,7 @@ import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.JLabel
 import javax.swing.JPanel
+import io.github.sawaichi9527.eyeshell.platform.I18n
 import javax.swing.JTextField
 import javax.swing.SwingUtilities
 import javax.swing.event.DocumentEvent
@@ -31,17 +32,17 @@ internal class JediTermSearchController(
     private val observedRevision = AtomicLong(widget.terminalTextBuffer.getMainBufferRevision())
     private val closed = AtomicBoolean()
     private val query = JTextField(24).apply { name = "terminalSearchQuery" }
-    private val matchCase = JCheckBox("Match case")
+    private val matchCase = JCheckBox(I18n.t("search.matchCase"))
     private val status = JLabel(" ").apply { name = "terminalSearchStatus" }
     private val panel = JPanel(BorderLayout(8, 0)).apply {
         name = "terminalSearch"
         add(query, BorderLayout.CENTER)
         add(JPanel(FlowLayout(FlowLayout.TRAILING, 4, 0)).apply {
             add(matchCase)
-            add(JButton("Previous").apply { addActionListener { widget.terminalPanel.selectPreviousCoordinateFindResult() } })
-            add(JButton("Next").apply { addActionListener { widget.terminalPanel.selectNextCoordinateFindResult() } })
+            add(JButton(I18n.t("search.previous")).apply { addActionListener { widget.terminalPanel.selectPreviousCoordinateFindResult() } })
+            add(JButton(I18n.t("search.next")).apply { addActionListener { widget.terminalPanel.selectNextCoordinateFindResult() } })
             add(status)
-            add(JButton("Close").apply { addActionListener { hideSearch() } })
+            add(JButton(I18n.t("search.close")).apply { addActionListener { hideSearch() } })
         }, BorderLayout.EAST)
     }
     private var pending: Future<*>? = null

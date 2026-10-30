@@ -11,6 +11,7 @@ import io.github.sawaichi9527.eyeshell.platform.SafeMode
 import io.github.sawaichi9527.eyeshell.platform.ShutdownNoiseFilter
 import io.github.sawaichi9527.eyeshell.platform.AppSettings
 import io.github.sawaichi9527.eyeshell.platform.BackgroundImages
+import io.github.sawaichi9527.eyeshell.platform.I18n
 import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorSchemes
 import io.github.sawaichi9527.eyeshell.secrets.SystemPasswordCredentialStore
@@ -56,6 +57,7 @@ fun main(arguments: Array<String>) {
         )
         val catalog = SqliteHostCatalog(EyeShellPaths.catalogDatabaseFile())
         val appSettings = AppSettings.load(EyeShellPaths.settingsFile())
+        I18n.setLocaleId(appSettings.localeId)
         applyDefaultBackground(appSettings)
         val commandsController = CommandsController(catalog)
         val hostCatalogController = HostCatalogController(

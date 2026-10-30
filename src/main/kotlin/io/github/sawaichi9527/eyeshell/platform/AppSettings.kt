@@ -84,6 +84,17 @@ class AppSettings private constructor(
             save()
         }
 
+    /**
+     * UI language id (`system`, `en`, `zh-TW`, `zh-CN`, `ja`); resolution and fallback live in the
+     * platform `I18n` object.
+     */
+    var localeId: String
+        get() = properties.getProperty(KEY_LOCALE)?.takeIf(String::isNotBlank) ?: "system"
+        set(value) {
+            properties.setProperty(KEY_LOCALE, value)
+            save()
+        }
+
     private fun save() {
         val target = file ?: return
         try {
@@ -109,6 +120,7 @@ class AppSettings private constructor(
         const val MAX_BACKGROUND_OPACITY = 100
 
         private const val KEY_TERMINAL_FONT_SIZE = "terminal.font.size"
+        private const val KEY_LOCALE = "app.locale"
         private const val KEY_TERMINAL_COLOR_SCHEME = "terminal.color.scheme"
         private const val KEY_TERMINAL_CHARSET = "terminal.charset"
         private const val KEY_TERMINAL_BACKGROUND_ENABLED = "terminal.background.enabled"

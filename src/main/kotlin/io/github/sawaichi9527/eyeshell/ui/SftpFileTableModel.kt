@@ -1,5 +1,6 @@
 package io.github.sawaichi9527.eyeshell.ui
 
+import io.github.sawaichi9527.eyeshell.platform.I18n
 import io.github.sawaichi9527.eyeshell.sftp.RemoteFile
 import io.github.sawaichi9527.eyeshell.sftp.SftpFormatting
 import javax.swing.table.AbstractTableModel
@@ -23,9 +24,9 @@ class SftpFileTableModel : AbstractTableModel() {
 
     override fun getRowCount(): Int = files.size
 
-    override fun getColumnCount(): Int = COLUMNS.size
+    override fun getColumnCount(): Int = COLUMN_KEYS.size
 
-    override fun getColumnName(column: Int): String = COLUMNS[column]
+    override fun getColumnName(column: Int): String = I18n.t(COLUMN_KEYS[column])
 
     override fun getColumnClass(column: Int): Class<*> = when (column) {
         SIZE_COLUMN, MODIFIED_COLUMN -> Long::class.javaObjectType
@@ -56,6 +57,13 @@ class SftpFileTableModel : AbstractTableModel() {
         const val PERMISSIONS_COLUMN = 4
         const val OWNER_GROUP_COLUMN = 5
 
-        val COLUMNS = listOf("Name", "Size", "Type", "Modified", "Permissions", "Owner / Group")
+        val COLUMN_KEYS = listOf(
+            "column.name",
+            "column.size",
+            "column.type",
+            "column.modified",
+            "column.permissions",
+            "column.ownerGroup",
+        )
     }
 }

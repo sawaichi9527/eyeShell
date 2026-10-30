@@ -76,6 +76,7 @@
 
 ### 3.3 中優先功能
 
+- 介面多語言（English／繁體中文／简体中文／日本語）
 - Terminal 背景圖片
 - Terminal 字元編碼（UTF-8／GB18030／GBK／BIG5 等）
 - 多主機批次命令
@@ -1136,9 +1137,32 @@ Repaint
 
 ## 21. 待後續確認
 
-- 正式 Logo、圖示與品牌色。
+- 品牌色與其他行銷素材（App Icon 已選定 `02-eye`，成品在 `src/main/resources/icons/` 與 `packaging/eyeshell.ico`）。
 - Java/JBR 的具體 Distribution 與更新政策。
 - Windows Installer 是否同時提供 MSI 與 Portable ZIP。
 - Linux 是否同時提供 DEB 與 Portable tar.gz。
 - Phase 1 的量化效能門檻與驗收設備矩陣。
 - 貢獻政策。
+
+---
+
+## 22. 介面多語言與 About
+
+### 22.1 語言清單與選擇
+
+- 內建 English（base）、繁體中文（zh-TW）、简体中文（zh-CN）、日本語（ja）。
+- 以 JDK `ResourceBundle` 與 UTF-8 `.properties` 實作（`src/main/resources/i18n/`），不引入額外 i18n 依賴。
+- `ResourceBundle` 必須使用 `getNoFallbackControl`，避免預設 control 在 base bundle 之前回退到 JVM 預設 locale。
+- 選擇保存在非機密的 `settings.properties`（`app.locale`：`system`／`en`／`zh-TW`／`zh-CN`／`ja`）；`system` 讀作業系統 locale，未知語言回退英文，`zh` 無地區時預設繁體中文。
+- 切換語言立即套用到整個介面：Settings 重建、主工作台按鈕／狀態列／Session 狀態、Monitor 側欄、SFTP／Commands 面板、表格標題、終端右鍵選單與搜尋／Highlight 對話框都會以 `relocalize()` 重新套用；不需要重啟。
+- 仍然以英文呈現：SSH 連線對話框、Saved Host 編輯器、Host Key 確認視窗與部分較長的驗證訊息（`docs/I18N.md` 有清單）。
+- 其他語言檔必須與 `messages.properties` 具備完全相同的 key 集合，由測試守門；缺 key 不得默默顯示英文。
+- 新增語言的流程見 `docs/I18N.md`。
+
+### 22.2 About 頁面
+
+- 顯示 eyeShell 版本、Java runtime（vendor + version）、作業系統與架構。
+- 以表格列出實際打包的開放原始碼元件：名稱、版本、授權、Scope（Runtime／Test only／Bundled asset）。
+- 清單由建置時從 resolved runtime classpath 產生（`generateAboutManifest`），版本不得手寫而與 jar 漂移；顯示名稱與授權以 curated 對照表提供，未收錄者標示 `See THIRD_PARTY_NOTICES.md`。
+- `Third-party notices` 按鈕顯示打包的 `THIRD_PARTY_NOTICES.md`。
+- 內建背景圖片屬於非開源資產，必須在清單中以 `Bundled asset` 標示。

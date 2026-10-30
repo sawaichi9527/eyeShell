@@ -31,6 +31,8 @@
 - Password／Public Key／`ssh-agent`
 - Known Hosts／Host Key 驗證
 - Terminal Search／Scrollback／Copy／Export
+- 介面多語言（English／繁體中文／简体中文／日本語）
+- About 列出實際打包的開源元件、版本與授權
 - Terminal 背景圖片（內建 `bg1`–`bg5` 預設，預設 `bg1`）
 - Terminal 字元編碼（預設 UTF-8，可切換 GB18030／GBK／BIG5 等）
 - Regex Highlight

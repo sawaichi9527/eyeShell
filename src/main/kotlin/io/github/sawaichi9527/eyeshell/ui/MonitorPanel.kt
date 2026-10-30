@@ -5,6 +5,7 @@ import io.github.sawaichi9527.eyeshell.monitor.MonitorSnapshot
 import io.github.sawaichi9527.eyeshell.monitor.NetworkInterfaceUsage
 import io.github.sawaichi9527.eyeshell.monitor.NetworkUsage
 import io.github.sawaichi9527.eyeshell.monitor.ProcessUsage
+import io.github.sawaichi9527.eyeshell.platform.I18n
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Component
@@ -80,7 +81,7 @@ class MonitorPanel(
     private val userProcessColumnWidths = HashMap<Int, Int>()
     private val lastProcessColumnWidths = IntArray(3)
     private var lastSnapshot: MonitorSnapshot? = null
-    private val processModel = ReadOnlyTableModel(arrayOf("Name", "Mem", "CPU"))
+    private val processModel = ReadOnlyTableModel(arrayOf(I18n.t("monitor.process.name"), I18n.t("monitor.process.mem"), I18n.t("monitor.process.cpu")))
     private val processTable = JTable(processModel).apply {
         name = "monitorProcessTable"
         // Columns are measured from their content, so a long process name widens the table and the
@@ -165,7 +166,7 @@ class MonitorPanel(
 
     init {
         name = "monitorPanel"
-        getAccessibleContext().accessibleName = "Monitor"
+        getAccessibleContext().accessibleName = I18n.t("monitor.title")
         minimumSize = Dimension(190, 0)
         preferredSize = Dimension(230, 0)
         processTable.columnModel.addColumnModelListener(processColumnResizeListener)
@@ -182,6 +183,11 @@ class MonitorPanel(
         if (lastSnapshot == null) resetToIdle()
     }
 
+    /** Re-renders the current state so labels follow the new language. */
+    fun relocalize() {
+        lastSnapshot?.let { update(it) } ?: resetToIdle()
+    }
+
     fun resetToIdle() {
         content.removeAll()
         selectedInterface = null
@@ -189,25 +195,25 @@ class MonitorPanel(
         var row = addTopSpacer(0)
         row = addTitle(row)
         row = addSeparator(row)
-        row = addDetail(row, "Host", EMPTY_VALUE, tooltip = null)
-        row = addDetail(row, "Address", EMPTY_VALUE, tooltip = null)
-        row = addDetail(row, "OS", EMPTY_VALUE, tooltip = null)
-        row = addDetail(row, "Kernel", EMPTY_VALUE, tooltip = null)
-        row = addDetail(row, "Uptime", EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, I18n.t("monitor.host"), EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, I18n.t("monitor.address"), EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, I18n.t("monitor.os"), EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, I18n.t("monitor.kernel"), EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, I18n.t("monitor.uptime"), EMPTY_VALUE, tooltip = null)
         row = addSeparator(row)
-        row = addDetail(row, "Load", EMPTY_VALUE, tooltip = null)
-        row = addDetail(row, "CPU", EMPTY_VALUE, tooltip = null)
-        row = addDetail(row, "Memory", EMPTY_VALUE, tooltip = null)
-        row = addDetail(row, "Swap", EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, I18n.t("monitor.load"), EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, I18n.t("monitor.cpu"), EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, I18n.t("monitor.memory"), EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, I18n.t("monitor.swap"), EMPTY_VALUE, tooltip = null)
         row = addSeparator(row)
-        row = addHeading(row, "Network")
-        row = addDetail(row, "Down", EMPTY_VALUE, tooltip = null)
-        row = addDetail(row, "Up", EMPTY_VALUE, tooltip = null)
+        row = addHeading(row, I18n.t("monitor.network"))
+        row = addDetail(row, I18n.t("monitor.down"), EMPTY_VALUE, tooltip = null)
+        row = addDetail(row, I18n.t("monitor.up"), EMPTY_VALUE, tooltip = null)
         row = addSeparator(row)
-        row = addHeading(row, "Filesystems")
+        row = addHeading(row, I18n.t("monitor.filesystems"))
         row = addSpanning(row, mutedLabel(EMPTY_VALUE), top = 0, bottom = 2)
         row = addSeparator(row)
-        row = addHeading(row, "Processes")
+        row = addHeading(row, I18n.t("monitor.processes"))
         row = addSpanning(row, mutedLabel(EMPTY_VALUE), top = 0, bottom = 2)
         row = addSeparator(row)
         row = addSpanning(
@@ -236,19 +242,19 @@ class MonitorPanel(
         row = addTitle(row)
         row = addSeparator(row)
 
-        row = addDetail(row, "Host", snapshot.system?.hostname?.takeIf(String::isNotEmpty) ?: "-", copyable = true)
+        row = addDetail(row, I18n.t("monitor.host"), snapshot.system?.hostname?.takeIf(String::isNotEmpty) ?: "-", copyable = true)
         snapshot.endpoint?.let { endpoint ->
-            row = addDetail(row, "Address", displayAddress(endpoint), copyable = true)
+            row = addDetail(row, I18n.t("monitor.address"), displayAddress(endpoint), copyable = true)
         }
         snapshot.system?.let { systemInfo ->
             row = addDetail(
                 row,
-                "OS",
+                I18n.t("monitor.os"),
                 systemInfo.distribution.ifBlank { systemInfo.operatingSystem },
                 copyable = true,
             )
-            row = addDetail(row, "Kernel", systemInfo.kernel, copyable = true)
-            row = addDetail(row, "Uptime", formatUptime(systemInfo.uptimeSeconds), copyable = true)
+            row = addDetail(row, I18n.t("monitor.kernel"), systemInfo.kernel, copyable = true)
+            row = addDetail(row, I18n.t("monitor.uptime"), formatUptime(systemInfo.uptimeSeconds), copyable = true)
         }
 
         if (snapshot.cpu != null || snapshot.memory != null || snapshot.swapPresent || snapshot.load != null) {
@@ -258,7 +264,7 @@ class MonitorPanel(
             val cores = snapshot.cpu?.cores ?: 0
             row = addDetail(
                 row = row,
-                label = "Load",
+                label = I18n.t("monitor.load"),
                 value = String.format("%.2f %.2f %.2f", load.oneMinute, load.fiveMinute, load.fifteenMinute),
                 tooltip = UiText.LOAD_TOOLTIP,
                 warning = cores > 0 && load.oneMinute > cores,
@@ -267,16 +273,16 @@ class MonitorPanel(
         snapshot.cpu?.let { cpu ->
             row = addMeter(
                 row = row,
-                label = "CPU",
+                label = I18n.t("monitor.cpu"),
                 percent = cpu.percent,
                 color = CPU_COLOR,
-                detail = cpu.cores.takeIf { it > 0 }?.let { cores -> if (cores == 1) "1 core" else "$cores cores" },
+                detail = cpu.cores.takeIf { it > 0 }?.let { cores -> if (cores == 1) I18n.t("monitor.cores.one") else I18n.t("monitor.cores.many", cores) },
             )
         }
         snapshot.memory?.let { memory ->
             row = addMeter(
                 row = row,
-                label = "Memory",
+                label = I18n.t("monitor.memory"),
                 percent = memory.percent,
                 color = MEMORY_COLOR,
                 detail = "${formatSize(memory.usedBytes)} / ${formatSize(memory.totalBytes)}",
@@ -286,7 +292,7 @@ class MonitorPanel(
             snapshot.swap?.let { swap ->
                 row = addMeter(
                     row = row,
-                    label = "Swap",
+                    label = I18n.t("monitor.swap"),
                     percent = swap.percent,
                     color = SWAP_COLOR,
                     detail = "${formatSize(swap.usedBytes)} / ${formatSize(swap.totalBytes)}",
@@ -301,19 +307,19 @@ class MonitorPanel(
 
         if (snapshot.filesystems.isNotEmpty()) {
             row = addSeparator(row)
-            row = addHeading(row, "Filesystems")
+            row = addHeading(row, I18n.t("monitor.filesystems"))
             row = renderFilesystems(row, snapshot.filesystems)
         }
 
         if (snapshot.processes.isNotEmpty()) {
             row = addSeparator(row)
-            row = addHeading(row, "Processes")
+            row = addHeading(row, I18n.t("monitor.processes"))
             row = renderProcesses(row, snapshot.processes)
         }
 
         if (snapshot.unsupported) {
             row = addSeparator(row)
-            row = addSpanning(row, mutedLabel("Metrics unsupported on this host."), top = 2, bottom = 2)
+            row = addSpanning(row, mutedLabel(I18n.t("monitor.unsupported")), top = 2, bottom = 2)
         }
         addVerticalFiller(row)
         revalidate()
@@ -323,17 +329,17 @@ class MonitorPanel(
     private fun renderNetwork(row: Int, network: NetworkUsage, endpoint: String?): Int {
         val interfaces = network.interfaces.sortedBy { it.name }
         if (interfaces.isEmpty()) {
-            var current = addDetail(row, "Down", formatRate(network.receiveBytesPerSecond))
-            current = addDetail(current, "Up", formatRate(network.transmitBytesPerSecond))
+            var current = addDetail(row, I18n.t("monitor.down"), formatRate(network.receiveBytesPerSecond))
+            current = addDetail(current, I18n.t("monitor.up"), formatRate(network.transmitBytesPerSecond))
             return current
         }
         val known = interfaces.firstOrNull { it.name == selectedInterface }
         val active = known ?: defaultInterface(network, interfaces, endpoint)
         if (known == null) selectedInterface = active?.name
 
-        var current = addHeadingWithControl(row, "Network", interfaceSelector(network, interfaces, active))
-        current = addDetail(current, "Down", formatRate(active?.receiveBytesPerSecond ?: network.receiveBytesPerSecond))
-        current = addDetail(current, "Up", formatRate(active?.transmitBytesPerSecond ?: network.transmitBytesPerSecond))
+        var current = addHeadingWithControl(row, I18n.t("monitor.network"), interfaceSelector(network, interfaces, active))
+        current = addDetail(current, I18n.t("monitor.down"), formatRate(active?.receiveBytesPerSecond ?: network.receiveBytesPerSecond))
+        current = addDetail(current, I18n.t("monitor.up"), formatRate(active?.transmitBytesPerSecond ?: network.transmitBytesPerSecond))
         return current
     }
 
@@ -349,8 +355,8 @@ class MonitorPanel(
         preferredSize = Dimension(96, 22)
         toolTipText = active?.let { iface ->
             network.interfaceAddresses[iface.name]?.joinToString(", ")?.takeIf(String::isNotEmpty)
-                ?: "Show this interface's rates"
-        } ?: "Show this interface's rates"
+                ?: I18n.t("monitor.interface.hint")
+        } ?: I18n.t("monitor.interface.hint")
         addActionListener {
             val name = selectedItem as? String ?: return@addActionListener
             if (name == selectedInterface) return@addActionListener
@@ -421,7 +427,7 @@ class MonitorPanel(
         if (filesystems.size > MAX_FILESYSTEM_ROWS) {
             return addSpanning(
                 placed,
-                mutedLabel("and ${filesystems.size - MAX_FILESYSTEM_ROWS} more"),
+                mutedLabel(I18n.t("monitor.more", filesystems.size - MAX_FILESYSTEM_ROWS)),
                 top = 0,
                 bottom = 2,
             )
@@ -520,7 +526,7 @@ class MonitorPanel(
             isOpaque = false
         }
         header.add(
-            JLabel("Monitor").apply {
+            JLabel(I18n.t("monitor.title")).apply {
                 font = titleFont()
             },
             BorderLayout.WEST,
@@ -535,8 +541,8 @@ class MonitorPanel(
 
     private fun createSettingsButton(): JButton = JButton(GearIcon(GEAR_ICON_SIZE)).apply {
         name = "monitorSettingsButton"
-        toolTipText = "Settings"
-        accessibleContext.accessibleName = "Settings"
+        toolTipText = I18n.t("monitor.settings")
+        accessibleContext.accessibleName = I18n.t("monitor.settings")
         isFocusable = false
         isContentAreaFilled = false
         isBorderPainted = false

@@ -4,6 +4,8 @@ import io.github.sawaichi9527.eyeshell.monitor.MonitorSampler
 import io.github.sawaichi9527.eyeshell.monitor.MonitorSnapshot
 import io.github.sawaichi9527.eyeshell.platform.AppInfo
 import io.github.sawaichi9527.eyeshell.platform.AppSettings
+import io.github.sawaichi9527.eyeshell.platform.AppIcons
+import io.github.sawaichi9527.eyeshell.platform.I18n
 import io.github.sawaichi9527.eyeshell.ssh.HostSession
 import io.github.sawaichi9527.eyeshell.terminal.ReplayTerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalBackgroundImage
@@ -38,13 +40,13 @@ import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 
 enum class SessionStatus(
-    val label: String,
+    val labelKey: String,
     val color: Color,
 ) {
-    CONNECTED("Connected", Color(0x4CAF50)),
-    EXITED("Exited", Color(0x9E9E9E)),
-    FAILED("Failed", Color(0xF44336)),
-    CLOSING("Closing", Color(0xFF9800)),
+    CONNECTED("sessionStatus.connected", Color(0x4CAF50)),
+    EXITED("sessionStatus.exited", Color(0x9E9E9E)),
+    FAILED("sessionStatus.failed", Color(0xF44336)),
+    CLOSING("sessionStatus.closing", Color(0xFF9800)),
 }
 
 class EyeShellWindow(
@@ -69,6 +71,7 @@ class EyeShellWindow(
         applyColorScheme = { scheme -> applyTerminalColorScheme(scheme) },
         applyCharset = { charset -> applyTerminalCharset(charset) },
         applyBackgroundImage = { image -> applyTerminalBackgroundImage(image) },
+        applyLocale = { workbench.relocalize() },
     )
     private val workbench: WorkbenchPanel = WorkbenchPanel(
         connectAction = connectAction?.let { action -> { action(this) } },
@@ -85,6 +88,7 @@ class EyeShellWindow(
         minimumSize = Dimension(960, 640)
         size = Dimension(1280, 800)
         contentPane = workbench
+        iconImages = AppIcons.images()
         setLocationRelativeTo(null)
         initialized = true
     }
@@ -564,22 +568,26 @@ class WorkbenchPanel(
         getAccessibleContext().accessibleName = "Sessions"
     }
     private val sessions = linkedMapOf<Component, SessionTab>()
+    private val emptyStateLabel = JLabel(I18n.t("workbench.empty"), SwingConstants.CENTER).apply {
+        name = "emptyState"
+        alignmentX = Component.LEFT_ALIGNMENT
+    }
     private val emptySession = createEmptySession()
     private var connecting = false
     private val monitorPanel = MonitorPanel(onOpenSettings = onOpenSettings)
     private val onMonitorSelectionChanged = monitorSelectionChanged
     private val onSftpSelectionChanged = sftpSelectionChanged
-    private val connectionStatus = JLabel("Not connected").apply {
+    private val connectionStatus = JLabel(I18n.t("workbench.notConnected")).apply {
         name = "connectionStatus"
     }
-    private val connectButton = JButton("Connect...").apply {
+    private val connectButton = JButton(I18n.t("workbench.connect")).apply {
         name = "connectButton"
         isEnabled = canConnect
         addActionListener { connectAction?.invoke() }
     }
     private val newSessionButton = JButton("+").apply {
         name = "newSessionButton"
-        toolTipText = "New connection"
+        toolTipText = I18n.t("workbench.newSession.tooltip")
         isEnabled = canConnect
         isFocusable = false
         margin = Insets(0, 6, 0, 6)
@@ -589,18 +597,18 @@ class WorkbenchPanel(
         isOpaque = false
         add(newSessionButton, BorderLayout.WEST)
     }
-    private val hostsButton = JButton("Hosts...").apply {
+    private val hostsButton = JButton(I18n.t("workbench.hosts")).apply {
         name = "hostsButton"
         isEnabled = hostsAction != null
         addActionListener { hostsAction?.invoke() }
     }
     private val toolDock = CollapsibleToolDock(commandsController)
-    private val toolDockToggle = JButton("Show tools").apply {
+    private val toolDockToggle = JButton(I18n.t("workbench.tools.show")).apply {
         name = "toolDockToggle"
         getAccessibleContext().accessibleName = "Toggle session tools"
         addActionListener {
             toolDock.setExpanded(!toolDock.isExpanded)
-            text = if (toolDock.isExpanded) "Hide tools" else "Show tools"
+            text = if (toolDock.isExpanded) I18n.t("workbench.tools.hide") else I18n.t("workbench.tools.show")
         }
     }
 
@@ -640,14 +648,14 @@ class WorkbenchPanel(
         val index = sessionTabs.indexOfComponent(component)
         sessionTabs.setTabComponentAt(index, createSessionTabHeader(title, component, tab))
         sessionTabs.selectedComponent = component
-        setConnectionState("Connected to $title", false)
+        setConnectionState(I18n.t("workbench.connectedTo", title), false)
     }
 
     fun updateSessionStatus(component: Component, status: SessionStatus) {
         check(SwingUtilities.isEventDispatchThread()) { "Session status must be updated on the Swing EDT" }
         val tab = sessions[component] ?: return
         tab.status = status
-        tab.statusLabel.text = status.label
+        tab.statusLabel.text = I18n.t(status.labelKey)
         tab.statusLabel.foreground = status.color
         if (sessionTabs.selectedComponent === component) updateSelectedSessionStatus()
     }
@@ -658,7 +666,7 @@ class WorkbenchPanel(
         val tab = sessions[component] ?: return
         tab.title = title
         tab.titleLabel.text = title
-        tab.closeButton.toolTipText = "Close $title"
+        tab.closeButton.toolTipText = I18n.t("workbench.tab.close", title)
         val index = sessionTabs.indexOfComponent(component)
         if (index >= 0) sessionTabs.setTitleAt(index, title)
         if (sessionTabs.selectedComponent === component) updateSelectedSessionStatus()
@@ -753,12 +761,42 @@ class WorkbenchPanel(
     private fun createEmptySession(): JPanel = JPanel(BorderLayout()).apply {
         name = "terminalWorkspace"
         border = BorderFactory.createEmptyBorder(24, 24, 24, 24)
-        add(emptyState("No active terminal session. Use Connect... to open an SSH shell."), BorderLayout.CENTER)
+        add(emptyStateLabel, BorderLayout.CENTER)
+    }
+
+    /**
+     * Re-applies localized texts across the workbench after the Settings language change, so the
+     * main window follows immediately instead of waiting for a restart.
+     */
+    fun relocalize() {
+        check(SwingUtilities.isEventDispatchThread()) { "Localized texts must be refreshed on the Swing EDT" }
+        connectButton.text = I18n.t("workbench.connect")
+        hostsButton.text = I18n.t("workbench.hosts")
+        newSessionButton.toolTipText = I18n.t("workbench.newSession.tooltip")
+        toolDockToggle.text = if (toolDock.isExpanded) {
+            I18n.t("workbench.tools.hide")
+        } else {
+            I18n.t("workbench.tools.show")
+        }
+        emptyStateLabel.text = I18n.t("workbench.empty")
+        val startIndex = sessionTabs.indexOfComponent(emptySession)
+        if (startIndex >= 0) sessionTabs.setTitleAt(startIndex, I18n.t("workbench.tab.start"))
+        sessions.forEach { (_, tab) ->
+            tab.statusLabel.text = I18n.t(tab.status.labelKey)
+            tab.closeButton.toolTipText = I18n.t("workbench.tab.close", tab.title)
+        }
+        if (sessions.isEmpty()) {
+            if (!connecting) connectionStatus.text = I18n.t("workbench.notConnected")
+        } else {
+            updateSelectedSessionStatus()
+        }
+        toolDock.relocalize()
+        monitorPanel.relocalize()
     }
 
     private fun showEmptySession() {
-        if (sessionTabs.indexOfComponent(emptySession) < 0) sessionTabs.addTab("Start", emptySession)
-        if (!connecting) connectionStatus.text = "Not connected"
+        if (sessionTabs.indexOfComponent(emptySession) < 0) sessionTabs.addTab(I18n.t("workbench.tab.start"), emptySession)
+        if (!connecting) connectionStatus.text = I18n.t("workbench.notConnected")
     }
 
     private fun createSessionTabHeader(title: String, component: Component, tab: SessionTab): JPanel = JPanel(
@@ -766,7 +804,7 @@ class WorkbenchPanel(
     ).apply {
         isOpaque = false
         add(tab.titleLabel.also { it.text = title })
-        add(tab.statusLabel.also { it.text = tab.status.label; it.foreground = tab.status.color })
+        add(tab.statusLabel.also { it.text = I18n.t(tab.status.labelKey); it.foreground = tab.status.color })
         add(tab.closeButton.also {
             it.toolTipText = "Close $title"
             it.addActionListener { closeSession(component) }
@@ -794,10 +832,10 @@ class WorkbenchPanel(
         val component = sessionTabs.getComponentAt(index)
         val tab = sessions[component] ?: return
         connectionStatus.text = when (tab.status) {
-            SessionStatus.CONNECTED -> "Connected to ${sessionTabs.getTitleAt(index)}"
-            SessionStatus.EXITED -> "Exited: ${sessionTabs.getTitleAt(index)}"
-            SessionStatus.FAILED -> "Failed: ${sessionTabs.getTitleAt(index)}"
-            SessionStatus.CLOSING -> "Closing: ${sessionTabs.getTitleAt(index)}"
+            SessionStatus.CONNECTED -> I18n.t("sessionStatus.line.connected", sessionTabs.getTitleAt(index))
+            SessionStatus.EXITED -> I18n.t("sessionStatus.line.exited", sessionTabs.getTitleAt(index))
+            SessionStatus.FAILED -> I18n.t("sessionStatus.line.failed", sessionTabs.getTitleAt(index))
+            SessionStatus.CLOSING -> I18n.t("sessionStatus.line.closing", sessionTabs.getTitleAt(index))
         }
     }
 
@@ -867,8 +905,8 @@ private class CollapsibleToolDock(commandsController: CommandsController?) : JPa
     private val content = JTabbedPane(JTabbedPane.TOP).apply {
         name = "toolDockContent"
         preferredSize = Dimension(0, 300)
-        addTab("SFTP", sftpPanel)
-        addTab("Commands", commandsPanel)
+        addTab(I18n.t("dock.sftp"), sftpPanel)
+        addTab(I18n.t("dock.commands"), commandsPanel)
         isVisible = false
     }
     var isExpanded: Boolean = false
@@ -898,6 +936,14 @@ private class CollapsibleToolDock(commandsController: CommandsController?) : JPa
     }
 
     fun commandsPanel(): CommandsPanel = commandsPanel
+
+    /** Re-applies the dock tab titles and the panel texts after a language change. */
+    fun relocalize() {
+        content.setTitleAt(0, I18n.t("dock.sftp"))
+        content.setTitleAt(1, I18n.t("dock.commands"))
+        sftpPanel.relocalize()
+        commandsPanel.relocalize()
+    }
 
     fun setExpanded(expanded: Boolean) {
         if (isExpanded == expanded) return

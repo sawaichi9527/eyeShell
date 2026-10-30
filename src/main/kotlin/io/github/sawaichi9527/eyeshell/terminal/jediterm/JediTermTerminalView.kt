@@ -15,6 +15,7 @@ import com.jediterm.terminal.ui.TerminalActionProvider
 import com.jediterm.terminal.ui.JediTermWidget
 import com.jediterm.terminal.ui.settings.DefaultSettingsProvider
 import com.jediterm.terminal.util.CharUtils
+import io.github.sawaichi9527.eyeshell.platform.I18n
 import io.github.sawaichi9527.eyeshell.terminal.TerminalBackgroundImage
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorScheme
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorSchemes
@@ -226,34 +227,34 @@ private class ContextActionProvider(
     private var nextProvider: TerminalActionProvider? = null
 
     override fun getActions(): List<TerminalAction> = listOf(
-        action("Copy", enabled = widget.terminalPanel::canCopyCurrentSelection) {
+        action(I18n.t("terminal.copy"), enabled = widget.terminalPanel::canCopyCurrentSelection) {
             widget.terminalPanel.copyCurrentSelection()
         },
-        action("Paste", enabled = { hasSession && widget.isSessionRunning }) {
+        action(I18n.t("terminal.paste"), enabled = { hasSession && widget.isSessionRunning }) {
             if (widget.isSessionRunning) widget.terminalPanel.pasteClipboard()
         },
-        action("Select Visible", separated = true, enabled = { hasSession }) {
+        action(I18n.t("terminal.selectVisible"), separated = true, enabled = { hasSession }) {
             widget.terminalPanel.selectVisible()
         },
-        action("Select All Output", enabled = { hasSession }) {
+        action(I18n.t("terminal.selectAllOutput"), enabled = { hasSession }) {
             widget.terminalPanel.selectAllMainOutput()
         },
-        action("Copy All Output", enabled = { hasSession && actions != null }) {
+        action(I18n.t("terminal.copyAllOutput"), enabled = { hasSession && actions != null }) {
             actions?.copyAllOutput?.invoke()
         },
-        action("Save All Output...", enabled = { hasSession && actions != null }) {
+        action(I18n.t("terminal.saveAllOutput"), enabled = { hasSession && actions != null }) {
             actions?.saveAllOutput?.invoke()
         },
-        action("Search...", separated = true, enabled = { hasSession }) {
+        action(I18n.t("terminal.search"), separated = true, enabled = { hasSession }) {
             showSearch()
         },
-        action("Add Color Highlight Rule...", enabled = { hasSession && actions?.addHighlightRule != null }) {
+        action(I18n.t("terminal.addHighlight"), enabled = { hasSession && actions?.addHighlightRule != null }) {
             actions?.addHighlightRule?.invoke()
         },
-        action("Manage Color Highlight Rules...", enabled = { hasSession && actions?.manageHighlightRules != null }) {
+        action(I18n.t("terminal.manageHighlights"), enabled = { hasSession && actions?.manageHighlightRules != null }) {
             actions?.manageHighlightRules?.invoke()
         },
-        action("Clear Buffer", separated = true, enabled = {
+        action(I18n.t("terminal.clearBuffer"), separated = true, enabled = {
             hasSession && !widget.terminalTextBuffer.isUsingAlternateBuffer
         }) {
             if (!widget.terminalTextBuffer.isUsingAlternateBuffer) widget.terminalPanel.clearBuffer()
