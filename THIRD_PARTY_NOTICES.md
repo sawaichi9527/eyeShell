@@ -1,5 +1,13 @@
 # Third-Party Notices
 
+## iTerm2-Color-Schemes
+
+- Project: iTerm2-Color-Schemes
+- Source: https://github.com/mbadolato/iTerm2-Color-Schemes
+- Copyright: Michael Badolato and contributors
+- License: MIT License (https://github.com/mbadolato/iTerm2-Color-Schemes/blob/master/LICENSE)
+- Usage: `src/main/resources/themes/iterm2.properties` is generated from the upstream `schemes/*.itermcolors` files. Only schemes whose foreground keeps at least 4.5:1 contrast against both their own background and the bundled `bg1.jpg` artwork are imported; upstream schemas that duplicate an eyeShell palette are skipped. The generated file keeps the upstream names and is the only runtime dependency.
+
 ## Bundled terminal background presets
 
 - Files: `src/main/resources/backgrounds/bg1.jpg` … `bg5.jpg`

@@ -186,7 +186,15 @@ class MonitorPanel(
     /** Re-renders the current state so labels follow the new language. */
     fun relocalize() {
         lastSnapshot?.let { update(it) } ?: resetToIdle()
+        processTable.columnModel.getColumn(0).headerValue = I18n.t("monitor.process.name")
+        processTable.columnModel.getColumn(1).headerValue = I18n.t("monitor.process.mem")
+        processTable.columnModel.getColumn(2).headerValue = I18n.t("monitor.process.cpu")
+        processTable.tableHeader.repaint()
     }
+
+    /** Test hook: the Processes table is only added to the tree while a snapshot is rendered. */
+    internal val processTableComponent: JTable
+        get() = processTable
 
     fun resetToIdle() {
         content.removeAll()

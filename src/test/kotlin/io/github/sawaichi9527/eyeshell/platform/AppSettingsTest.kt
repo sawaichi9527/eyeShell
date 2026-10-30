@@ -60,6 +60,21 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `terminal font families survive a reload`() {
+        val file = directory.resolve("settings.properties")
+        val settings = AppSettings.load(file)
+        assertEquals("", settings.terminalFontFamily)
+        assertEquals("", settings.terminalFontCjkFamily)
+
+        settings.terminalFontFamily = "Consolas"
+        settings.terminalFontCjkFamily = "Sarasa Mono TC"
+
+        val reloaded = AppSettings.load(file)
+        assertEquals("Consolas", reloaded.terminalFontFamily)
+        assertEquals("Sarasa Mono TC", reloaded.terminalFontCjkFamily)
+    }
+
+    @Test
     fun `terminal background settings survive a reload`() {
         val file = directory.resolve("settings.properties")
         val settings = AppSettings.load(file)

@@ -1,5 +1,6 @@
 package io.github.sawaichi9527.eyeshell.ui
 
+import io.github.sawaichi9527.eyeshell.platform.I18n
 import io.github.sawaichi9527.eyeshell.ssh.ChangedHostKey
 import io.github.sawaichi9527.eyeshell.ssh.ChangedHostKeyHandler
 import io.github.sawaichi9527.eyeshell.platform.EyeShellPaths
@@ -72,7 +73,7 @@ internal class SshConnectionController(
     internal fun connect(owner: EyeShellWindow, preset: HostConnectionPreset?, target: JComponent?): Boolean {
         check(SwingUtilities.isEventDispatchThread()) { "The SSH connection dialog must open on the Swing EDT" }
         if (closed.get() || connectionTask?.isDone == false) return false
-        owner.setConnectionState("Preparing SSH connection...", true)
+        owner.setConnectionState(I18n.t("conn.preparing"), true)
         connectionTask = executor.submit {
             connectInBackground(owner, preset, target)
         }
@@ -95,7 +96,7 @@ internal class SshConnectionController(
                 }
                 when (decision) {
                     ConnectionDialogDecision.Cancel -> {
-                        publishConnectionState(owner, "Not connected")
+                        publishConnectionState(owner, I18n.t("conn.notConnected"))
                         return
                     }
                     ConnectionDialogDecision.ForgetPassword -> {
@@ -108,7 +109,7 @@ internal class SshConnectionController(
                             jumpCredential = preset.jumpHost?.let { loadStoredPassword(it.toPreset()) }
                                 ?: LoadedCredential(CredentialStoreStatus.UNAVAILABLE, null, null, CredentialSource.NONE)
                         } catch (_: Exception) {
-                            showCredentialWarning(owner, "Could not forget the saved password.")
+                            showCredentialWarning(owner, I18n.t("conn.forgetFailed"))
                         }
                     }
                     is ConnectionDialogDecision.Connect -> {
@@ -172,7 +173,7 @@ internal class SshConnectionController(
 
     private fun connectRequest(owner: EyeShellWindow, request: ConnectionRequest, target: JComponent?) {
         request.use {
-            publishConnectionState(owner, "Connecting to ${request.endpoint.displayName}...", connecting = true)
+            publishConnectionState(owner, I18n.t("conn.connecting", request.endpoint.displayName), connecting = true)
             val changedHostKey = AtomicReference<ChangedHostKey>()
             val changedJumpHostKey = AtomicReference<ChangedHostKey>()
             val review = HostKeyReview(request.endpoint, request.jumpHost?.endpoint)
@@ -180,7 +181,7 @@ internal class SshConnectionController(
                 TransportProvider.JumpHost(
                     endpoint = jump.endpoint,
                     authentication = checkNotNull(request.jumpAuthentication) {
-                        "Jump host authentication is missing"
+                        I18n.t("conn.jumpAuthMissing")
                     },
                     unknownHostVerifier = HostKeyVerifier { presented ->
                         confirmHostKey(owner, review.jumpPrompt(presented)).also { accepted ->
@@ -216,15 +217,15 @@ internal class SshConnectionController(
                                 }
                             }
                             if (opened.passwordSaveFailed) {
-                                showCredentialWarning(owner, "Connected, but the password could not be saved.")
+                                showCredentialWarning(owner, I18n.t("conn.saveFailed"))
                             }
                         } catch (failure: Exception) {
                             opened.hostSession.close()
-                            owner.setConnectionState("Connection failed", false)
+                            owner.setConnectionState(I18n.t("conn.failed"), false)
                             JOptionPane.showMessageDialog(
                                 owner,
                                 describeFailure(failure),
-                                if (target != null) "Could not reconnect" else "Could not open terminal tab",
+                                if (target != null) I18n.t("conn.reconnectFailed") else I18n.t("conn.openTabFailed"),
                                 JOptionPane.ERROR_MESSAGE,
                             )
                         }
@@ -235,13 +236,13 @@ internal class SshConnectionController(
             } catch (failure: Exception) {
                 SwingUtilities.invokeLater {
                     if (owner.isDisplayable && !closed.get()) {
-                        owner.setConnectionState("Connection failed", false)
+                        owner.setConnectionState(I18n.t("conn.failed"), false)
                         val changedKey = changedJumpHostKey.get() ?: changedHostKey.get()
                         JOptionPane.showMessageDialog(
                             owner,
                             changedKey?.let(::changedHostKeyMessage)
                                 ?: describeFailure(failure),
-                            "SSH connection failed",
+                            I18n.t("conn.failedTitle"),
                             JOptionPane.ERROR_MESSAGE,
                         )
                     }
@@ -398,9 +399,9 @@ internal class SshConnectionController(
             selectedItem = preset?.authenticationMethod ?: ConnectionAuthenticationMethod.PASSWORD
         }
         val passwordField = JPasswordField(24)
-        val rememberPassword = JCheckBox("Remember password in OS credential store", canForgetPassword)
+        val rememberPassword = JCheckBox(I18n.t("conn.remember"), canForgetPassword)
         val keyFileField = JTextField(24)
-        val keyFileButton = JButton("Browse...")
+        val keyFileButton = JButton(I18n.t("conn.browse"))
         val keyFilePanel = JPanel(java.awt.BorderLayout(6, 0)).apply {
             add(keyFileField, java.awt.BorderLayout.CENTER)
             add(keyFileButton, java.awt.BorderLayout.EAST)
@@ -409,21 +410,21 @@ internal class SshConnectionController(
         val jump = preset?.jumpHost
         val jumpPasswordField = JPasswordField(24)
         val jumpKeyFileField = JTextField(24)
-        val jumpKeyFileButton = JButton("Browse...")
+        val jumpKeyFileButton = JButton(I18n.t("conn.browse"))
         val jumpPassphraseField = JPasswordField(24)
         val credentialHint = JLabel()
         val panel = JPanel(GridBagLayout())
-        addField(panel, 0, "Host", hostField)
-        addField(panel, 1, "Port", portSpinner)
-        addField(panel, 2, "Username", usernameField)
-        addField(panel, 3, "Authentication", authenticationField)
-        addField(panel, 4, "Password", passwordField)
-        addField(panel, 5, "Private key", keyFilePanel)
-        addField(panel, 6, "Passphrase", passphraseField)
+        addField(panel, 0, I18n.t("conn.host"), hostField)
+        addField(panel, 1, I18n.t("conn.port"), portSpinner)
+        addField(panel, 2, I18n.t("conn.username"), usernameField)
+        addField(panel, 3, I18n.t("conn.authentication"), authenticationField)
+        addField(panel, 4, I18n.t("conn.password"), passwordField)
+        addField(panel, 5, I18n.t("conn.privateKey"), keyFilePanel)
+        addField(panel, 6, I18n.t("conn.passphrase"), passphraseField)
         addField(panel, 7, "", rememberPassword)
         addField(panel, 8, "", credentialHint)
         if (jump != null) {
-            addField(panel, 9, "Jump host", buildJumpCredentialPanel(
+            addField(panel, 9, I18n.t("conn.jumpHost"), buildJumpCredentialPanel(
                 jump = jump,
                 storedJumpPassword = storedJumpPassword,
                 jumpStoreStatus = jumpStoreStatus,
@@ -436,7 +437,7 @@ internal class SshConnectionController(
             jumpKeyFileButton.addActionListener {
                 JFileChooser().apply {
                     fileSelectionMode = JFileChooser.FILES_ONLY
-                    dialogTitle = "Select jump host SSH private key"
+                    dialogTitle = I18n.t("conn.chooseJumpKey")
                     if (showOpenDialog(owner) == JFileChooser.APPROVE_OPTION) {
                         jumpKeyFileField.text = selectedFile.toPath().toString()
                     }
@@ -463,8 +464,8 @@ internal class SshConnectionController(
                 credential.source == CredentialSource.SESSION -> UiText.CONNECT_SESSION_PASSWORD
                 storeStatus == CredentialStoreStatus.LOCKED -> UiText.CONNECT_STORE_LOCKED
                 storeStatus != CredentialStoreStatus.AVAILABLE ->
-                    "OS credential store unavailable; password remains session-only."
-                storedPassword != null -> "Saved password will be used unless a replacement is entered."
+                    I18n.t("conn.storedUnavailable")
+                storedPassword != null -> I18n.t("conn.storedUsed")
                 else -> ""
             }
         }
@@ -472,7 +473,7 @@ internal class SshConnectionController(
         keyFileButton.addActionListener {
             JFileChooser().apply {
                 fileSelectionMode = JFileChooser.FILES_ONLY
-                dialogTitle = "Select SSH private key"
+                dialogTitle = I18n.t("conn.chooseKey")
                 if (showOpenDialog(owner) == JFileChooser.APPROVE_OPTION) {
                     keyFileField.text = selectedFile.toPath().toString()
                 }
@@ -480,16 +481,16 @@ internal class SshConnectionController(
         }
         updateAuthenticationFields()
 
-        val options = if (canForgetPassword) arrayOf("Connect", "Cancel", "Forget saved password") else arrayOf("Connect", "Cancel")
+        val options = if (canForgetPassword) arrayOf(I18n.t("conn.connect"), I18n.t("conn.cancel"), I18n.t("conn.forget")) else arrayOf(I18n.t("conn.connect"), I18n.t("conn.cancel"))
         val optionPane = JOptionPane(
             panel,
             JOptionPane.PLAIN_MESSAGE,
             JOptionPane.DEFAULT_OPTION,
             null,
             options,
-            "Connect",
+            I18n.t("conn.connect"),
         )
-        val dialog = optionPane.createDialog(owner, "Connect with SSH")
+        val dialog = optionPane.createDialog(owner, I18n.t("conn.title"))
         connectionDialog.set(dialog)
         val selected = try {
             dialog.isVisible = true
@@ -563,7 +564,7 @@ internal class SshConnectionController(
             )).also { jumpAuthentication = null }
         } catch (failure: IllegalArgumentException) {
             jumpAuthentication?.close()
-            JOptionPane.showMessageDialog(owner, failure.message, "Invalid SSH connection", JOptionPane.ERROR_MESSAGE)
+            JOptionPane.showMessageDialog(owner, failure.message, I18n.t("conn.invalid"), JOptionPane.ERROR_MESSAGE)
             ConnectionDialogDecision.Cancel
         } finally {
             Arrays.fill(password, '\u0000')
@@ -631,35 +632,35 @@ internal class SshConnectionController(
         val inner = JPanel(GridBagLayout())
         inner.border = BorderFactory.createTitledBorder(jump.endpoint.displayName)
         var row = 0
-        addField(inner, row++, "Authentication", JLabel(jump.authenticationMethod.toString()))
+        addField(inner, row++, I18n.t("conn.authentication"), JLabel(jump.authenticationMethod.toString()))
         when (jump.authenticationMethod) {
             ConnectionAuthenticationMethod.PASSWORD -> {
                 val hint = when {
                     jumpSource == CredentialSource.SESSION -> UiText.CONNECT_SESSION_PASSWORD
                     jumpStoreStatus == CredentialStoreStatus.LOCKED -> UiText.CONNECT_STORE_LOCKED
                     jumpStoreStatus != CredentialStoreStatus.AVAILABLE ->
-                        "OS credential store unavailable; the jump password stays session-only."
-                    storedJumpPassword != null -> "Saved jump password will be used unless a replacement is entered."
-                    else -> "Enter the jump host password for this connection."
+                        I18n.t("conn.jumpStoredUnavailable")
+                    storedJumpPassword != null -> I18n.t("conn.jumpStoredUsed")
+                    else -> I18n.t("conn.jumpPrompt")
                 }
                 addField(inner, row++, "", JLabel(hint))
                 passwordField.putClientProperty(
                     "JTextField.placeholderText",
                     UiText.passwordPlaceholder(passwordAuthentication = true, savedPassword = storedJumpPassword != null),
                 )
-                addField(inner, row++, "Password", passwordField)
+                addField(inner, row++, I18n.t("conn.password"), passwordField)
             }
             ConnectionAuthenticationMethod.PUBLIC_KEY -> {
-                addField(inner, row++, "Private key", JPanel(java.awt.BorderLayout(6, 0)).apply {
+                addField(inner, row++, I18n.t("conn.privateKey"), JPanel(java.awt.BorderLayout(6, 0)).apply {
                     add(keyFileField, java.awt.BorderLayout.CENTER)
                     add(keyFileButton, java.awt.BorderLayout.EAST)
                 })
-                addField(inner, row++, "Passphrase", passphraseField)
+                addField(inner, row++, I18n.t("conn.passphrase"), passphraseField)
             }
             ConnectionAuthenticationMethod.KEYBOARD_INTERACTIVE ->
-                addField(inner, row, "", JLabel("The jump host prompts during authentication."))
+                addField(inner, row, "", JLabel(I18n.t("conn.jumpInteractive")))
             ConnectionAuthenticationMethod.SSH_AGENT ->
-                addField(inner, row, "", JLabel("The jump host uses the running SSH agent."))
+                addField(inner, row, "", JLabel(I18n.t("conn.jumpAgent")))
         }
         return inner
     }
@@ -716,7 +717,7 @@ internal class SshConnectionController(
     private fun showCredentialWarning(owner: EyeShellWindow, message: String) {
         val show = {
             if (owner.isDisplayable && !closed.get()) {
-                JOptionPane.showMessageDialog(owner, message, "Credential store", JOptionPane.WARNING_MESSAGE)
+                JOptionPane.showMessageDialog(owner, message, I18n.t("conn.credentialStore"), JOptionPane.WARNING_MESSAGE)
             }
         }
         if (SwingUtilities.isEventDispatchThread()) show() else SwingUtilities.invokeLater(show)
@@ -773,7 +774,7 @@ internal class SshConnectionController(
                 JOptionPane.PLAIN_MESSAGE,
                 JOptionPane.OK_CANCEL_OPTION,
             )
-            val dialog = optionPane.createDialog(owner, "SSH authentication challenge")
+            val dialog = optionPane.createDialog(owner, I18n.t("conn.challenge"))
             challengeDialog.set(dialog)
             try {
                 dialog.isVisible = true
@@ -888,11 +889,11 @@ private object MinaTerminalConnector : SshTerminalConnector {
 internal enum class ConnectionAuthenticationMethod(
     private val label: String,
 ) {
-    PASSWORD("Password"),
-    PUBLIC_KEY("Private key"),
-    KEYBOARD_INTERACTIVE("Keyboard-interactive"),
-    SSH_AGENT("SSH agent"),
+    PASSWORD("conn.auth.password"),
+    PUBLIC_KEY("conn.auth.privateKey"),
+    KEYBOARD_INTERACTIVE("conn.auth.keyboardInteractive"),
+    SSH_AGENT("conn.auth.agent"),
     ;
 
-    override fun toString(): String = label
+    override fun toString(): String = I18n.t(label)
 }

@@ -9,6 +9,7 @@ import com.jediterm.terminal.ui.TerminalPanel
 import com.jediterm.terminal.ui.settings.SettingsProvider
 import io.github.sawaichi9527.eyeshell.terminal.TerminalBackgroundImage
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorScheme
+import io.github.sawaichi9527.eyeshell.terminal.TerminalFallbackFonts
 import io.github.sawaichi9527.eyeshell.terminal.TerminalFontFallback
 import java.awt.AlphaComposite
 import java.awt.Font
@@ -91,7 +92,10 @@ internal class EyeShellTerminalPanel(
     terminalTextBuffer: TerminalTextBuffer,
     internal val styleState: StyleState,
 ) : TerminalPanel(settingsProvider, terminalTextBuffer, styleState) {
-    private val fallback = TerminalFontFallback()
+    private val eyeSettings = settingsProvider as EyeShellTerminalSettings
+    private var fallback = TerminalFontFallback(
+        TerminalFallbackFonts.fallbackFamiliesWith(eyeSettings.cjkFontFamily),
+    )
 
     private var backgroundSelection: TerminalBackgroundImage? = null
     private var backgroundSource: BufferedImage? = null
@@ -101,6 +105,12 @@ internal class EyeShellTerminalPanel(
 
     /** Re-reads the terminal font from the settings provider and re-flows the cell grid. */
     internal fun refreshFont() = reinitFontAndResize()
+
+    /** Rebuilds the per-glyph fallback chain, for example after the CJK family changed. */
+    internal fun refreshFontFallback() {
+        fallback = TerminalFontFallback(TerminalFallbackFonts.fallbackFamiliesWith(eyeSettings.cjkFontFamily))
+        repaint()
+    }
 
     /**
      * Selects (or clears) the background image. The image is decoded off the EDT unless

@@ -72,8 +72,12 @@ fun main(arguments: Array<String>) {
                 JediTermTerminalView(
                     scrollbackLines = safeMode.scrollbackLines,
                     maxRefreshRate = safeMode.maxRefreshRate,
-                    font = TerminalTypography.resolveFont(size = appSettings.terminalFontSize.toFloat()),
+                    font = TerminalTypography.resolveFontFor(
+                        family = appSettings.terminalFontFamily,
+                        size = appSettings.terminalFontSize.toFloat(),
+                    ),
                     colorScheme = TerminalColorSchemes.fromId(appSettings.terminalColorSchemeId),
+                    cjkFontFamily = appSettings.terminalFontCjkFamily.ifBlank { null },
                 )
             },
             connectAction = { owner -> connectionController.connect(owner) },

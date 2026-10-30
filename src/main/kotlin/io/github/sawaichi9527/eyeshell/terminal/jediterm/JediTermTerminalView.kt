@@ -36,8 +36,9 @@ class JediTermTerminalView(
     maxRefreshRate: Int = EyeShellTerminalSettings.MAX_REFRESH_RATE,
     font: java.awt.Font = TerminalTypography.defaultFont(),
     colorScheme: TerminalColorScheme = TerminalColorSchemes.DEFAULT,
+    cjkFontFamily: String? = null,
 ) : TerminalView {
-    private val settings = EyeShellTerminalSettings(scrollbackLines, maxRefreshRate, font, colorScheme)
+    private val settings = EyeShellTerminalSettings(scrollbackLines, maxRefreshRate, font, colorScheme, cjkFontFamily)
     private val widget = EyeShellTerminalWidget(columns, rows, settings)
     private val searchController = JediTermSearchController(widget)
     private val highlightController = JediTermHighlightController(widget)
@@ -186,6 +187,17 @@ class JediTermTerminalView(
         require(size > 0f) { "Terminal font size must be positive" }
         settings.font = settings.font.deriveFont(size)
         (widget.terminalPanel as EyeShellTerminalPanel).refreshFont()
+    }
+
+    override fun setFontFamilies(latin: String?, cjk: String?) {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal font changes must happen on the Swing EDT" }
+        val size = settings.font.size2D
+        settings.font = TerminalTypography.resolveFontFor(latin, size)
+        settings.cjkFontFamily = cjk?.trim().orEmpty().ifEmpty { null }
+        (widget.terminalPanel as EyeShellTerminalPanel).apply {
+            refreshFont()
+            refreshFontFallback()
+        }
     }
 
     override fun setColorScheme(scheme: TerminalColorScheme) {
@@ -337,12 +349,16 @@ internal class EyeShellTerminalSettings(
     private val refreshRate: Int = MAX_REFRESH_RATE,
     font: java.awt.Font = TerminalTypography.defaultFont(),
     colorScheme: TerminalColorScheme = TerminalColorSchemes.DEFAULT,
+    cjkFontFamily: String? = null,
 ) : DefaultSettingsProvider() {
     /** Mutable so the Settings dialog can change the size of a live terminal. */
     var font: java.awt.Font = font
 
     /** Mutable so the Settings dialog can recolor a live terminal. */
     var colorScheme: TerminalColorScheme = colorScheme
+
+    /** Preferred family for CJK glyphs the primary font lacks; null keeps the built-in chain. */
+    var cjkFontFamily: String? = cjkFontFamily
 
     override fun audibleBell(): Boolean = false
 

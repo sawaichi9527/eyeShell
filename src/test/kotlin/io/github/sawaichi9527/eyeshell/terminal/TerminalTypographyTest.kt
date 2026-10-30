@@ -83,4 +83,51 @@ class TerminalTypographyTest {
         assertTrue(TerminalTypography.INITIAL_ROWS in 24..40)
         assertEquals(16f, TerminalTypography.DEFAULT_FONT_SIZE)
     }
+
+    @Test
+    fun `a selected family is matched case-insensitively`() {
+        val available = setOf("Consolas", "DejaVu Sans Mono", "Sarasa Mono TC")
+
+        val font = TerminalTypography.resolveFontFor("consolas", 15f, "Windows 10", available)
+
+        assertEquals("Consolas", font.family)
+        assertEquals(15f, font.size2D)
+    }
+
+    @Test
+    fun `an unknown family falls back to the automatic choice`() {
+        val available = setOf("Consolas", "DejaVu Sans Mono")
+
+        val font = TerminalTypography.resolveFontFor("Not Installed Mono", 16f, "Windows 10", available)
+
+        assertEquals(
+            TerminalTypography.resolveFamily(TerminalTypography.preferredFamilies("Windows 10"), available),
+            font.family,
+        )
+    }
+
+    @Test
+    fun `a blank family means automatic`() {
+        val available = setOf("Consolas")
+
+        val font = TerminalTypography.resolveFontFor("", 16f, "Windows 10", available)
+
+        assertEquals("Consolas", font.family)
+    }
+
+    @Test
+    fun `a chosen CJK family heads the fallback chain`() {
+        val families = TerminalFallbackFonts.fallbackFamiliesWith("My CJK Font", "Windows 10")
+
+        assertEquals("My CJK Font", families.first())
+        assertEquals(TerminalFallbackFonts.fallbackFamilies("Windows 10"), families.drop(1))
+    }
+
+    @Test
+    fun `a blank CJK family keeps the default chain`() {
+        assertEquals(
+            TerminalFallbackFonts.fallbackFamilies("Linux"),
+            TerminalFallbackFonts.fallbackFamiliesWith("  ", "Linux"),
+        )
+    }
 }

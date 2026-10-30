@@ -68,6 +68,7 @@ class EyeShellWindow(
     private val settingsController = SettingsController(
         appSettings,
         applyFontSize = { size -> applyTerminalFontSize(size) },
+        applyFontFamilies = { latin, cjk -> applyTerminalFontFamilies(latin, cjk) },
         applyColorScheme = { scheme -> applyTerminalColorScheme(scheme) },
         applyCharset = { charset -> applyTerminalCharset(charset) },
         applyBackgroundImage = { image -> applyTerminalBackgroundImage(image) },
@@ -230,6 +231,12 @@ class EyeShellWindow(
         pagesByComponent.values.toList().forEach { page -> page.applyFontSize(size) }
     }
 
+    /** Applies the selected Latin/CJK font families to every open session. */
+    private fun applyTerminalFontFamilies(latin: String, cjk: String) {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal font changes must happen on the Swing EDT" }
+        pagesByComponent.values.toList().forEach { page -> page.applyFontFamilies(latin, cjk) }
+    }
+
     /** Applies the Settings color scheme to every open session; new sessions read it from the factory. */
     internal fun applyTerminalColorScheme(scheme: TerminalColorScheme) {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal color changes must happen on the Swing EDT" }
@@ -313,6 +320,8 @@ internal class TerminalSessionPage(
     }
 
     fun applyFontSize(size: Float) = terminalView.setFontSize(size)
+
+    fun applyFontFamilies(latin: String, cjk: String) = terminalView.setFontFamilies(latin, cjk)
 
     fun applyColorScheme(scheme: TerminalColorScheme) = terminalView.setColorScheme(scheme)
 

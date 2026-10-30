@@ -546,14 +546,16 @@ Alternate Screen 用於 `vim`、`top`、`less`、`tmux` 等程式，不應將每
 
 Terminal 的 background、foreground 與 16 色 ANSI palette 由使用者選擇，並套用到所有已開啟的 Session。
 
-- 內建配色僅採用公開、常見的組合：`eyeShell Dark`（預設）、`eyeShell Light`、`Solarized Light`、`Solarized Dark`、`Dracula`、`Nord`。
-- 不得複製 FinalShell 的配色資產；色票以公開 palette 數值自行宣告。
+- 內建配色僅採用公開、常見的組合：`eyeShell Dark`（預設）、`eyeShell Light`、`Solarized Light`、`Solarized Dark`、`Dracula`、`Nord`，另加上從 `mbadolato/iTerm2-Color-Schemes`（MIT）匯入的精選主題。
+- 匯入主題由 `src/main/resources/themes/iterm2.properties` 提供（建置時不連網、不引入依賴）；僅收錄 foreground 對自身背景 ≥ 4.5:1，且對內建 `bg1.jpg` 平均亮度（RGB 37/65/85，相對亮度 0.048）亦 ≥ 4.5:1 的主題，避免使用背景圖片時文字不可讀。與內建主題同名的項目會跳過。
+- 不得複製 FinalShell 的配色資產；色票以公開 palette 數值自行宣告或自 MIT 專案匯入。
 - 淺色主題的 ANSI `white`／`bright white` slot 必須改映射為深色 base，避免淺底淺字。
 - 每個內建主題的 foreground/background 對比必須 ≥ 4.5:1（WCAG AA body text），由測試守門。
 - 選擇即時套用到所有已開啟 Session，不重建 `TerminalView`、不影響 scrollback、Search、Selection 或 Highlight 規則。
 - 預設文字顏色的儲存格必須以「未指定顏色」保存，繪製時才解析為目前主題，因此切換主題時既有 scrollback 一併重新著色。
 - 選擇保存在非機密的 `settings.properties`（`terminal.color.scheme`）；未知或已移除的 id 回退到預設主題。
-- Settings 對話框採左側分類、右側內容的 layout；顏色頁面提供主題下拉選單、即時預覽與對比數值；Terminal 頁面提供字型大小與字元編碼；Background 頁面提供背景圖片開關、圖片選擇與預覽（§9.5）。
+- Settings 對話框採左側分類、右側內容的 layout；顏色頁面提供主題下拉選單、即時預覽與對比數值；Terminal 頁面提供字型大小、英文字型、中文字型與字元編碼；Background 頁面提供背景圖片開關、圖片選擇與預覽（§9.5）。
+- 英文字型（primary）與中文字型（CJK fallback）各自可選；空值代表自動，對照目前安裝字型以不分大小寫比對，找不到時回退自動選擇。字型變更即時套用到所有已開啟 Session，候選字型清單來自 JVM 已安裝字型，不需重新啟動。
 
 ### 9.5 Terminal 背景圖片
 

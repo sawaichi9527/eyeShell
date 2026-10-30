@@ -80,6 +80,19 @@ internal object TerminalFallbackFonts {
         osName.startsWith("Mac", ignoreCase = true) -> MAC_FAMILIES
         else -> LINUX_FAMILIES
     }
+
+    /**
+     * Candidate list with the user's chosen CJK family first, so CJK text uses it before the
+     * built-in Nerd/CJK chain. A blank choice keeps the default order.
+     */
+    fun fallbackFamiliesWith(
+        cjkFamily: String?,
+        osName: String = System.getProperty("os.name").orEmpty(),
+    ): List<String> {
+        val base = fallbackFamilies(osName)
+        val preferred = cjkFamily?.trim().orEmpty()
+        return if (preferred.isEmpty()) base else listOf(preferred) + base
+    }
 }
 
 /**

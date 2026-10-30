@@ -44,6 +44,13 @@ interface TerminalView : AutoCloseable {
     fun setFontSize(size: Float) = Unit
 
     /**
+     * Applies user-selected font families. [latin] is the primary family (blank means automatic);
+     * [cjk] is preferred for CJK glyphs the primary font lacks (blank keeps the built-in fallback
+     * chain). Views that cannot change fonts keep their current ones.
+     */
+    fun setFontFamilies(latin: String?, cjk: String?) = Unit
+
+    /**
      * Applies a color scheme to the retained buffer without recreating the view, so scrollback,
      * highlight rules, and searches survive the change. Views that cannot recolor themselves keep
      * their current scheme.

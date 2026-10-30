@@ -14,6 +14,7 @@ import java.nio.charset.Charset
 import java.util.concurrent.atomic.AtomicReference
 import javax.swing.JButton
 import javax.swing.JComboBox
+import javax.swing.JComponent
 import javax.swing.JDialog
 import javax.swing.JFrame
 import javax.swing.JLabel
@@ -198,6 +199,37 @@ class SettingsControllerTest {
             assertEquals(stored.toString(), settings.terminalBackgroundImage)
             assertTrue(java.nio.file.Files.exists(stored))
             assertEquals(TerminalBackgroundImage(stored), applied.last())
+        } finally {
+            onEdt { dialog.dispose() }
+        }
+    }
+
+    @Test
+    fun `the terminal page shows a live font preview`() {
+        val controller = SettingsController(AppSettings.inMemory(), applyFontSize = {})
+        val dialog = onEdt { controller.createDialog(JFrame()) }
+
+        try {
+            val preview = onEdt { findComponent(dialog, "settingsFontPreview") as JComponent }
+            val image = onEdt {
+                preview.setSize(520, 132)
+                val rendered = java.awt.image.BufferedImage(520, 132, java.awt.image.BufferedImage.TYPE_INT_RGB)
+                val graphics = rendered.createGraphics()
+                try {
+                    preview.paint(graphics)
+                } finally {
+                    graphics.dispose()
+                }
+                rendered
+            }
+            val background = image.getRGB(519, 131) and 0xFFFFFF
+            var textPixels = 0
+            for (y in 0 until image.height step 2) {
+                for (x in 0 until image.width step 2) {
+                    if ((image.getRGB(x, y) and 0xFFFFFF) != background) textPixels++
+                }
+            }
+            assertTrue(textPixels > 100, "Expected the preview to draw sample text, got $textPixels pixels")
         } finally {
             onEdt { dialog.dispose() }
         }

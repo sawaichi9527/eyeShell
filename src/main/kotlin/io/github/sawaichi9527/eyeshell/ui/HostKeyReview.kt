@@ -1,5 +1,6 @@
 package io.github.sawaichi9527.eyeshell.ui
 
+import io.github.sawaichi9527.eyeshell.platform.I18n
 import io.github.sawaichi9527.eyeshell.ssh.PresentedHostKey
 import io.github.sawaichi9527.eyeshell.ssh.SshEndpoint
 
@@ -37,12 +38,12 @@ internal class HostKeyReview(
     fun jumpPrompt(presented: PresentedHostKey): HostKeyPrompt {
         require(jump != null) { "This connection does not use a jump host" }
         return HostKeyPrompt(
-            title = "Verify jump host key",
+            title = I18n.t("hostkey.verifyJump"),
             subject = "jump",
             address = jump.displayName,
-            contextLines = listOf("Target: ${target.displayName}"),
+            contextLines = listOf(I18n.t("hostkey.target", target.displayName)),
             key = presented,
-            acceptLabel = "Continue",
+            acceptLabel = I18n.t("hostkey.continue"),
         )
     }
 
@@ -56,21 +57,21 @@ internal class HostKeyReview(
         } else {
             val accepted = acceptedJumpKey
             if (accepted == null) {
-                listOf("Via jump host: ${jump.displayName} (matches saved key)")
+                listOf(I18n.t("hostkey.viaJumpSaved", jump.displayName))
             } else {
                 listOf(
-                    "Via jump host: ${jump.displayName} (verified now)",
-                    "Jump key: ${accepted.algorithm} ${accepted.fingerprint}",
+                    I18n.t("hostkey.viaJumpVerified", jump.displayName),
+                    I18n.t("hostkey.jumpKey", accepted.algorithm, accepted.fingerprint),
                 )
             }
         }
         return HostKeyPrompt(
-            title = if (jump == null) "Verify SSH host key" else "Verify SSH host chain",
+            title = if (jump == null) I18n.t("hostkey.verifyTarget") else I18n.t("hostkey.verifyChain"),
             subject = "target",
             address = target.displayName,
             contextLines = context,
             key = presented,
-            acceptLabel = "Connect",
+            acceptLabel = I18n.t("hostkey.connect"),
         )
     }
 }

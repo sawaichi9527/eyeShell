@@ -86,8 +86,9 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 
 - The dialog shows the categories General, Terminal, Colors, Background, and About, with the content on the right.
 - `Terminal` changes the font size live for every open session (the PTY reflows) and the value survives a restart.
+- `Terminal` also offers `Latin font` and `CJK font` pickers (default `Automatic`): choosing a Latin family re-renders the terminal immediately, and choosing a CJK family puts it first in the per-glyph fallback chain; both survive a restart as `terminal.font.family` / `terminal.font.cjkFamily`. An uninstalled family falls back to the automatic choice.
 - `Terminal` also lists the character encodings with UTF-8 selected by default; the choice applies to every open session immediately and survives a restart as `terminal.charset`.
-- `Colors` lists the six schemes, updates the four-line preview and the WCAG contrast figure when a scheme is picked, and applies it to every open session immediately.
+- `Colors` lists the six eyeShell palettes plus the imported iTerm2 themes, updates the four-line preview and the WCAG contrast figure when a scheme is picked, and applies it to every open session immediately.
 - The color scheme survives a restart and is stored as `terminal.color.scheme` in `settings.properties`.
 - `Background` offers `Enable background image`, `Choose image...`, `Clear`, the opacity spinner, and an image list that always starts with the five bundled presets (`bg1`–`bg5`, marked `(preset)`) followed by imported files. A fresh profile has `bg1` selected and applied; choosing any entry applies it to every open session at once. A missing or corrupt file falls back to the plain scheme background without an error dialog.
 - A preset is copied into `backgrounds/` the first time it is used; replacing that file by hand is preserved (the bundled copy is never silently overwritten).

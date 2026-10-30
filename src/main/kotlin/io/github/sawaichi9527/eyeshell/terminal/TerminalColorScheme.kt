@@ -129,8 +129,15 @@ object TerminalColorSchemes {
         ),
     )
 
-    /** The schemes in Settings order. */
-    val ALL: List<TerminalColorScheme> = listOf(DARK, LIGHT, SOLARIZED_LIGHT, SOLARIZED_DARK, DRACULA, NORD)
+    /** The schemes in Settings order: eyeShell's own palettes first, then the imported iTerm2 set. */
+    val ALL: List<TerminalColorScheme> = run {
+        val builtIn = listOf(DARK, LIGHT, SOLARIZED_LIGHT, SOLARIZED_DARK, DRACULA, NORD)
+        // Imported themes that duplicate a built-in name are skipped so ids and names stay unique.
+        val imported = Iterm2Themes.load().filter { candidate ->
+            builtIn.none { it.id == candidate.id || it.displayName.equals(candidate.displayName, ignoreCase = true) }
+        }
+        builtIn + imported
+    }
 
     /** Applied when nothing is stored yet, or when a stored id no longer exists. */
     val DEFAULT: TerminalColorScheme = DARK

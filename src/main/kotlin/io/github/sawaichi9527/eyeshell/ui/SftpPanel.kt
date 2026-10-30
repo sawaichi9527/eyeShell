@@ -118,7 +118,15 @@ class SftpPanel(
         }
         columnModel.getColumn(SftpFileTableModel.OWNER_GROUP_COLUMN).preferredWidth = 140
     }
-    private val transferModel = object : DefaultTableModel(arrayOf("Direction", "Path", "Progress", "Status"), 0) {
+    private val transferModel = object : DefaultTableModel(
+        arrayOf(
+            I18n.t("sftp.transfer.direction"),
+            I18n.t("sftp.transfer.path"),
+            I18n.t("sftp.transfer.progress"),
+            I18n.t("sftp.transfer.status"),
+        ),
+        0,
+    ) {
         override fun isCellEditable(row: Int, column: Int): Boolean = false
     }
     private val transferTable = JTable(transferModel).apply {
@@ -236,6 +244,24 @@ class SftpPanel(
         loadingLabel.text = I18n.t("sftp.opening")
         retryButton.text = I18n.t("sftp.retry")
         getAccessibleContext().accessibleName = I18n.t("dock.sftp")
+
+        transferModel.setColumnIdentifiers(
+            arrayOf(
+                I18n.t("sftp.transfer.direction"),
+                I18n.t("sftp.transfer.path"),
+                I18n.t("sftp.transfer.progress"),
+                I18n.t("sftp.transfer.status"),
+            ),
+        )
+        refreshTableHeaders(fileTable)
+    }
+
+    /** Table headers keep the value they were given when the model was attached, so re-apply them. */
+    private fun refreshTableHeaders(table: JTable) {
+        for (index in 0 until table.columnModel.columnCount) {
+            table.columnModel.getColumn(index).headerValue = table.model.getColumnName(index)
+        }
+        table.tableHeader.repaint()
     }
 
     private fun showCard(name: String) {
@@ -315,9 +341,9 @@ class SftpPanel(
                     tableModel.setFiles(files)
                     pathField.text = currentDirectory
                     statusLabel.text = if (files.isEmpty()) {
-                        "$currentDirectory is empty."
+                        I18n.t("sftp.emptyDirectory", currentDirectory)
                     } else {
-                        "${files.size} entries in $currentDirectory"
+                        I18n.t("sftp.entries", files.size, currentDirectory)
                     }
                     updateActionEnablement()
                 }.onFailure { failure ->

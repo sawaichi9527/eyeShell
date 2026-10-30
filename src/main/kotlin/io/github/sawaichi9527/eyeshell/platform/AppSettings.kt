@@ -54,6 +54,22 @@ class AppSettings private constructor(
             save()
         }
 
+    /** Selected Latin terminal font family; an empty value means "automatic". */
+    var terminalFontFamily: String
+        get() = properties.getProperty(KEY_TERMINAL_FONT_FAMILY).orEmpty()
+        set(value) {
+            properties.setProperty(KEY_TERMINAL_FONT_FAMILY, value)
+            save()
+        }
+
+    /** Preferred CJK font family for glyph fallback; an empty value keeps the built-in chain. */
+    var terminalFontCjkFamily: String
+        get() = properties.getProperty(KEY_TERMINAL_FONT_CJK_FAMILY).orEmpty()
+        set(value) {
+            properties.setProperty(KEY_TERMINAL_FONT_CJK_FAMILY, value)
+            save()
+        }
+
     /** Whether the selected terminal background image is drawn; bundled `bg1` is on by default. */
     var terminalBackgroundEnabled: Boolean
         get() = properties.getProperty(KEY_TERMINAL_BACKGROUND_ENABLED)?.toBooleanStrictOrNull() ?: true
@@ -120,6 +136,8 @@ class AppSettings private constructor(
         const val MAX_BACKGROUND_OPACITY = 100
 
         private const val KEY_TERMINAL_FONT_SIZE = "terminal.font.size"
+        private const val KEY_TERMINAL_FONT_FAMILY = "terminal.font.family"
+        private const val KEY_TERMINAL_FONT_CJK_FAMILY = "terminal.font.cjkFamily"
         private const val KEY_LOCALE = "app.locale"
         private const val KEY_TERMINAL_COLOR_SCHEME = "terminal.color.scheme"
         private const val KEY_TERMINAL_CHARSET = "terminal.charset"

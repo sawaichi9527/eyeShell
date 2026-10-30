@@ -5,6 +5,7 @@ import java.awt.Component
 import java.awt.Container
 import javax.swing.JButton
 import javax.swing.JLabel
+import javax.swing.JTable
 import javax.swing.SwingUtilities
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -48,6 +49,44 @@ class LiveLocaleTest {
 
             assertEquals("執行", onEdt { (findComponent(panel, "runCommandButton") as JButton).text })
             assertEquals("尚無儲存的指令。", onEdt { (findComponent(panel, "commandSnippetStatus") as JLabel).text })
+        } finally {
+            onEdt { I18n.setLocaleId("en") }
+        }
+    }
+
+    @Test
+    fun `table headers follow the language change`() {
+        val panel = onEdt { SftpPanel() }
+        try {
+            onEdt {
+                I18n.setLocaleId("zh-TW")
+                panel.relocalize()
+            }
+
+            val fileTable = onEdt { findComponent(panel, "sftpTable") as JTable }
+            assertEquals("名稱", onEdt { fileTable.columnModel.getColumn(0).headerValue })
+            assertEquals("權限", onEdt { fileTable.columnModel.getColumn(4).headerValue })
+
+            val transferTable = onEdt { findComponent(panel, "sftpTransferTable") as JTable }
+            assertEquals("方向", onEdt { transferTable.columnModel.getColumn(0).headerValue })
+            assertEquals("狀態", onEdt { transferTable.columnModel.getColumn(3).headerValue })
+        } finally {
+            onEdt { I18n.setLocaleId("en") }
+        }
+    }
+
+    @Test
+    fun `the monitor process headers follow the language change`() {
+        val panel = onEdt { MonitorPanel() }
+        try {
+            onEdt {
+                I18n.setLocaleId("ja")
+                panel.relocalize()
+            }
+
+            val table = panel.processTableComponent
+            assertEquals("名前", onEdt { table.columnModel.getColumn(0).headerValue })
+            assertEquals("メモリ", onEdt { table.columnModel.getColumn(1).headerValue })
         } finally {
             onEdt { I18n.setLocaleId("en") }
         }

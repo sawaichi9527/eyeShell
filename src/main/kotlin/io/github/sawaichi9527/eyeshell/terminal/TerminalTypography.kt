@@ -85,6 +85,26 @@ object TerminalTypography {
         available: Set<String> = installedFamilies(),
     ): Font = Font(resolveFamily(preferredFamilies(osName), available), Font.PLAIN, size.toInt()).deriveFont(size)
 
+    /**
+     * Resolves a user-selected Latin family (blank or unknown means "automatic") at [size].
+     * The family is matched case-insensitively against the installed families so a stale stored
+     * name degrades to the automatic choice instead of silently becoming `Dialog`.
+     */
+    fun resolveFontFor(
+        family: String?,
+        size: Float = DEFAULT_FONT_SIZE,
+        osName: String = System.getProperty("os.name").orEmpty(),
+        available: Set<String> = installedFamilies(),
+    ): Font {
+        val selected = family?.trim().orEmpty().takeIf(String::isNotEmpty)
+            ?.let { requested -> available.firstOrNull { it.equals(requested, ignoreCase = true) } }
+        val resolved = selected ?: resolveFamily(preferredFamilies(osName), available)
+        return Font(resolved, Font.PLAIN, size.toInt()).deriveFont(size)
+    }
+
+    /** Installed families sorted for a picker; `Automatic` is represented by a blank value. */
+    fun familyChoices(): List<String> = installedFamilies().sortedBy { it.lowercase() }
+
     private val sharedDefaultFont: Font by lazy { resolveFont() }
 
     /** One resolved font shared by every terminal view created without an explicit font. */

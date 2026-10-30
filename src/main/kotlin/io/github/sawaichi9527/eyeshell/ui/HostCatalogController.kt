@@ -1,5 +1,6 @@
 package io.github.sawaichi9527.eyeshell.ui
 
+import io.github.sawaichi9527.eyeshell.platform.I18n
 import io.github.sawaichi9527.eyeshell.ssh.SshEndpoint
 import io.github.sawaichi9527.eyeshell.secrets.CredentialStoreStatus
 import io.github.sawaichi9527.eyeshell.secrets.PasswordCredentialStore
@@ -142,7 +143,7 @@ internal class HostCatalogController(
     }
 
     private class CredentialRollbackException(cause: Exception) : Exception(
-        "The profile was unchanged, but its saved password could not be restored.",
+        I18n.t("hostcat.restoreFailed"),
         cause,
     )
 
@@ -150,7 +151,7 @@ internal class HostCatalogController(
         val model = HostTableModel()
         val table = JTable(model).apply {
             name = "hostCatalogTable"
-            getAccessibleContext().accessibleName = "Saved hosts"
+            getAccessibleContext().accessibleName = I18n.t("hostcat.savedHosts")
             setSelectionMode(ListSelectionModel.SINGLE_SELECTION)
             autoResizeMode = JTable.AUTO_RESIZE_SUBSEQUENT_COLUMNS
             rowHeight = 24
@@ -167,16 +168,16 @@ internal class HostCatalogController(
         }
         val search = JTextField().apply {
             name = "hostCatalogSearch"
-            putClientProperty("JTextField.placeholderText", "Filter by name, host, user, or group")
-            toolTipText = "Filter saved hosts"
+            putClientProperty("JTextField.placeholderText", I18n.t("hostcat.filterHint"))
+            toolTipText = I18n.t("hostcat.filterTip")
         }
-        val status = JLabel("Loading...").apply { name = "hostCatalogStatus" }
-        val add = JButton("Add...")
-        val edit = JButton("Edit...").apply { isEnabled = false }
-        val delete = JButton("Delete").apply { isEnabled = false }
-        val connectButton = JButton("Connect").apply { isEnabled = false }
-        val close = JButton("Close")
-        val dialog = JDialog(owner, "Saved hosts", false).apply {
+        val status = JLabel(I18n.t("hostcat.loading")).apply { name = "hostCatalogStatus" }
+        val add = JButton(I18n.t("hostcat.add"))
+        val edit = JButton(I18n.t("hostcat.edit")).apply { isEnabled = false }
+        val delete = JButton(I18n.t("hostcat.delete")).apply { isEnabled = false }
+        val connectButton = JButton(I18n.t("hostcat.connect")).apply { isEnabled = false }
+        val close = JButton(I18n.t("hostcat.close"))
+        val dialog = JDialog(owner, I18n.t("hostcat.savedHosts"), false).apply {
             name = "hostCatalogDialog"
             defaultCloseOperation = JDialog.DISPOSE_ON_CLOSE
             contentPane = JPanel(BorderLayout(8, 8)).apply {
@@ -212,8 +213,8 @@ internal class HostCatalogController(
             if (jumpProfileId != null && jumpHost == null) {
                 JOptionPane.showMessageDialog(
                     dialog,
-                    "The selected jump host no longer exists. Edit '${host.draft.name}' to choose another jump host.",
-                    "Jump host unavailable",
+                    I18n.t("hostcat.jumpMissing", host.draft.name),
+                    I18n.t("hostcat.jumpMissingTitle"),
                     JOptionPane.ERROR_MESSAGE,
                 )
                 return
@@ -223,8 +224,8 @@ internal class HostCatalogController(
             } else {
                 JOptionPane.showMessageDialog(
                     dialog,
-                    "Another SSH connection attempt is already in progress.",
-                    "Connection in progress",
+                    I18n.t("hostcat.busy"),
+                    I18n.t("hostcat.busyTitle"),
                     JOptionPane.INFORMATION_MESSAGE,
                 )
             }
@@ -264,7 +265,7 @@ internal class HostCatalogController(
                     try {
                         applyEditorCredentials(host, editor)
                     } catch (_: Exception) {
-                        warning.set("Host saved, but the password could not be saved.")
+                        warning.set(I18n.t("hostcat.savedPasswordFailed"))
                     }
                 },
                 afterSave = {
@@ -288,9 +289,9 @@ internal class HostCatalogController(
                         } catch (_: Exception) {
                             warning.set(
                                 if (editor.clearSavedPassword) {
-                                    "Host saved, but the saved password could not be cleared."
+                                    I18n.t("hostcat.clearedPasswordFailed")
                                 } else {
-                                    "Host saved, but the password could not be saved."
+                                    I18n.t("hostcat.savedPasswordFailed")
                                 },
                             )
                         }
@@ -304,8 +305,8 @@ internal class HostCatalogController(
             val selected = selectedHost(state) ?: return@addActionListener
             if (JOptionPane.showConfirmDialog(
                     dialog,
-                    "Delete '${selected.draft.name}'?",
-                    "Delete saved host",
+                    I18n.t("hostcat.deleteConfirm", selected.draft.name),
+                    I18n.t("hostcat.deleteTitle"),
                     JOptionPane.YES_NO_OPTION,
                     JOptionPane.WARNING_MESSAGE,
                 ) == JOptionPane.YES_OPTION
@@ -336,7 +337,7 @@ internal class HostCatalogController(
             success = { hosts ->
                 if (!state.dialog.isDisplayable) return@submit
                 rebuildTable(state, hosts)
-                setBusy(state, false, if (hosts.isEmpty()) "No saved hosts." else "${hosts.size} saved hosts")
+                setBusy(state, false, if (hosts.isEmpty()) I18n.t("hostcat.noHosts") else I18n.t("hostcat.count", hosts.size))
             },
             failure = { showCatalogFailure(state, it) },
         )
@@ -348,7 +349,7 @@ internal class HostCatalogController(
         onRejected: (() -> Unit)? = null,
         operation: () -> Unit,
     ) {
-        setBusy(state, true, "Saving...")
+        setBusy(state, true, I18n.t("hostcat.saving"))
         submit(
             operation = {
                 operation()
@@ -357,7 +358,7 @@ internal class HostCatalogController(
             success = { hosts ->
                 if (!state.dialog.isDisplayable) return@submit
                 rebuildTable(state, hosts)
-                setBusy(state, false, if (hosts.isEmpty()) "No saved hosts." else "${hosts.size} saved hosts")
+                setBusy(state, false, if (hosts.isEmpty()) I18n.t("hostcat.noHosts") else I18n.t("hostcat.count", hosts.size))
                 afterSave?.invoke()
             },
             failure = { showCatalogFailure(state, it) },
@@ -407,15 +408,15 @@ internal class HostCatalogController(
 
     private fun showCatalogFailure(state: DialogState, failure: Throwable) {
         if (!state.dialog.isDisplayable) return
-        setBusy(state, false, "Host catalog unavailable")
+        setBusy(state, false, I18n.t("hostcat.unavailable"))
         val message = when (failure) {
             is CredentialRollbackException, is IllegalArgumentException -> failure.message
-            else -> "Could not access the local host catalog."
+            else -> I18n.t("hostcat.accessFailed")
         }
         JOptionPane.showMessageDialog(
             state.dialog,
             message,
-            "Host catalog error",
+            I18n.t("hostcat.errorTitle"),
             JOptionPane.ERROR_MESSAGE,
         )
     }
@@ -465,7 +466,7 @@ internal class HostCatalogController(
         val total = state.hosts.size
         val shown = state.model.rows().count { it is HostRow.Host }
         state.status.text = when {
-            total == 0 -> "No saved hosts."
+            total == 0 -> I18n.t("hostcat.noHosts")
             state.search.text.isBlank() -> "$total saved hosts"
             else -> "$shown of $total saved hosts"
         }
@@ -522,9 +523,9 @@ internal class HostCatalogController(
             false
         }
         val password = JPasswordField(24)
-        val rememberPassword = JCheckBox("Save password in OS credential store", storeUsable)
-        val clearPassword = JButton("Clear saved password")
-        val connectAfterSave = JCheckBox("Connect after saving", false)
+        val rememberPassword = JCheckBox(I18n.t("hostcat.savePassword"), storeUsable)
+        val clearPassword = JButton(I18n.t("hostcat.clearPassword"))
+        val connectAfterSave = JCheckBox(I18n.t("hostcat.connectAfterSave"), false)
         val credentialHint = JLabel()
         var clearRequested = false
 
@@ -558,18 +559,18 @@ internal class HostCatalogController(
         updateCredentialFields()
 
         val panel = JPanel(GridBagLayout()).apply {
-            addField(0, "Name", name)
-            addField(1, "Host", host)
-            addField(2, "Port", port)
-            addField(3, "Username", username)
-            addField(4, "Authentication", authentication)
-            addField(5, "Password", password)
-            addField(6, "Remember", rememberPassword)
+            addField(0, I18n.t("hostcat.name"), name)
+            addField(1, I18n.t("hostcat.host"), host)
+            addField(2, I18n.t("hostcat.port"), port)
+            addField(3, I18n.t("hostcat.username"), username)
+            addField(4, I18n.t("hostcat.authentication"), authentication)
+            addField(5, I18n.t("hostcat.password"), password)
+            addField(6, I18n.t("hostcat.remember"), rememberPassword)
             addField(7, "", clearPassword)
-            addField(8, "Jump host", jumpHost)
-            addField(9, "Group", group)
-            addField(10, "Remark", remark)
-            addField(11, "Tags", tags)
+            addField(8, I18n.t("hostcat.jumpHost"), jumpHost)
+            addField(9, I18n.t("hostcat.group"), group)
+            addField(10, I18n.t("hostcat.remark"), remark)
+            addField(11, I18n.t("hostcat.tags"), tags)
             addField(12, "", credentialHint)
             if (existing == null) addField(13, "", connectAfterSave)
         }
@@ -577,7 +578,7 @@ internal class HostCatalogController(
             while (JOptionPane.showConfirmDialog(
                     owner,
                     panel,
-                    if (existing == null) "Add saved host" else "Edit saved host",
+                    if (existing == null) I18n.t("hostcat.addTitle") else I18n.t("hostcat.editTitle"),
                     JOptionPane.OK_CANCEL_OPTION,
                     JOptionPane.PLAIN_MESSAGE,
                 ) == JOptionPane.OK_OPTION
@@ -608,7 +609,7 @@ internal class HostCatalogController(
                     JOptionPane.showMessageDialog(
                         owner,
                         failure.message,
-                        "Invalid saved host",
+                        I18n.t("hostcat.invalid"),
                         JOptionPane.ERROR_MESSAGE,
                     )
                 }
@@ -674,7 +675,7 @@ internal class HostCatalogController(
         JOptionPane.showMessageDialog(
             owner,
             message,
-            "OS credential store",
+            I18n.t("hostcat.credentialStore"),
             JOptionPane.WARNING_MESSAGE,
         )
     }
@@ -838,7 +839,7 @@ private class HostTableRenderer : DefaultTableCellRenderer() {
             }
         }
         toolTipText = if (rowData is HostRow.Group && column == HostTableModel.NAME_COLUMN) {
-            "Click to expand or collapse ${rowData.name}"
+            I18n.t("hostcat.expandHint", rowData.name)
         } else {
             null
         }

@@ -11,6 +11,7 @@ import io.github.sawaichi9527.eyeshell.terminal.TerminalCharset
 import io.github.sawaichi9527.eyeshell.terminal.TerminalCharsets
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorScheme
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorSchemes
+import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Color
@@ -65,6 +66,7 @@ import javax.swing.table.AbstractTableModel
 internal class SettingsController(
     private val settings: AppSettings,
     private val applyFontSize: (Float) -> Unit,
+    private val applyFontFamilies: (String, String) -> Unit = { _, _ -> },
     private val applyColorScheme: (TerminalColorScheme) -> Unit = {},
     private val applyCharset: (Charset) -> Unit = {},
     private val applyBackgroundImage: (TerminalBackgroundImage?) -> Unit = {},
@@ -211,15 +213,46 @@ internal class SettingsController(
         ).apply {
             name = "settingsFontSize"
             toolTipText = I18n.t("settings.terminal.fontSize")
-            addChangeListener {
-                val size = (value as Number).toInt()
-                if (size != settings.terminalFontSize) {
-                    settings.terminalFontSize = size
-                    applyFontSize(size.toFloat())
-                }
+        }
+
+        val preview = FontPreview().apply {
+            name = "settingsFontPreview"
+            alignmentX = Component.LEFT_ALIGNMENT
+        }
+
+        fun syncPreview() {
+            preview.update(
+                size = (fontSpinner.value as Number).toInt().toFloat(),
+                latin = settings.terminalFontFamily.ifBlank { null },
+                cjk = settings.terminalFontCjkFamily.ifBlank { null },
+                scheme = TerminalColorSchemes.fromId(settings.terminalColorSchemeId),
+            )
+        }
+
+        fontSpinner.addChangeListener {
+            val size = (fontSpinner.value as Number).toInt()
+            if (size != settings.terminalFontSize) {
+                settings.terminalFontSize = size
+                applyFontSize(size.toFloat())
             }
+            syncPreview()
         }
         addRow(this, I18n.t("settings.terminal.fontSize"), fontSpinner, I18n.t("settings.terminal.fontSize.hint"))
+
+        val families = TerminalTypography.familyChoices()
+        val latinFamily = fontFamilyCombo(families, settings.terminalFontFamily, "settingsFontFamily") { selected ->
+            settings.terminalFontFamily = selected
+            applyFontFamilies(selected, settings.terminalFontCjkFamily)
+            syncPreview()
+        }
+        addRow(this, I18n.t("settings.terminal.fontFamily"), latinFamily, I18n.t("settings.terminal.fontFamily.hint"))
+
+        val cjkFamily = fontFamilyCombo(families, settings.terminalFontCjkFamily, "settingsCjkFontFamily") { selected ->
+            settings.terminalFontCjkFamily = selected
+            applyFontFamilies(settings.terminalFontFamily, selected)
+            syncPreview()
+        }
+        addRow(this, I18n.t("settings.terminal.cjkFontFamily"), cjkFamily, I18n.t("settings.terminal.cjkFontFamily.hint"))
 
         val encoding = JComboBox(TerminalCharsets.ALL.toTypedArray()).apply {
             name = "settingsCharset"
@@ -235,6 +268,17 @@ internal class SettingsController(
             }
         }
         addRow(this, I18n.t("settings.terminal.encoding"), encoding, I18n.t("settings.terminal.encoding.hint"))
+
+        add(Box.createVerticalStrut(10).apply { setAlignmentX(Component.LEFT_ALIGNMENT) })
+        add(
+            JLabel(I18n.t("settings.terminal.preview")).apply {
+                foreground = mutedColor()
+                alignmentX = Component.LEFT_ALIGNMENT
+                border = BorderFactory.createEmptyBorder(0, 0, 4, 0)
+            },
+        )
+        add(preview)
+        syncPreview()
     }
 
     private fun colorsPage(): JPanel = page().apply {
@@ -587,6 +631,91 @@ internal class SettingsController(
     }
 
     private fun mutedColor(): Color = UIManager.getColor("Label.disabledForeground") ?: Color.GRAY
+
+    /**
+     * Family picker with an empty value meaning "automatic", so an uninstalled stored family falls
+     * back visibly instead of silently resolving to `Dialog`.
+     */
+    private fun fontFamilyCombo(
+        families: List<String>,
+        initial: String,
+        name: String,
+        onSelected: (String) -> Unit,
+    ): JComboBox<String> {
+        val combo = JComboBox((listOf("") + families).toTypedArray()).apply {
+            this.name = name
+            preferredSize = Dimension(220, preferredSize.height)
+            renderer = javax.swing.DefaultListCellRenderer().let { base ->
+                javax.swing.ListCellRenderer<String> { owner, value, index, isSelected, cellHasFocus ->
+                    val label = base.getListCellRendererComponent(owner, value, index, isSelected, cellHasFocus) as JLabel
+                    label.text = value?.takeIf(String::isNotEmpty) ?: I18n.t("settings.terminal.fontAutomatic")
+                    label
+                }
+            }
+        }
+        combo.selectedItem = families.firstOrNull { it.equals(initial, ignoreCase = true) }.orEmpty()
+        var current = combo.selectedItem as? String ?: ""
+        combo.addActionListener {
+            val value = combo.selectedItem as? String ?: ""
+            if (value != current) {
+                current = value
+                onSelected(value)
+            }
+        }
+        return combo
+    }
+
+    /** Badge-free sample of the selected scheme: background, default text, and three ANSI colors. */
+    private class FontPreview : JPanel() {
+        private var fontSize: Float = TerminalTypography.DEFAULT_FONT_SIZE
+        private var latinFamily: String? = null
+        private var cjkFamily: String? = null
+        private var scheme: TerminalColorScheme = TerminalColorSchemes.DEFAULT
+
+        init {
+            preferredSize = Dimension(520, 132)
+            maximumSize = Dimension(Int.MAX_VALUE, 132)
+            border = BorderFactory.createLineBorder(muted(), 1)
+        }
+
+        fun update(size: Float, latin: String?, cjk: String?, scheme: TerminalColorScheme) {
+            fontSize = size
+            latinFamily = latin
+            cjkFamily = cjk
+            this.scheme = scheme
+            repaint()
+        }
+
+        override fun paintComponent(g: Graphics) {
+            val gfx = g.create() as Graphics2D
+            try {
+                gfx.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
+                gfx.color = Color(scheme.backgroundRgb)
+                gfx.fillRect(0, 0, width, height)
+
+                val latin = TerminalTypography.resolveFontFor(latinFamily, fontSize)
+                val cjk = TerminalTypography.resolveFontFor(cjkFamily, fontSize)
+                val latinMetrics = getFontMetrics(latin)
+                val cjkMetrics = getFontMetrics(cjk)
+                val firstBaseline = 12 + latinMetrics.ascent
+                val secondBaseline = firstBaseline + maxOf(latinMetrics.height, cjkMetrics.height) + 4
+
+                gfx.color = Color(scheme.foregroundRgb)
+                gfx.font = latin
+                gfx.drawString("0123456789 abcdefgh ABCDEFGH", 12, firstBaseline)
+
+                gfx.color = Color(scheme.ansiRgb[6])
+                gfx.font = cjk
+                gfx.drawString("中文範例 日本語 한국어 0123", 12, secondBaseline)
+            } finally {
+                gfx.dispose()
+            }
+        }
+
+        private companion object {
+            fun muted(): Color = UIManager.getColor("Component.borderColor") ?: Color.GRAY
+        }
+    }
 
     /** Badge-free sample of the selected scheme: background, default text, and three ANSI colors. */
     private class ColorSchemePreview : JPanel() {
