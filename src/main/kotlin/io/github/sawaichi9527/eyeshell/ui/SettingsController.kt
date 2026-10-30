@@ -11,6 +11,8 @@ import io.github.sawaichi9527.eyeshell.terminal.TerminalCharset
 import io.github.sawaichi9527.eyeshell.terminal.TerminalCharsets
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorScheme
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorSchemes
+import io.github.sawaichi9527.eyeshell.terminal.TerminalFallbackFonts
+import io.github.sawaichi9527.eyeshell.terminal.TerminalFontFallback
 import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
 import java.awt.BorderLayout
 import java.awt.CardLayout
@@ -22,6 +24,7 @@ import java.awt.Font
 import java.awt.Frame
 import java.awt.Graphics
 import java.awt.Graphics2D
+import java.awt.GridLayout
 import java.awt.RenderingHints
 import java.awt.event.ItemEvent
 import java.nio.charset.Charset
@@ -32,6 +35,7 @@ import java.util.concurrent.atomic.AtomicReference
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
+import javax.swing.DefaultListModel
 import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.JComboBox
@@ -239,20 +243,49 @@ internal class SettingsController(
         }
         addRow(this, I18n.t("settings.terminal.fontSize"), fontSpinner, I18n.t("settings.terminal.fontSize.hint"))
 
-        val families = TerminalTypography.familyChoices()
-        val latinFamily = fontFamilyCombo(families, settings.terminalFontFamily, "settingsFontFamily") { selected ->
-            settings.terminalFontFamily = selected
-            applyFontFamilies(selected, settings.terminalFontCjkFamily)
-            syncPreview()
-        }
-        addRow(this, I18n.t("settings.terminal.fontFamily"), latinFamily, I18n.t("settings.terminal.fontFamily.hint"))
+        add(Box.createVerticalStrut(10).apply { setAlignmentX(Component.LEFT_ALIGNMENT) })
+        add(
+            JLabel(I18n.t("settings.terminal.preview")).apply {
+                foreground = mutedColor()
+                alignmentX = Component.LEFT_ALIGNMENT
+                border = BorderFactory.createEmptyBorder(0, 0, 4, 0)
+            },
+        )
+        add(preview)
 
-        val cjkFamily = fontFamilyCombo(families, settings.terminalFontCjkFamily, "settingsCjkFontFamily") { selected ->
-            settings.terminalFontCjkFamily = selected
-            applyFontFamilies(settings.terminalFontFamily, selected)
-            syncPreview()
+        val families = TerminalTypography.familyChoices()
+        val fontLists = JPanel(GridLayout(1, 2, 12, 0)).apply {
+            isOpaque = false
+            alignmentX = Component.LEFT_ALIGNMENT
+            border = BorderFactory.createEmptyBorder(10, 0, 6, 0)
+            add(
+                fontFamilyList(
+                    families = families,
+                    initial = settings.terminalFontFamily,
+                    name = "settingsFontFamily",
+                    titleKey = "settings.terminal.fontFamily",
+                ) { selected ->
+                    settings.terminalFontFamily = selected
+                    applyFontFamilies(selected, settings.terminalFontCjkFamily)
+                    syncPreview()
+                },
+            )
+            add(
+                fontFamilyList(
+                    families = families,
+                    initial = settings.terminalFontCjkFamily,
+                    name = "settingsCjkFontFamily",
+                    titleKey = "settings.terminal.cjkFontFamily",
+                ) { selected ->
+                    settings.terminalFontCjkFamily = selected
+                    applyFontFamilies(settings.terminalFontFamily, selected)
+                    syncPreview()
+                },
+            )
+            maximumSize = Dimension(Int.MAX_VALUE, 220)
+            preferredSize = Dimension(520, 200)
         }
-        addRow(this, I18n.t("settings.terminal.cjkFontFamily"), cjkFamily, I18n.t("settings.terminal.cjkFontFamily.hint"))
+        add(fontLists)
 
         val encoding = JComboBox(TerminalCharsets.ALL.toTypedArray()).apply {
             name = "settingsCharset"
@@ -269,15 +302,6 @@ internal class SettingsController(
         }
         addRow(this, I18n.t("settings.terminal.encoding"), encoding, I18n.t("settings.terminal.encoding.hint"))
 
-        add(Box.createVerticalStrut(10).apply { setAlignmentX(Component.LEFT_ALIGNMENT) })
-        add(
-            JLabel(I18n.t("settings.terminal.preview")).apply {
-                foreground = mutedColor()
-                alignmentX = Component.LEFT_ALIGNMENT
-                border = BorderFactory.createEmptyBorder(0, 0, 4, 0)
-            },
-        )
-        add(preview)
         syncPreview()
     }
 
@@ -633,19 +657,25 @@ internal class SettingsController(
     private fun mutedColor(): Color = UIManager.getColor("Label.disabledForeground") ?: Color.GRAY
 
     /**
-     * Family picker with an empty value meaning "automatic", so an uninstalled stored family falls
-     * back visibly instead of silently resolving to `Dialog`.
+     * Family picker in the FinalShell shape: a titled scrollable list with an "Automatic" entry
+     * first. The selection applies immediately, like the previous combo box.
      */
-    private fun fontFamilyCombo(
+    private fun fontFamilyList(
         families: List<String>,
         initial: String,
         name: String,
+        titleKey: String,
         onSelected: (String) -> Unit,
-    ): JComboBox<String> {
-        val combo = JComboBox((listOf("") + families).toTypedArray()).apply {
+    ): JScrollPane {
+        val model = DefaultListModel<String>().apply {
+            addElement("")
+            families.forEach(::addElement)
+        }
+        val list = JList(model).apply {
             this.name = name
-            preferredSize = Dimension(220, preferredSize.height)
-            renderer = javax.swing.DefaultListCellRenderer().let { base ->
+            selectionMode = ListSelectionModel.SINGLE_SELECTION
+            visibleRowCount = 7
+            cellRenderer = javax.swing.DefaultListCellRenderer().let { base ->
                 javax.swing.ListCellRenderer<String> { owner, value, index, isSelected, cellHasFocus ->
                     val label = base.getListCellRendererComponent(owner, value, index, isSelected, cellHasFocus) as JLabel
                     label.text = value?.takeIf(String::isNotEmpty) ?: I18n.t("settings.terminal.fontAutomatic")
@@ -653,20 +683,26 @@ internal class SettingsController(
                 }
             }
         }
-        combo.selectedItem = families.firstOrNull { it.equals(initial, ignoreCase = true) }.orEmpty()
-        var current = combo.selectedItem as? String ?: ""
-        combo.addActionListener {
-            val value = combo.selectedItem as? String ?: ""
+        val match = families.firstOrNull { it.equals(initial, ignoreCase = true) }.orEmpty()
+        list.setSelectedValue(match, true)
+        var current = match
+        list.addListSelectionListener { event ->
+            if (event.valueIsAdjusting) return@addListSelectionListener
+            val value = list.selectedValue ?: return@addListSelectionListener
             if (value != current) {
                 current = value
                 onSelected(value)
             }
         }
-        return combo
+        return JScrollPane(list).apply {
+            this.name = "$name-scroll"
+            border = BorderFactory.createTitledBorder(I18n.t(titleKey))
+            viewportBorder = BorderFactory.createEmptyBorder(2, 2, 2, 2)
+        }
     }
 
     /** Badge-free sample of the selected scheme: background, default text, and three ANSI colors. */
-    private class FontPreview : JPanel() {
+    internal class FontPreview : JPanel() {
         private var fontSize: Float = TerminalTypography.DEFAULT_FONT_SIZE
         private var latinFamily: String? = null
         private var cjkFamily: String? = null
@@ -686,6 +722,26 @@ internal class SettingsController(
             repaint()
         }
 
+        /**
+         * The CJK sample font: the requested family when it covers CJK, otherwise the first family
+         * in the terminal's glyph-fallback chain that does. This mirrors what the terminal actually
+         * draws, so choosing a Latin-only family shows the fallback result instead of tofu.
+         */
+        internal fun resolvedCjkFont(text: String = CJK_SAMPLE): java.awt.Font {
+            val primary = TerminalTypography.resolveFontFor(cjkFamily, fontSize)
+            if (text.all { primary.canDisplay(it) }) return primary
+            val fallback = TerminalFontFallback(TerminalFallbackFonts.fallbackFamiliesWith(cjkFamily))
+            return fallback.resolve(primary, text.toCharArray(), 0, text.length)
+        }
+
+        /** Latin sample font, with the same fallback guarantee for safety. */
+        internal fun resolvedLatinFont(text: String = LATIN_SAMPLE): java.awt.Font {
+            val primary = TerminalTypography.resolveFontFor(latinFamily, fontSize)
+            if (text.all { primary.canDisplay(it) }) return primary
+            val fallback = TerminalFontFallback(TerminalFallbackFonts.fallbackFamiliesWith(cjkFamily))
+            return fallback.resolve(primary, text.toCharArray(), 0, text.length)
+        }
+
         override fun paintComponent(g: Graphics) {
             val gfx = g.create() as Graphics2D
             try {
@@ -693,8 +749,8 @@ internal class SettingsController(
                 gfx.color = Color(scheme.backgroundRgb)
                 gfx.fillRect(0, 0, width, height)
 
-                val latin = TerminalTypography.resolveFontFor(latinFamily, fontSize)
-                val cjk = TerminalTypography.resolveFontFor(cjkFamily, fontSize)
+                val latin = resolvedLatinFont()
+                val cjk = resolvedCjkFont()
                 val latinMetrics = getFontMetrics(latin)
                 val cjkMetrics = getFontMetrics(cjk)
                 val firstBaseline = 12 + latinMetrics.ascent
@@ -702,17 +758,20 @@ internal class SettingsController(
 
                 gfx.color = Color(scheme.foregroundRgb)
                 gfx.font = latin
-                gfx.drawString("0123456789 abcdefgh ABCDEFGH", 12, firstBaseline)
+                gfx.drawString(LATIN_SAMPLE, 12, firstBaseline)
 
                 gfx.color = Color(scheme.ansiRgb[6])
                 gfx.font = cjk
-                gfx.drawString("中文範例 日本語 한국어 0123", 12, secondBaseline)
+                gfx.drawString(CJK_SAMPLE, 12, secondBaseline)
             } finally {
                 gfx.dispose()
             }
         }
 
         private companion object {
+            const val LATIN_SAMPLE = "0123456789 abcdefgh ABCDEFGH"
+            const val CJK_SAMPLE = "中文範例 日本語 한국어 0123"
+
             fun muted(): Color = UIManager.getColor("Component.borderColor") ?: Color.GRAY
         }
     }

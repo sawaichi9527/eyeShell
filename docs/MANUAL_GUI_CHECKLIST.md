@@ -86,7 +86,7 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 
 - The dialog shows the categories General, Terminal, Colors, Background, and About, with the content on the right.
 - `Terminal` changes the font size live for every open session (the PTY reflows) and the value survives a restart.
-- `Terminal` also offers `Latin font` and `CJK font` pickers (default `Automatic`): choosing a Latin family re-renders the terminal immediately, and choosing a CJK family puts it first in the per-glyph fallback chain; both survive a restart as `terminal.font.family` / `terminal.font.cjkFamily`. An uninstalled family falls back to the automatic choice.
+- `Terminal` shows a font preview box (Latin and CJK sample text painted with the active terminal palette) above two FinalShell-style font lists, `Latin font` and `CJK font`, each starting with `Automatic`. Selecting a family re-renders the preview and every open terminal immediately; a CJK choice goes first in the per-glyph fallback chain, and both survive a restart as `terminal.font.family` / `terminal.font.cjkFamily`. An uninstalled family falls back to the automatic choice.
 - `Terminal` also lists the character encodings with UTF-8 selected by default; the choice applies to every open session immediately and survives a restart as `terminal.charset`.
 - `Colors` lists the six eyeShell palettes plus the imported iTerm2 themes, updates the four-line preview and the WCAG contrast figure when a scheme is picked, and applies it to every open session immediately.
 - The color scheme survives a restart and is stored as `terminal.color.scheme` in `settings.properties`.

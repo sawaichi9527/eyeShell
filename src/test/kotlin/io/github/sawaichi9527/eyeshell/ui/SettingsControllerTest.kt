@@ -205,6 +205,57 @@ class SettingsControllerTest {
     }
 
     @Test
+    fun `the preview falls back when the chosen CJK family has no CJK glyphs`() {
+        val settings = AppSettings.inMemory().apply { terminalFontCjkFamily = "Arial" }
+        val controller = SettingsController(settings, applyFontSize = {})
+        val dialog = onEdt { controller.createDialog(JFrame()) }
+
+        try {
+            val preview = onEdt {
+                findComponent(dialog, "settingsFontPreview") as SettingsController.FontPreview
+            }
+            assertTrue(
+                onEdt { preview.resolvedCjkFont("中文範例") }.canDisplay('中'),
+                "A Latin-only CJK choice must fall back to a CJK-capable font, like the terminal does",
+            )
+        } finally {
+            onEdt { dialog.dispose() }
+        }
+    }
+
+    @Test
+    fun `font family lists are shown and selecting one applies it`() {
+        val settings = AppSettings.inMemory()
+        val applied = mutableListOf<Pair<String, String>>()
+        val controller = SettingsController(
+            settings,
+            applyFontSize = {},
+            applyFontFamilies = { latin, cjk -> applied += latin to cjk },
+        )
+        val dialog = onEdt { controller.createDialog(JFrame()) }
+
+        try {
+            val latin = onEdt { findComponent(dialog, "settingsFontFamily") as JList<*> }
+            val cjk = onEdt { findComponent(dialog, "settingsCjkFontFamily") as JList<*> }
+            val families = onEdt {
+                (1 until latin.model.size).map { latin.model.getElementAt(it) as String }
+            }
+            org.junit.jupiter.api.Assumptions.assumeTrue(families.isNotEmpty(), "No installed fonts")
+
+            onEdt { latin.selectedIndex = latin.model.size - 1 }
+            val chosen = families.last()
+            assertEquals(chosen, settings.terminalFontFamily)
+            assertEquals(chosen, applied.last().first)
+
+            onEdt { cjk.selectedIndex = 1 }
+            assertEquals(families.first(), settings.terminalFontCjkFamily)
+            assertEquals(families.first(), applied.last().second)
+        } finally {
+            onEdt { dialog.dispose() }
+        }
+    }
+
+    @Test
     fun `the terminal page shows a live font preview`() {
         val controller = SettingsController(AppSettings.inMemory(), applyFontSize = {})
         val dialog = onEdt { controller.createDialog(JFrame()) }
@@ -394,6 +445,16 @@ class SettingsControllerTest {
             onEdt { writeDialogRender(dialog, "settings-background.png") }
             onEdt { categories.selectedIndex = 4 }
             onEdt { writeDialogRender(dialog, "settings-about.png") }
+
+            // Show the CJK fallback path: Arial has no CJK glyphs, so the preview must fall back.
+            onEdt { categories.selectedIndex = 1 }
+            onEdt {
+                val cjkList = findComponent(dialog, "settingsCjkFontFamily") as JList<*>
+                val model = cjkList.model
+                val index = (0 until model.size).firstOrNull { (model.getElementAt(it) as String) == "Arial" }
+                if (index != null) cjkList.selectedIndex = index
+            }
+            onEdt { writeDialogRender(dialog, "settings-terminal-cjk-fallback.png") }
 
             // Same dialog, rebuilt in Traditional Chinese, to verify the bundle and the language row.
             onEdt { dialog.dispose() }
