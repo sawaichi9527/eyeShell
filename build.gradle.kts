@@ -11,7 +11,7 @@ val sqliteNativeClassifier = if (isWindowsBuild) {
 }
 
 group = "io.github.sawaichi9527.eyeshell"
-version = "0.1.4-SNAPSHOT"
+version = "0.1.5-SNAPSHOT"
 
 kotlin {
     jvmToolchain(21)
@@ -174,12 +174,13 @@ fun jpackageArgs(
     "--vendor", "sawaichi9527",
     "--java-options", "-Dfile.encoding=UTF-8",
 ) + (
-    iconFile?.let { listOf("--icon", File(it).absolutePath) } ?: emptyList()
+    iconFile?.let { listOf("--icon", it) } ?: emptyList()
     )
 
-/** Windows packages need an ICO; Linux uses the largest bundled PNG. */
-val appIconFile: String =
-    if (isWindowsBuild) "packaging/eyeshell.ico" else "src/main/resources/icons/eyeshell-512.png"
+/** Windows packages need an ICO; Linux uses the largest bundled PNG. Resolved against the project. */
+val appIconFile: String = rootProject.file(
+    if (isWindowsBuild) "packaging/eyeshell.ico" else "src/main/resources/icons/eyeshell-512.png",
+).absolutePath
 
 tasks.register<Exec>("jpackageAppImage") {
     dependsOn(preparePackageInput)
