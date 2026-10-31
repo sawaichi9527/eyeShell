@@ -1017,3 +1017,9 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Exit codes: 0 for the full suite, `check`, the diff check, and `appImage`.
 - Result: the rebuilt AppImage (`eyeShell-0.1.5-x86_64.AppImage`, copied over the installed shortcut target) opens with the Monitor title and the footer fully visible; the connected layout is unchanged in structure. Full suite remains **410 tests: 410 executed, 0 failures, 0 errors, 19 skipped**, and `check` passes. The debug probes and the temporary `MonitorIdleProbe` test were deleted before validation; the only source change is `MonitorPanel.kt`.
 - Not verified in this entry: a live SSH session through the rebuilt AppImage (the connected layout is covered by the existing monitor integration/panel tests), resizing the window while the sidebar is scrolled, other look-and-feels, native Wayland, and Windows. The workaround targets GridBagLayout's inconsistent preferred height; the underlying Swing behaviour was not pinned to a specific JDK bug.
+
+### 2026-10-31 push (idle Monitor sidebar clipping)
+
+- Commands: `git push origin main`.
+- Result: pushed `2924aa8..c7c33b3` (`c7c33b3` fixes the idle Monitor sidebar clipping plus its handoff entry) to `origin/main`; the working tree is clean and `main` is in sync with `origin/main` afterwards at 2026-10-31T21:35+08:00.
+- Not re-run for the push: the full suite and `check` passed on the same tree before the commit (`410 tests, 0 failures, 19 skipped`); the rebuilt AppImage was installed to `~/.local/share/eyeShell/` outside the repository and is not part of this push.
