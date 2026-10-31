@@ -233,8 +233,33 @@ class MonitorPanel(
         row = addSpanning(row, mutedLabel(UiText.IDLE_HINT), top = 0, bottom = 2)
         row = addSpanning(row, mutedLabel(runtimeSummary()), top = 2, bottom = 2)
         addVerticalFiller(row)
+        syncContentPreferredSize()
         revalidate()
         repaint()
+    }
+
+    /**
+     * GridBagLayout reports a preferred height that is smaller than the rows it then lays out (the
+     * first display rebuild triggers this), which squeezes the title and the footer until a terminal
+     * is attached. Sizing the scrollable content from the grid's own row heights keeps every row at
+     * its preferred height.
+     */
+    private fun syncContentPreferredSize() {
+        // The grid's preferred size and its laid-out row heights disagree on the first display pass
+        // (614 vs 640 px), which squeezes the title and the footer. Recompute from the rows the
+        // layout actually produced, one event-loop turn later, so the viewport cannot clip them.
+        javax.swing.SwingUtilities.invokeLater {
+            val layout = content.layout as? java.awt.GridBagLayout ?: return@invokeLater
+            val rows = layout.getLayoutDimensions().getOrNull(1)?.sum() ?: return@invokeLater
+            val insets = content.insets
+            val needed = rows + insets.top + insets.bottom
+            if (content.preferredSize.height != needed) {
+                content.preferredSize = Dimension(1, needed)
+                content.revalidate()
+                contentScroll.revalidate()
+                repaint()
+            }
+        }
     }
 
     private fun runtimeSummary(): String = buildString {
@@ -330,6 +355,7 @@ class MonitorPanel(
             row = addSpanning(row, mutedLabel(I18n.t("monitor.unsupported")), top = 2, bottom = 2)
         }
         addVerticalFiller(row)
+        syncContentPreferredSize()
         revalidate()
         repaint()
     }
