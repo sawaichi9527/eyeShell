@@ -95,11 +95,20 @@ object TerminalTypography {
         size: Float = DEFAULT_FONT_SIZE,
         osName: String = System.getProperty("os.name").orEmpty(),
         available: Set<String> = installedFamilies(),
-    ): Font {
+    ): Font = Font(resolveFamilyFor(family, osName, available), Font.PLAIN, size.toInt()).deriveFont(size)
+
+    /**
+     * The family [resolveFontFor] would use, without constructing a [Font]. A `Font` built for a
+     * family this host lacks reports `Dialog`, so callers that need to assert the choice use this.
+     */
+    fun resolveFamilyFor(
+        family: String?,
+        osName: String = System.getProperty("os.name").orEmpty(),
+        available: Set<String> = installedFamilies(),
+    ): String {
         val selected = family?.trim().orEmpty().takeIf(String::isNotEmpty)
             ?.let { requested -> available.firstOrNull { it.equals(requested, ignoreCase = true) } }
-        val resolved = selected ?: resolveFamily(preferredFamilies(osName), available)
-        return Font(resolved, Font.PLAIN, size.toInt()).deriveFont(size)
+        return selected ?: resolveFamily(preferredFamilies(osName), available)
     }
 
     /** Installed families sorted for a picker; `Automatic` is represented by a blank value. */

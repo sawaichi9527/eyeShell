@@ -88,21 +88,22 @@ class TerminalTypographyTest {
     fun `a selected family is matched case-insensitively`() {
         val available = setOf("Consolas", "DejaVu Sans Mono", "Sarasa Mono TC")
 
-        val font = TerminalTypography.resolveFontFor("consolas", 15f, "Windows 10", available)
+        assertEquals("Consolas", TerminalTypography.resolveFamilyFor("consolas", "Windows 10", available))
 
-        assertEquals("Consolas", font.family)
+        // A Font built for a family this host lacks reports `Dialog`, so the size/style are asserted
+        // through resolveFontFor and the family through resolveFamilyFor.
+        val font = TerminalTypography.resolveFontFor("consolas", 15f, "Windows 10", available)
         assertEquals(15f, font.size2D)
+        assertEquals(Font.PLAIN, font.style)
     }
 
     @Test
     fun `an unknown family falls back to the automatic choice`() {
         val available = setOf("Consolas", "DejaVu Sans Mono")
 
-        val font = TerminalTypography.resolveFontFor("Not Installed Mono", 16f, "Windows 10", available)
-
         assertEquals(
             TerminalTypography.resolveFamily(TerminalTypography.preferredFamilies("Windows 10"), available),
-            font.family,
+            TerminalTypography.resolveFamilyFor("Not Installed Mono", "Windows 10", available),
         )
     }
 
@@ -110,9 +111,7 @@ class TerminalTypographyTest {
     fun `a blank family means automatic`() {
         val available = setOf("Consolas")
 
-        val font = TerminalTypography.resolveFontFor("", 16f, "Windows 10", available)
-
-        assertEquals("Consolas", font.family)
+        assertEquals("Consolas", TerminalTypography.resolveFamilyFor("", "Windows 10", available))
     }
 
     @Test
