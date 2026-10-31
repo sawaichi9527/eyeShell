@@ -1023,3 +1023,19 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Commands: `git push origin main`.
 - Result: pushed `2924aa8..c7c33b3` (`c7c33b3` fixes the idle Monitor sidebar clipping plus its handoff entry) to `origin/main`; the working tree is clean and `main` is in sync with `origin/main` afterwards at 2026-10-31T21:35+08:00.
 - Not re-run for the push: the full suite and `check` passed on the same tree before the commit (`410 tests, 0 failures, 19 skipped`); the rebuilt AppImage was installed to `~/.local/share/eyeShell/` outside the repository and is not part of this push.
+
+### 2026-10-31 follow-up (AppImage kept in ~/Applications)
+
+- Owner preference: the installed AppImage should live in `~/Applications/` rather than `~/.local/share/eyeShell/`.
+- Action: copied the rebuilt `eyeShell-0.1.5-x86_64.AppImage` to `~/Applications/eyeShell-0.1.5-x86_64.AppImage`, re-ran `scripts/install-linux-shortcut.sh` against that path (so `Exec`/`TryExec` point there), and removed the `~/.local/share/eyeShell/` copy and directory.
+- AppImageLauncher caveat confirmed again: `appimagelauncherd` auto-integrates a new file placed in `~/Applications/`, which re-created `appimagekit_6a2279150fa8d87538a34f50c0572e27-eyeShell.desktop` as `eyeShell (1)` with the never-extracted `appimagekit_*_eyeshell` icon. Re-running the install script removed it; the launcher itself is bypassed at run time by `Exec=env APPIMAGELAUNCHER_DISABLE=1 "…"`.
+- Verified: `~/.local/share/applications` contains only `eyeshell.desktop`; GLib resolves it as `eyeShell | io-github-sawaichi9527-eyeshell-MainKt | eyeshell | env APPIMAGELAUNCHER_DISABLE=1 "/home/sawaichi/Applications/eyeShell-0.1.5-x86_64.AppImage"`, and launching that file produced no new AppImageLauncher entry.
+- README: the packaging section now recommends `~/Applications/` and documents that a freshly copied AppImage may need one re-run of the install script to clear the daemon's duplicate entry.
+
+### 2026-10-31 design check (relocatable AppImage, persistent data)
+
+- Requirement confirmed with the owner: the AppImage may be deployed in any folder and replaced with a newer version; user data must stay outside the image and be inherited.
+- Code audit: `EyeShellPaths` resolves the catalog from `$XDG_DATA_HOME` (default `~/.local/share/eyeShell/eyeshell.db`) and `settings.properties`, `known_hosts`, and `backgrounds/` from `$XDG_CONFIG_HOME` (default `~/.config/eyeShell/`); `backgrounds` uses the same config directory. No production code reads `user.dir`, `java.class.path`, the code source, or an `APPIMAGE` variable, so nothing is stored beside the executable. `BackgroundImages.defaultDirectory()` delegates to `EyeShellPaths.backgroundDirectory()`.
+- Empirical check: copied the AppImage to `/tmp/opencode/relocated/eyeShell-test.AppImage`, launched it with `APPIMAGELAUNCHER_DISABLE=1`, and inspected the process's open files — `/proc/<pid>/fd/40 -> /home/sawaichi/.local/share/eyeShell/eyeshell.db`. Launching from an unrelated directory therefore used the existing catalog; the temporary copy was removed afterwards.
+- Docs: the README packaging section now states that the AppImage is relocatable, that `~/Applications/` is only an example, and tabulates where the database, settings/known_hosts/backgrounds, and passwords live (`$XDG_DATA_HOME/eyeShell`, `$XDG_CONFIG_HOME/eyeShell`, OS credential store).
+- Not verified in this entry: replacing the AppImage with a newer version while the old one runs (only the same-version relocation was exercised), a portable copy on a USB drive, and Windows portable ZIP relocation. No code change was needed for this requirement.

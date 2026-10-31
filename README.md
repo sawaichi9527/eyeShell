@@ -158,7 +158,24 @@ Linux x86_64 AppImage（單一可執行檔，內含 bundled runtime，不需系�
 ./scripts/install-linux-shortcut.sh --remove
 ```
 
-腳本會安裝 `eyeshell.desktop` 與 16–512 px 圖示、移除 AppImageLauncher 留下且圖示缺失的 `appimagekit_*eyeShell*.desktop` 重複項目，並以 `Exec=env APPIMAGELAUNCHER_DISABLE=1 "<AppImage>"` 啟動，避免 AppImageLauncher 再次搬移檔案或建立名為 `eyeShell (1)` 的齒輪捷徑。建議先把 AppImage 放到穩定位置再安裝，例如 `~/.local/share/eyeShell/`。
+腳本會安裝 `eyeshell.desktop` 與 16–512 px 圖示、移除 AppImageLauncher 留下且圖示缺失的 `appimagekit_*eyeShell*.desktop` 重複項目，並以 `Exec=env APPIMAGELAUNCHER_DISABLE=1 "<AppImage>"` 啟動，避免 AppImageLauncher 再次搬移檔案或建立名為 `eyeShell (1)` 的齒輪捷徑。
+
+AppImage 檔本身可以放在任何資料夾（例如 `~/Applications/` 或隨身碟），不需要安裝，也不綁定資料位置：
+
+```bash
+cp build/package/eyeShell-<version>-x86_64.AppImage ~/Applications/
+./scripts/install-linux-shortcut.sh ~/Applications/eyeShell-<version>-x86_64.AppImage
+```
+
+所有使用者資料都依 XDG 慣例放在 AppImage 之外，因此替換新版本或搬移 AppImage 後仍會沿用同一份資料：
+
+| 內容 | 位置 |
+|---|---|
+| Saved Hosts、schema（`eyeshell.db`） | `$XDG_DATA_HOME/eyeShell/`（預設 `~/.local/share/eyeShell/`） |
+| `settings.properties`、`known_hosts`、`backgrounds/` | `$XDG_CONFIG_HOME/eyeShell/`（預設 `~/.config/eyeShell/`） |
+| 密碼 | 作業系統憑證儲存區（GNOME Secret Service／Windows Credential Manager） |
+
+若 AppImageLauncher 的常駐程式（`appimagelauncherd`）在檔案複製到 `~/Applications/` 後又自動整合出一個 `appimagekit_*eyeShell*.desktop`，重新執行 `install-linux-shortcut.sh` 即可移除；該 entry 的圖示抽取在這台機器上會失敗，因此不建議改用它的整合。
 
 GNOME 是透過視窗的 `WM_CLASS` 對應 `.desktop` 檔，而 AWT 會把 `WM_CLASS` 設成主類別名稱（`io.github.sawaichi9527.eyeshell.MainKt` → `io-github-sawaichi9527-eyeshell-MainKt`）。因此 `.desktop` 的 `StartupWMClass` 必須是這個值，且 `Icon=eyeshell` 要搭配已安裝的 `eyeshell.png`；只憑視窗的 `_NET_WM_ICON` 不足，GNOME 在找不到對應的 `.desktop` 時會顯示通用齒輪圖示。`TryExec` 刻意不寫，因為 GLib 會拒絕含引號的 `TryExec` 並忽略整個 entry。
 
