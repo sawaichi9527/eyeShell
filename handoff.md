@@ -1039,3 +1039,9 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Empirical check: copied the AppImage to `/tmp/opencode/relocated/eyeShell-test.AppImage`, launched it with `APPIMAGELAUNCHER_DISABLE=1`, and inspected the process's open files — `/proc/<pid>/fd/40 -> /home/sawaichi/.local/share/eyeShell/eyeshell.db`. Launching from an unrelated directory therefore used the existing catalog; the temporary copy was removed afterwards.
 - Docs: the README packaging section now states that the AppImage is relocatable, that `~/Applications/` is only an example, and tabulates where the database, settings/known_hosts/backgrounds, and passwords live (`$XDG_DATA_HOME/eyeShell`, `$XDG_CONFIG_HOME/eyeShell`, OS credential store).
 - Not verified in this entry: replacing the AppImage with a newer version while the old one runs (only the same-version relocation was exercised), a portable copy on a USB drive, and Windows portable ZIP relocation. No code change was needed for this requirement.
+
+### 2026-10-31 push (relocatable AppImage documentation)
+
+- Commands: `git push origin main`.
+- Result: pushed `acfc96b..9fe969f` (`9fe969f` documents the relocatable AppImage, its XDG data paths, and the relocation check) to `origin/main`; the working tree is clean and `main` is in sync with `origin/main` afterwards at 2026-10-31T21:45+08:00.
+- Not re-run for the push: documentation only; no source changed since the validated `410 tests, 0 failures, 19 skipped` run. The deployed AppImage in `~/Applications/` and the per-user desktop entry are outside the repository.
