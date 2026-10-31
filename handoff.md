@@ -1087,3 +1087,9 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Artifacts: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`; logs `/tmp/opencode/close-015-test.log` and `/tmp/opencode/close-015-check.log`; AppImage and checksum under `build/package/`; release-notes draft `/tmp/opencode/RELEASE_v0.1.5.md`.
 - Not done / blocked: the GitHub Release page was not created. The supplied fine-grained token authenticates but lacks `Contents: write`, so `POST /repos/sawaichi9527/eyeShell/releases` returned **403 Resource not accessible by personal access token**; the AppImage and `.sha256` therefore still need to be uploaded to the `v0.1.5` release once the permission is granted (or from the web UI). The token value appeared in the chat, so it should be revoked and re-issued.
 - Not verified at this close: a live SSH/SFTP session through the 0.1.5 AppImage, the Windows `eyeShell-0.1.5.zip` upload (owner will upload from the Windows host), the GNOME app-grid rendering after the last shortcut change, MSI/Jump Host/live Windows credential validation, and the manual GUI checklist.
+
+### 2026-10-31 push (session close, 0.1.5 release record)
+
+- Commands: `git push origin main`.
+- Result: pushed `e20800b..bdda69a` (`bdda69a` records the 0.1.5 session close, the 410-test validation, and the GitHub release/assets verification) to `origin/main`; the working tree is clean and `main` is in sync with `origin/main` afterwards at 2026-10-31T23:05+08:00.
+- Release state: `v0.1.5` tag and the GitHub release assets are live; the Windows `eyeShell-0.1.5.zip` is still to be uploaded from the Windows host by the owner. No source changed in this commit.
