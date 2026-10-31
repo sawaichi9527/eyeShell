@@ -1045,3 +1045,20 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Commands: `git push origin main`.
 - Result: pushed `acfc96b..9fe969f` (`9fe969f` documents the relocatable AppImage, its XDG data paths, and the relocation check) to `origin/main`; the working tree is clean and `main` is in sync with `origin/main` afterwards at 2026-10-31T21:45+08:00.
 - Not re-run for the push: documentation only; no source changed since the validated `410 tests, 0 failures, 19 skipped` run. The deployed AppImage in `~/Applications/` and the per-user desktop entry are outside the repository.
+
+### 2026-10-31 fix (AppImageLauncher kept re-adding "eyeShell (1)")
+
+- Symptom: the `eyeShell (1)` gear shortcut reappeared after the previous cleanup.
+- Root cause: `appimagelauncherd` treats an AppImage in `~/Applications/` without its `appimagekit_*` entry as not integrated and re-creates the entry (`Icon=appimagekit_<hash>_eyeshell`, which it never installs, and `Name=eyeShell (1)` because our `eyeshell.desktop` already owned the name). Deleting that entry therefore only resets the loop.
+- Fix: `scripts/install-linux-shortcut.sh` now has two modes. If an integrated `appimagekit_*eyeShell*.desktop` exists for the given AppImage, it is **adopted**: `Name=eyeShell`, `Icon=eyeshell` (the icons the script installs), `StartupWMClass=io-github-sawaichi9527-eyeshell-MainKt`, extra entries for the same AppImage removed, and our own `eyeshell.desktop` deleted. Only when no integrated entry exists does the script write the standalone entry with `Exec=env APPIMAGELAUNCHER_DISABLE=1 "<AppImage>"`.
+- Applied here: the existing `appimagekit_6a2279150fa8d87538a34f50c0572e27-eyeShell.desktop` was patched in place and `eyeshell.desktop` removed; GLib resolves it as `eyeShell | io-github-sawaichi9527-eyeshell-MainKt | eyeshell | /home/sawaichi/Applications/eyeShell-0.1.5-x86_64.AppImage`.
+- Verified: the entry survived a launch and a 90-second daemon rescan without a duplicate appearing; `bash -n` and `git diff --check` pass. No JVM source changed.
+- Remaining caveat: replacing the AppImage with a new build may make the daemon create a new hash entry; re-running the script adopts it and removes the previous duplicate. A `--remove` while the AppImage stays in `~/Applications/` can still be undone by the daemon.
+
+### 2026-10-31 correction (restore the visible eyeShell shortcut; hide AppImageLauncher's)
+
+- Owner feedback: adopting AppImageLauncher's entry removed the normal `eyeShell` shortcut the owner used, so the previous decision was reversed.
+- Final layout: `eyeshell.desktop` is the visible shortcut again (`Name=eyeShell`, `Icon=eyeshell`, `Exec=env APPIMAGELAUNCHER_DISABLE=1 "<AppImage>"`, correct `StartupWMClass`). An integrated `appimagekit_*eyeShell*.desktop` is kept but patched with `NoDisplay=true` in its `[Desktop Entry]` group: the daemon sees its entry and does not re-create one, while GNOME lists only `eyeshell.desktop`.
+- Script detail: `install-linux-shortcut.sh` rewrites the daemon entry with `awk` (Name/Icon/StartupWMClass corrected, `NoDisplay=true` inserted after `Type=`), then writes `eyeshell.desktop` and refreshes the desktop/icon caches. The first attempt appended `NoDisplay` after the `[Desktop Action …]` group, where it has no effect; it is now inserted into `[Desktop Entry]`.
+- Verified: `GioUnix.DesktopAppInfo` reports `eyeshell.desktop => eyeShell | show=true | icon=eyeshell` and `appimagekit_6a2279…-eyeShell.desktop => eyeShell | show=false | icon=eyeshell`; the icon resolves through the hicolor theme to `~/.local/share/icons/hicolor/256x256/apps/eyeshell.png`; `bash -n` and `git diff --check` pass.
+- Not verified: the GNOME app grid rendered after the change (needs the owner's eyes, and a shell cache refresh may be required), and the daemon's behaviour when a replaced AppImage produces a new hash entry (re-running the script hides it).

@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Installs (or removes) a per-user .desktop entry and icon so GNOME links the eyeShell window to the
-# application. Without it, the window's WM_CLASS (derived by AWT from the main class) has no desktop
-# entry to match and the dock/app menu fall back to a generic gear icon.
+# Installs (or removes) the per-user desktop entry and icons so GNOME links the eyeShell window to
+# the application. Without a matching entry, the window's WM_CLASS (derived by AWT from the main
+# class) has no application to resolve, and the dock/app menu fall back to a generic gear icon.
 #
-# The entry launches the AppImage with APPIMAGELAUNCHER_DISABLE=1 so AppImageLauncher does not move
-# the file, rewrite the entry, or add a second "eyeShell (1)" shortcut with a missing icon.
+# AppImageLauncher's daemon re-creates its own appimagekit_* entry whenever it is missing, and its
+# icon extraction fails on this image, so deleting that entry is not a stable state. The daemon's
+# entry is therefore kept but hidden (`NoDisplay=true`), and a standalone `eyeshell.desktop` is the
+# only visible shortcut. It starts the AppImage with APPIMAGELAUNCHER_DISABLE=1 so the launcher
+# cannot move the file or add another entry.
 #
 # Usage:
 #   scripts/install-linux-shortcut.sh [path/to/eyeShell-<version>-x86_64.AppImage]
 #   scripts/install-linux-shortcut.sh --remove
 #
+# The AppImage can live in any folder; all data stays under $XDG_DATA_HOME/$XDG_CONFIG_HOME.
 # Only files under $XDG_DATA_HOME (default ~/.local/share) are written; nothing system-wide.
 
 readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -44,7 +48,7 @@ if [[ "${1:-}" == "--remove" ]]; then
         rm -f "${ICON_ROOT}/${size}x${size}/apps/${APP_ID}.png"
     done
     refresh_caches
-    printf 'Removed %s and the hicolor %s icons\n' "${DESKTOP_PATH}" "${APP_ID}"
+    printf 'Removed %s and the hicolor %s icons.\n' "${DESKTOP_PATH}" "${APP_ID}"
     exit 0
 fi
 
@@ -83,17 +87,27 @@ for size in "${ICON_SIZES[@]}"; do
     cp -f "${source_icon}" "${ICON_ROOT}/${size}x${size}/apps/${APP_ID}.png"
 done
 
-# AppImageLauncher re-adds its own appimagekit_* entry with Name=eyeShell (1) and an icon it failed
-# to extract; remove those stale entries so the menu shows one eyeShell shortcut.
-removed_stale=0
-for stale in "${DESKTOP_DIR}"/appimagekit_*eyeShell*.desktop; do
-    [[ -e "${stale}" ]] || continue
-    rm -f "${stale}"
-    removed_stale=$((removed_stale + 1))
+# Keep the daemon's integration entry (so it does not re-create it) but hide it from GNOME, and
+# correct its fields in case AppImageLauncher rewrote them from the AppImage's embedded desktop file.
+for integrated in "${DESKTOP_DIR}"/appimagekit_*eyeShell*.desktop; do
+    [[ -e "${integrated}" ]] || continue
+    patched="$(mktemp)"
+    awk -v name="${APP_NAME}" -v icon="${APP_ID}" -v wm="${WM_CLASS}" '
+        /^Name=/ { print "Name=" name; next }
+        /^Icon=/ { print "Icon=" icon; next }
+        /^StartupWMClass=/ { print "StartupWMClass=" wm; next }
+        /^NoDisplay=/ { next }
+        /^Type=/ && !hidden { print; print "NoDisplay=true"; hidden = 1; next }
+        { print }
+    ' "${integrated}" > "${patched}"
+    mv -f "${patched}" "${integrated}"
+    chmod 644 "${integrated}"
+    printf 'Hid AppImageLauncher entry %s (NoDisplay=true)\n' "${integrated}"
 done
 
-# No TryExec: GLib rejects a desktop entry whose quoted TryExec path cannot be resolved, which makes
-# the whole entry invisible to GNOME. TryExec is optional, so it is omitted for quoted paths.
+# No TryExec: GLib rejects a desktop entry whose quoted TryExec path cannot be resolved, which
+# makes the whole entry invisible to GNOME. TryExec is optional, so it is omitted for quoted
+# paths. APPIMAGELAUNCHER_DISABLE keeps the launcher from moving the file or adding an entry.
 cat > "${DESKTOP_PATH}" <<EOF
 [Desktop Entry]
 Type=Application
@@ -114,8 +128,5 @@ refresh_caches
 
 printf 'Installed %s\n' "${DESKTOP_PATH}"
 printf 'Installed hicolor icons under %s/*/apps/%s.png\n' "${ICON_ROOT}" "${APP_ID}"
-printf 'Exec: env APPIMAGELAUNCHER_DISABLE=1 "%s"\n' "${app_image}"
+printf 'AppImage: %s\n' "${app_image}"
 printf 'StartupWMClass: %s\n' "${WM_CLASS}"
-if [[ "${removed_stale}" -gt 0 ]]; then
-    printf 'Removed %s stale AppImageLauncher entr(y/ies) for eyeShell.\n' "${removed_stale}"
-fi
