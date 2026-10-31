@@ -1062,3 +1062,9 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Script detail: `install-linux-shortcut.sh` rewrites the daemon entry with `awk` (Name/Icon/StartupWMClass corrected, `NoDisplay=true` inserted after `Type=`), then writes `eyeshell.desktop` and refreshes the desktop/icon caches. The first attempt appended `NoDisplay` after the `[Desktop Action …]` group, where it has no effect; it is now inserted into `[Desktop Entry]`.
 - Verified: `GioUnix.DesktopAppInfo` reports `eyeshell.desktop => eyeShell | show=true | icon=eyeshell` and `appimagekit_6a2279…-eyeShell.desktop => eyeShell | show=false | icon=eyeshell`; the icon resolves through the hicolor theme to `~/.local/share/icons/hicolor/256x256/apps/eyeshell.png`; `bash -n` and `git diff --check` pass.
 - Not verified: the GNOME app grid rendered after the change (needs the owner's eyes, and a shell cache refresh may be required), and the daemon's behaviour when a replaced AppImage produces a new hash entry (re-running the script hides it).
+
+### 2026-10-31 push (visible shortcut restored, AppImageLauncher entry hidden)
+
+- Commands: `git push origin main`.
+- Result: pushed `48e05de..28fd40c` (`28fd40c` restores the visible `eyeshell.desktop`, hides the daemon's entry with `NoDisplay=true`, and updates the install script and docs) to `origin/main`; the working tree is clean and `main` is in sync with `origin/main` afterwards at 2026-10-31T22:05+08:00.
+- Not re-run for the push: shell script/docs only; no JVM source or test changed. `bash -n`, `git diff --check`, and the GLib/Gtk parsing checks were run before the commit.
