@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=eyeShell
+Comment=Local-first visual SSH console workbench
+Exec=eyeShell
+Icon=eyeshell
+Terminal=false
+Categories=Network;
+StartupWMClass=io-github-sawaichi9527-eyeshell-MainKt

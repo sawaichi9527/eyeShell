@@ -1,0 +1,4 @@
+#!/bin/sh
+# AppImage entry point: runs the jpackage app image shipped under usr/lib/eyeShell.
+HERE=$(dirname "$(readlink -f "$0")")
+exec "$HERE/usr/lib/eyeShell/bin/eyeShell" "$@"

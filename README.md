@@ -140,6 +140,30 @@ scripts\gradlew-local.cmd run
 
 Use `./scripts/gradlew-local.sh --stop`, `.\scripts\gradlew-local.ps1 --stop`, or `scripts\gradlew-local.cmd --stop` to stop the project-local Gradle daemon. The standard `gradlew` and `gradlew.bat` remain available for isolated CI runners.
 
+### Packaging
+
+Linux x86_64 AppImage（單一可執行檔，內含 bundled runtime，不需系統 JDK）：
+
+```bash
+./scripts/bootstrap-appimagetool.sh   # 一次即可：鎖定 appimagetool 1.9.0 並驗證 SHA-256
+./scripts/gradlew-local.sh appImage
+```
+
+輸出為 `build/package/eyeShell-<version>-x86_64.AppImage`。`scripts/bootstrap-appimagetool.sh` 會把 appimagetool 解壓到 `.local/appimagetool/`，打包時不需要 FUSE，也不會安裝系統套件。`jpackageAppImage`（app image 目錄）與 `jpackagePortable`／`jpackageInstaller`（tar.gz／DEB、Windows ZIP／MSI）仍保留，但 AppImage 是本專案 Linux 端的發佈格式。
+
+安裝桌面捷徑與圖示（僅寫入 `$XDG_DATA_HOME`，預設 `~/.local/share`）：
+
+```bash
+./scripts/install-linux-shortcut.sh [path/to/eyeShell-<version>-x86_64.AppImage]
+./scripts/install-linux-shortcut.sh --remove
+```
+
+腳本會安裝 `eyeshell.desktop` 與 16–512 px 圖示、移除 AppImageLauncher 留下且圖示缺失的 `appimagekit_*eyeShell*.desktop` 重複項目，並以 `Exec=env APPIMAGELAUNCHER_DISABLE=1 "<AppImage>"` 啟動，避免 AppImageLauncher 再次搬移檔案或建立名為 `eyeShell (1)` 的齒輪捷徑。建議先把 AppImage 放到穩定位置再安裝，例如 `~/.local/share/eyeShell/`。
+
+GNOME 是透過視窗的 `WM_CLASS` 對應 `.desktop` 檔，而 AWT 會把 `WM_CLASS` 設成主類別名稱（`io.github.sawaichi9527.eyeshell.MainKt` → `io-github-sawaichi9527-eyeshell-MainKt`）。因此 `.desktop` 的 `StartupWMClass` 必須是這個值，且 `Icon=eyeshell` 要搭配已安裝的 `eyeshell.png`；只憑視窗的 `_NET_WM_ICON` 不足，GNOME 在找不到對應的 `.desktop` 時會顯示通用齒輪圖示。`TryExec` 刻意不寫，因為 GLib 會拒絕含引號的 `TryExec` 並忽略整個 entry。
+
+若主機安裝了 AppImageLauncher，首次執行新產生的 AppImage 會被它搬移到 `~/Applications/`；自動化驗證時請加上 `APPIMAGELAUNCHER_DISABLE=1`。
+
 ## Workbench layout
 
 eyeShell 的桌面工作台參考 [FinalShell 官方介紹頁](https://www.hostbuf.com/t/988.html) 所呈現的資訊架構：左側常駐 Monitor，右側工作區頂部顯示 Session tabs，中央是 Terminal workspace；Command Input 同列右方提供快捷工具按鈕，底部 SFTP／Commands dock 預設收合。這項參考僅限布局概念，不複製 FinalShell 的程式碼、圖示、圖片、品牌或其他介面資產。

@@ -239,3 +239,54 @@ tasks.register<Exec>("jpackagePortable") {
         commandLine("tar", "-C", appImageDir.absolutePath, "-czf", archivePath, ".")
     }
 }
+
+/**
+ * AppImage packaging for Linux x86_64: the jpackage app image is staged into an AppDir together
+ * with an `AppRun`, a `.desktop` entry, and the 512 px icon, then squashed by the pinned
+ * `appimagetool` installed by `scripts/bootstrap-appimagetool.sh`.
+ */
+val appImageFileName = "eyeShell-${packageVersion}-x86_64.AppImage"
+val appImageTool = rootProject.file(".local/appimagetool/AppRun")
+
+// The bundled jlink runtime ships read-only legal files; restaging over them fails on Windows-style
+// permission checks, so the AppDir directory is removed before every Sync.
+val cleanAppDir by tasks.registering(Delete::class) {
+    delete(layout.buildDirectory.dir("package/appimage"))
+}
+
+val prepareAppDir by tasks.registering(Sync::class) {
+    dependsOn("jpackageAppImage", cleanAppDir)
+    from(layout.buildDirectory.dir("package/eyeShell")) { into("usr/lib/eyeShell") }
+    from(rootProject.file("packaging/appimage/AppRun"))
+    from(rootProject.file("packaging/appimage/eyeShell.desktop"))
+    from(rootProject.file("src/main/resources/icons/eyeshell-512.png")) { rename { "eyeshell.png" } }
+    into(layout.buildDirectory.dir("package/appimage/eyeShell.AppDir"))
+}
+
+val cleanPackageAppImage by tasks.registering(Delete::class) {
+    delete(layout.buildDirectory.file("package/${appImageFileName}"))
+}
+
+tasks.register<Exec>("appImage") {
+    dependsOn(prepareAppDir, cleanPackageAppImage)
+    val appDir = layout.buildDirectory.dir("package/appimage/eyeShell.AppDir").get().asFile
+    val target = layout.buildDirectory.file("package/${appImageFileName}").get().asFile
+    val tool = appImageTool
+    val windowsHost = isWindowsBuild
+    inputs.dir(appDir)
+    outputs.file(target)
+    // appimagetool reads the target architecture from ARCH; only x86_64 Linux is packaged.
+    environment("ARCH", "x86_64")
+    executable = tool.absolutePath
+    args = listOf(appDir.absolutePath, target.absolutePath)
+    doFirst {
+        if (windowsHost) {
+            throw GradleException("AppImage packaging is Linux x86_64 only; build it on Ubuntu.")
+        }
+        if (!tool.canExecute()) {
+            throw GradleException(
+                "appimagetool is not installed. Run scripts/bootstrap-appimagetool.sh first.",
+            )
+        }
+    }
+}
