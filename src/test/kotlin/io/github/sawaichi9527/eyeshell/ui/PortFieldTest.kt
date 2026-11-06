@@ -20,6 +20,18 @@ class PortFieldTest {
     }
 
     @Test
+    fun `port field stays left aligned when the look and feel re-applies the orientation`() {
+        val spinner = createPortField(22)
+        javax.swing.SwingUtilities.updateComponentTreeUI(spinner)
+        // JSpinner.NumberEditor forces the alignment back to the right on every orientation change.
+        spinner.applyComponentOrientation(java.awt.ComponentOrientation.LEFT_TO_RIGHT)
+
+        val editor = spinner.editor as JSpinner.DefaultEditor
+        assertEquals(SwingConstants.LEFT, editor.textField.horizontalAlignment)
+        assertEquals("22", editor.textField.text)
+    }
+
+    @Test
     fun `port field keeps the valid SSH port range`() {
         val model = createPortField(2222).model as SpinnerNumberModel
 
