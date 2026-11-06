@@ -412,6 +412,7 @@ M1D 增加：
 
 - Keyboard-interactive server challenge；name、instruction、prompt 與 echo flag 顯示給使用者，response 僅存在本次 authentication 記憶體
 - Keyboard-interactive 的 human-response wait 不計入 authentication network timeout；network phase 仍有明確 timeout，dialog 會在 timeout、disconnect 或 controller close 時關閉
+- 未信任主機金鑰（unknown host key）的確認時間同樣不計入 connect／authentication network timeout：等待期間 network phase 仍受限，確認完成後才繼續計時，因此確認視窗停留過久不得造成連線逾時失敗
 - 明確選取的 `ssh-agent` authentication，不自動 fallback 至其他驗證方式
 - Linux 僅使用繼承的 `SSH_AUTH_SOCK` Unix-domain socket；不掃描其他 socket、不啟動或設定 agent
 - Windows 僅使用既有 OpenSSH `\\.\pipe\openssh-ssh-agent` named pipe；不安裝、啟動或設定服務

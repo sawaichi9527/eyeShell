@@ -61,6 +61,25 @@ class SystemPasswordCredentialStoreTest {
     }
 
     @Test
+    fun `linux store releases the shared secret service transport when closed`() {
+        var disconnects = 0
+        val collection = FakeSecretCollection()
+        val factory = object : SecretCollectionFactory {
+            override fun open(): SecretCollection = collection
+
+            override fun disconnect() {
+                disconnects++
+            }
+        }
+        val store = LinuxSecretServicePasswordStore(factory)
+
+        store.status()
+        store.close()
+
+        assertEquals(1, disconnects, "the D-Bus sender thread keeps the JVM alive unless the transport is closed")
+    }
+
+    @Test
     fun `linux store reports existence without unlocking the collection`() {
         val profileId = UUID.fromString("00000000-0000-0000-0000-000000000048")
         val collection = FakeSecretCollection().apply { locked = true }

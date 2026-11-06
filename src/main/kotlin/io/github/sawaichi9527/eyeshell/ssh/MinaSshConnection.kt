@@ -16,6 +16,7 @@ import java.util.Arrays
 import java.util.EnumSet
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import org.apache.sshd.client.SshClient
 import org.apache.sshd.client.auth.keyboard.UserAuthKeyboardInteractiveFactory
 import org.apache.sshd.client.auth.keyboard.UserInteraction
@@ -30,6 +31,8 @@ import org.apache.sshd.client.session.forward.PortForwardingTracker
 import org.apache.sshd.common.channel.StreamingChannel
 import org.apache.sshd.common.config.keys.FilePasswordProvider
 import org.apache.sshd.common.config.keys.KeyUtils
+import org.apache.sshd.common.future.SshFuture
+import org.apache.sshd.common.future.VerifiableFuture
 import org.apache.sshd.common.keyprovider.KeyIdentityProvider
 import org.apache.sshd.common.util.io.resource.PathResource
 import org.apache.sshd.common.util.net.SshdSocketAddress
@@ -41,6 +44,17 @@ class MinaSshConnection private constructor(
     override val endpoint: SshEndpoint,
     private val upstream: Upstream? = null,
 ) : HostSession {
+    /**
+     * Bounds for the SSH handshake.
+     *
+     * The connect and auth windows exclude the time a person spends reviewing an unknown host key,
+     * so a slow confirmation cannot consume the network timeout and fail the attempt.
+     */
+    class Timeouts(
+        val connect: Duration = Duration.ofSeconds(10),
+        val auth: Duration = Duration.ofSeconds(15),
+    )
+
     private val closed = AtomicBoolean()
 
     override fun openTerminal(columns: Int, rows: Int): TerminalSession {
@@ -131,18 +145,18 @@ class MinaSshConnection private constructor(
     }
 
     companion object {
-        private val CONNECT_TIMEOUT = Duration.ofSeconds(10)
-        private val AUTH_TIMEOUT = Duration.ofSeconds(15)
         private val CHANNEL_TIMEOUT = Duration.ofSeconds(10)
         private val EXEC_TIMEOUT = Duration.ofSeconds(10)
+        private const val NETWORK_POLL_MILLIS = 50L
 
-        fun connect(
+        internal fun connect(
             endpoint: SshEndpoint,
             authentication: SshAuthentication,
             knownHostsStore: KnownHostsStore,
             unknownHostVerifier: HostKeyVerifier,
             changedHostKeyHandler: ChangedHostKeyHandler = ChangedHostKeyHandler {},
             transport: TransportProvider = TransportProvider.Direct,
+            timeouts: Timeouts = Timeouts(),
         ): MinaSshConnection {
             val jump = transport as? TransportProvider.JumpHost
             if (jump != null) {
@@ -157,6 +171,7 @@ class MinaSshConnection private constructor(
                     knownHostsStore = knownHostsStore,
                     unknownHostVerifier = it.unknownHostVerifier,
                     changedHostKeyHandler = it.changedHostKeyHandler,
+                    timeouts = timeouts,
                 )
             }
             var tracker: PortForwardingTracker? = null
@@ -179,6 +194,7 @@ class MinaSshConnection private constructor(
                     unknownHostVerifier = unknownHostVerifier,
                     changedHostKeyHandler = changedHostKeyHandler,
                     route = route,
+                    timeouts = timeouts,
                 )
                 return MinaSshConnection(
                     opened.client,
@@ -208,7 +224,9 @@ class MinaSshConnection private constructor(
             unknownHostVerifier: HostKeyVerifier,
             changedHostKeyHandler: ChangedHostKeyHandler,
             route: SshdSocketAddress? = null,
+            timeouts: Timeouts = Timeouts(),
         ): OpenedConnection {
+            val hostKeyReviewClock = HostKeyReviewClock()
             val keyboardInteraction = (authentication as? SshAuthentication.KeyboardInteractive)
                 ?.let(::KeyboardUserInteraction)
             val publicKeys = if (authentication is SshAuthentication.PublicKey) {
@@ -233,7 +251,7 @@ class MinaSshConnection private constructor(
                     }
                 }
                 serverKeyVerifier = knownHostsStore.createServerKeyVerifier(
-                    unknownHostVerifier,
+                    timedHostKeyVerifier(unknownHostVerifier, hostKeyReviewClock),
                     changedHostKeyHandler,
                     verificationAddress = SshdSocketAddress(endpoint.host, endpoint.port),
                 )
@@ -242,13 +260,13 @@ class MinaSshConnection private constructor(
 
             var session: ClientSession? = null
             try {
-                val connectedSession = client.connect(
+                val connectFuture = client.connect(
                     endpoint.username,
                     route?.hostName ?: endpoint.host,
                     route?.port ?: endpoint.port,
                 )
-                    .verify(CONNECT_TIMEOUT)
-                    .session
+                awaitNetworkOperation(connectFuture, timeouts.connect, hostKeyReviewClock)
+                val connectedSession = connectFuture.session
                 session = connectedSession
                 var passwordIdentity: String? = null
                 try {
@@ -267,12 +285,12 @@ class MinaSshConnection private constructor(
                     if (authentication is SshAuthentication.KeyboardInteractive) {
                         val interaction = checkNotNull(keyboardInteraction)
                         try {
-                            verifyKeyboardInteractive(authFuture, interaction)
+                            verifyKeyboardInteractive(authFuture, interaction, timeouts.auth)
                         } finally {
                             interaction.cancel()
                         }
                     } else {
-                        authFuture.verify(AUTH_TIMEOUT)
+                        awaitNetworkOperation(authFuture, timeouts.auth, hostKeyReviewClock)
                     }
                 } finally {
                     passwordIdentity?.let(connectedSession::removePasswordIdentity)
@@ -312,11 +330,77 @@ class MinaSshConnection private constructor(
             }
         }
 
-        private fun verifyKeyboardInteractive(authFuture: AuthFuture, interaction: KeyboardUserInteraction) {
-            var networkDeadline = System.nanoTime() + AUTH_TIMEOUT.toNanos()
+        /**
+         * Tracks how long the unknown-host-key prompt has been open, including the part that is
+         * still running, so a handshake wait can pause its own deadline while the user decides.
+         */
+        private class HostKeyReviewClock {
+            private val accumulatedNanos = AtomicLong()
+            private val startedAtNanos = AtomicLong()
+
+            fun start() {
+                startedAtNanos.set(System.nanoTime())
+            }
+
+            fun stop() {
+                val startedAt = startedAtNanos.getAndSet(0L)
+                if (startedAt != 0L) accumulatedNanos.addAndGet(System.nanoTime() - startedAt)
+            }
+
+            fun elapsedNanos(): Long {
+                val startedAt = startedAtNanos.get()
+                val running = if (startedAt == 0L) 0L else System.nanoTime() - startedAt
+                return accumulatedNanos.get() + running
+            }
+        }
+
+        /**
+         * Measures the time a person spends at the unknown-host-key prompt so it can be excluded
+         * from the network timeouts.
+         */
+        private fun timedHostKeyVerifier(
+            verifier: HostKeyVerifier,
+            reviewClock: HostKeyReviewClock,
+        ): HostKeyVerifier = HostKeyVerifier { presented ->
+            reviewClock.start()
+            try {
+                verifier.verify(presented)
+            } finally {
+                reviewClock.stop()
+            }
+        }
+
+        /**
+         * Waits for a handshake future while giving the host-key review time back to the deadline,
+         * so a slow confirmation cannot fail an otherwise healthy connection. Timeouts still apply
+         * to the network phases themselves.
+         */
+        private fun <F> awaitNetworkOperation(
+            future: F,
+            timeout: Duration,
+            reviewClock: HostKeyReviewClock,
+        ) where F : SshFuture<F>, F : VerifiableFuture<F> {
+            val startedAt = System.nanoTime()
+            while (!future.await(NETWORK_POLL_MILLIS, TimeUnit.MILLISECONDS)) {
+                val networkNanos = System.nanoTime() - startedAt - reviewClock.elapsedNanos()
+                if (networkNanos >= timeout.toNanos()) {
+                    throw java.net.SocketTimeoutException(
+                        "SSH operation timed out after ${timeout.toMillis()} msec",
+                    )
+                }
+            }
+            future.verify()
+        }
+
+        private fun verifyKeyboardInteractive(
+            authFuture: AuthFuture,
+            interaction: KeyboardUserInteraction,
+            timeout: Duration,
+        ) {
+            var networkDeadline = System.nanoTime() + timeout.toNanos()
             while (!authFuture.await(100, TimeUnit.MILLISECONDS)) {
                 if (interaction.awaitingResponse.get()) {
-                    networkDeadline = System.nanoTime() + AUTH_TIMEOUT.toNanos()
+                    networkDeadline = System.nanoTime() + timeout.toNanos()
                 } else if (System.nanoTime() >= networkDeadline) {
                     throw java.net.SocketTimeoutException("SSH authentication timed out")
                 }

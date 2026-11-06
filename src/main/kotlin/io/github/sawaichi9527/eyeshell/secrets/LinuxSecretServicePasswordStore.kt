@@ -76,6 +76,17 @@ internal class LinuxSecretServicePasswordStore(
         "profile-id" to profileId.toString(),
     )
 
+    /**
+     * Releases the shared D-Bus transport.
+     *
+     * dbus-java's sender thread is not a daemon thread, so an open connection keeps the JVM alive
+     * after the window closes. The library also installs a shutdown hook, but that hook can never
+     * run while its own sender thread is still holding the process open.
+     */
+    override fun close() {
+        collections.disconnect()
+    }
+
     private inline fun <T> withCollection(operation: String, action: (SecretCollection) -> T): T = try {
         collections.open().use { collection ->
             if (collection.isLocked()) collection.unlock()
@@ -93,6 +104,9 @@ internal class LinuxSecretServicePasswordStore(
 
 internal fun interface SecretCollectionFactory {
     fun open(): SecretCollection
+
+    /** Releases the shared transport. The default no-op keeps in-memory test factories simple. */
+    fun disconnect() = Unit
 }
 
 internal interface SecretCollection : AutoCloseable {
@@ -110,6 +124,10 @@ internal interface SecretCollection : AutoCloseable {
 
 private object FreedesktopSecretCollectionFactory : SecretCollectionFactory {
     override fun open(): SecretCollection = FreedesktopSecretCollection(SimpleCollection())
+
+    override fun disconnect() {
+        SimpleCollection.disconnect()
+    }
 }
 
 private class FreedesktopSecretCollection(

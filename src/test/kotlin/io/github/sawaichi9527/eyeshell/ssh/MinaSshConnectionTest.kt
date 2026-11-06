@@ -128,6 +128,32 @@ class MinaSshConnectionTest {
     }
 
     @Test
+    fun `slow host key review does not consume the handshake timeout`() {
+        // The confirmation is human-paced: the network windows must not expire while it is open.
+        val reviewMillis = 2_000L
+        val connection = SshAuthentication.Password(password).use { authentication ->
+            MinaSshConnection.connect(
+                endpoint = SshEndpoint("127.0.0.1", server.port, USERNAME),
+                authentication = authentication,
+                knownHostsStore = knownHostsStore(),
+                unknownHostVerifier = HostKeyVerifier {
+                    Thread.sleep(reviewMillis)
+                    true
+                },
+                timeouts = MinaSshConnection.Timeouts(
+                    connect = Duration.ofMillis(750),
+                    auth = Duration.ofMillis(750),
+                ),
+            )
+        }
+        try {
+            connection.openTerminal(columns = 100, rows = 30).close()
+        } finally {
+            connection.close()
+        }
+    }
+
+    @Test
     fun `authenticates with an Ed25519 public key`() {
         val ed25519KeyPair = net.i2p.crypto.eddsa.KeyPairGenerator().generateKeyPair()
         val privateKeyFile = temporaryDirectory.resolve("id_ed25519")

@@ -55,11 +55,9 @@ import javax.swing.JPanel
 import javax.swing.JPasswordField
 import javax.swing.JScrollPane
 import javax.swing.JSeparator
-import javax.swing.JSpinner
 import javax.swing.JTable
 import javax.swing.JTextField
 import javax.swing.ListSelectionModel
-import javax.swing.SpinnerNumberModel
 import javax.swing.SwingUtilities
 import javax.swing.UIManager
 import javax.swing.event.DocumentEvent
@@ -659,7 +657,7 @@ internal class HostCatalogController(
     ): HostEditorResult? {
         val name = JTextField(existing?.draft?.name.orEmpty(), 24)
         val host = JTextField(existing?.draft?.endpoint?.host.orEmpty(), 24)
-        val port = JSpinner(SpinnerNumberModel(existing?.draft?.endpoint?.port ?: 22, 1, 65535, 1))
+        val port = createPortField(existing?.draft?.endpoint?.port ?: 22)
         val username = JTextField(existing?.draft?.endpoint?.username.orEmpty(), 24)
         val authentication = JComboBox(ConnectionAuthenticationMethod.entries.toTypedArray()).apply {
             selectedItem = existing?.draft?.authenticationMethod?.toConnectionMethod()

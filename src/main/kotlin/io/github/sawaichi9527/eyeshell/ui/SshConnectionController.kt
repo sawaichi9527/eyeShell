@@ -42,10 +42,8 @@ import javax.swing.JPanel
 import javax.swing.JPasswordField
 import javax.swing.JCheckBox
 import javax.swing.JComponent
-import javax.swing.JSpinner
 import javax.swing.JTextArea
 import javax.swing.JTextField
-import javax.swing.SpinnerNumberModel
 import javax.swing.SwingUtilities
 
 internal class SshConnectionController(
@@ -464,7 +462,7 @@ internal class SshConnectionController(
         val jumpStoreStatus = jumpCredential.storeStatus
         val jumpSource = jumpCredential.source
         val hostField = JTextField(preset?.endpoint?.host.orEmpty(), 24)
-        val portSpinner = JSpinner(SpinnerNumberModel(preset?.endpoint?.port ?: 22, 1, 65535, 1))
+        val portSpinner = createPortField(preset?.endpoint?.port ?: 22)
         val usernameField = JTextField(preset?.endpoint?.username.orEmpty(), 24)
         val authenticationField = JComboBox(ConnectionAuthenticationMethod.entries.toTypedArray()).apply {
             selectedItem = preset?.authenticationMethod ?: ConnectionAuthenticationMethod.PASSWORD
