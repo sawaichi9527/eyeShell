@@ -376,6 +376,16 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 
 ## Validation Evidence
 
+### 2026-11-06 session close (0.1.7 released)
+
+- Commands: `git status --short --branch`; `git diff --stat`; `scripts\gradlew-local.cmd test check --rerun-tasks --console=plain`; `git diff --check`.
+- Executed at: 2026-11-06T21:22+08:00, duration 1m31s (all 12 tasks executed, no cache reuse).
+- Exit codes: 0 for the suite, `check`, and the diff check.
+- Result: **434 tests: 434 executed, 0 failures, 0 errors, 24 skipped**; `check` passed. Working tree clean, `main` in sync with `origin/main` at HEAD `93f60f1`; `v0.1.7` and the `v0.1.7` release are published.
+- Test environment: Windows 11 x64, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 with caches under `.local/gradle-home`, Kotlin 2.4.10.
+- Artifacts: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`; `build\package\eyeShell-0.1.7.zip` (72,739,442 bytes, 448 entries, SHA-256 `18bc886e0d59990b7479008cab8861c7368fb9e01497cf5ed06ee1804704a3cd`); https://github.com/sawaichi9527/eyeShell/releases/tag/v0.1.7.
+- Not verified in this close: no live SSH/SFTP session was driven through the packaged 0.1.7 ZIP (the owner accepted the same tree from `gradlew run`), no Linux build/AppImage for 0.1.7, and no second-machine test of the archive.
+
 ### Release 0.1.7 (Windows portable ZIP, 2026-11-06)
 
 - Version: `build.gradle.kts` declares `version = "0.1.7"`; the packaged jar is `app/eyeShell-0.1.7.jar` and `eyeshell-build.properties` reports `version=0.1.7`.
