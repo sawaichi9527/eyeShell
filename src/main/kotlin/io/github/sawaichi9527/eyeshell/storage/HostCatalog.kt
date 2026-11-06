@@ -49,4 +49,12 @@ interface HostCatalog : AutoCloseable {
     fun updateHost(id: Long, host: HostDraft): SavedHost
 
     fun deleteHost(id: Long)
+
+    /**
+     * Applies a Saved hosts import as one unit of work, keeping each profile identity so jump-host
+     * references survive. The default rejects the operation, so small test catalogs do not have to
+     * model bulk writes.
+     */
+    fun importHosts(hosts: List<ImportedHost>): HostImportOutcome =
+        throw UnsupportedOperationException("Host import is not supported by this catalog")
 }

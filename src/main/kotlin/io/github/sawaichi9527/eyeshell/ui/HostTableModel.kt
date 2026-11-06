@@ -17,8 +17,8 @@ internal sealed interface HostRow {
  * Flattens the grouped host catalog into the rows a tree-table shows.
  *
  * A group is one row when collapsed and one row plus its hosts when expanded. A non-blank filter
- * matches hosts only (by name, host, port, user, authentication, or group), shows matching hosts
- * under their folder regardless of the collapsed state, and hides folders with no match.
+ * matches hosts only (by name, host, port, user, authentication, group, tag, or remark), shows
+ * matching hosts under their folder regardless of the collapsed state, and hides folders with no match.
  */
 internal object HostTableRows {
     fun build(hosts: List<SavedHost>, expandedGroups: Set<String>, query: String): List<HostRow> {
@@ -50,6 +50,7 @@ internal object HostTableRows {
             draft.endpoint.username,
             draft.group.orEmpty(),
             draft.remark.orEmpty(),
+            draft.tags.joinToString(" "),
             authLabel(draft.authenticationMethod),
         ).any { value -> value.lowercase(Locale.ROOT).contains(needle) }
     }
@@ -99,7 +100,9 @@ internal class HostTableModel : AbstractTableModel() {
             USER_COLUMN -> draft.endpoint.username
             AUTH_COLUMN -> HostTableRows.authLabel(draft.authenticationMethod)
             GROUP_COLUMN -> draft.group.orEmpty()
-            else -> draft.remark.orEmpty()
+            REMARK_COLUMN -> draft.remark.orEmpty()
+            TAGS_COLUMN -> draft.tags.joinToString(", ")
+            else -> ""
         }
     }
 
@@ -111,6 +114,7 @@ internal class HostTableModel : AbstractTableModel() {
         const val AUTH_COLUMN = 4
         const val GROUP_COLUMN = 5
         const val REMARK_COLUMN = 6
+        const val TAGS_COLUMN = 7
 
         val COLUMN_KEYS = listOf(
             "host.column.name",
@@ -120,6 +124,7 @@ internal class HostTableModel : AbstractTableModel() {
             "host.column.auth",
             "host.column.group",
             "host.column.remark",
+            "host.column.tags",
         )
     }
 }

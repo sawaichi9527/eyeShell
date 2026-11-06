@@ -395,6 +395,51 @@ class WorkbenchPanelTest {
     }
 
     @Test
+    fun `a saved host name titles the tab while the status line keeps the endpoint`() {
+        val session = TestTerminalSession("named")
+        val host = TestHostSession(session)
+        lateinit var window: EyeShellWindow
+
+        onEdt {
+            window = EyeShellWindow(
+                terminalViewFactory = { TestTerminalView(JPanel()) },
+                connectAction = {},
+                closeAction = {},
+            )
+            window.attachTerminal(host, session, reconnectPreset().copy(displayName = "Freelancer"))
+        }
+
+        try {
+            val tabs = onEdt { window.findByName("sessionTabs") as JTabbedPane }
+            val status = onEdt { window.findByName("connectionStatus") as JLabel }
+            onEdt {
+                assertEquals("Freelancer", tabs.getTitleAt(0))
+                assertTrue(
+                    status.text.contains("operator@test.example:22"),
+                    "The status line must keep the endpoint, but was: ${status.text}",
+                )
+                assertFalse(status.text.contains("Freelancer"), "The status line must not mirror the tab name")
+                val header = tabs.getTabComponentAt(0) as Container
+                val title = header.components.filterIsInstance<JLabel>().first()
+                assertEquals("Freelancer", title.text)
+                assertTrue(title.toolTipText.orEmpty().contains("operator@test.example:22"))
+            }
+        } finally {
+            onEdt { window.dispose() }
+        }
+    }
+
+    @Test
+    fun `session tabs stay on one row instead of wrapping`() {
+        SwingUtilities.invokeAndWait {
+            val panel = WorkbenchPanel(connectAction = {})
+            val tabs = panel.findByName("sessionTabs") as JTabbedPane
+
+            assertEquals(JTabbedPane.SCROLL_TAB_LAYOUT, tabs.tabLayoutPolicy)
+        }
+    }
+
+    @Test
     fun `the new session button sits right after the last tab`() {
         SwingUtilities.invokeAndWait {
             val panel = WorkbenchPanel(connectAction = {})
@@ -456,10 +501,11 @@ class WorkbenchPanelTest {
     }
 
     @Test
-    fun `tab strip exposes a new connection button`() {
+    fun `tab strip plus opens the saved hosts list instead of the connection dialog`() {
         SwingUtilities.invokeAndWait {
             val connectCount = AtomicInteger()
-            val panel = WorkbenchPanel(connectAction = connectCount::incrementAndGet)
+            val hostsCount = AtomicInteger()
+            val panel = WorkbenchPanel(connectCount::incrementAndGet, hostsCount::incrementAndGet)
             val tabs = panel.findByName("sessionTabs") as JTabbedPane
             val trailing = tabs.getClientProperty("JTabbedPane.trailingComponent") as? JPanel
             val plus = trailing?.components?.firstOrNull() as? JButton
@@ -470,17 +516,18 @@ class WorkbenchPanelTest {
             assertEquals("Start", tabs.getTitleAt(0))
 
             plus.doClick()
-            assertEquals(1, connectCount.get())
+            assertEquals(0, connectCount.get(), "The tab-strip + must not open the quick SSH dialog")
+            assertEquals(1, hostsCount.get())
 
             panel.setConnectionState("Connecting...", true)
-            assertFalse(plus.isEnabled)
+            assertTrue(plus.isEnabled, "Opening Saved hosts must stay available during a connection attempt")
         }
     }
 
     @Test
-    fun `new connection button is disabled without a connect action`() {
+    fun `new connection button is disabled without a hosts action`() {
         SwingUtilities.invokeAndWait {
-            val panel = WorkbenchPanel()
+            val panel = WorkbenchPanel(connectAction = {})
             val tabs = panel.findByName("sessionTabs") as JTabbedPane
             val trailing = tabs.getClientProperty("JTabbedPane.trailingComponent") as? JPanel
             val plus = trailing?.components?.firstOrNull() as? JButton
@@ -964,6 +1011,65 @@ class WorkbenchPanelTest {
         override fun close() {
             isOpen = false
             exitSignal.countDown()
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable(named = "EYESHELL_TEST_TAB_RENDER", matches = "1")
+    fun `renders the tab strip with many sessions for visual inspection`() {
+        lateinit var panel: WorkbenchPanel
+        lateinit var frame: javax.swing.JFrame
+        val previousLookAndFeel = javax.swing.UIManager.getLookAndFeel()
+
+        SwingUtilities.invokeAndWait {
+            com.formdev.flatlaf.FlatDarkLaf.setup()
+            panel = WorkbenchPanel(connectAction = {}, hostsAction = {})
+            frame = javax.swing.JFrame()
+            frame.defaultCloseOperation = javax.swing.JFrame.DISPOSE_ON_CLOSE
+            frame.contentPane = panel
+            frame.setSize(1000, 300)
+            frame.isVisible = true
+        }
+
+        try {
+            repeat(3) { SwingUtilities.invokeAndWait { frame.validate() } }
+            SwingUtilities.invokeAndWait {
+                repeat(8) { index ->
+                    panel.addSession(
+                        title = if (index == 0) "Freelancer" else "session-with-a-long-name-$index",
+                        component = JPanel(),
+                        closeAction = {},
+                        endpointLabel = "operator@192.168.23.${210 + index}:22",
+                    )
+                }
+            }
+            // The scroll layout settles after FlatLaf's later-invoked "ensure selected visible" pass.
+            repeat(4) { SwingUtilities.invokeAndWait { frame.validate() } }
+            SwingUtilities.invokeAndWait {
+                frame.validate()
+                val tabs = panel.findByName("sessionTabs") as JTabbedPane
+                tabs.doLayout()
+                val image = java.awt.image.BufferedImage(
+                    tabs.width.coerceAtLeast(1),
+                    tabs.height.coerceAtLeast(1),
+                    java.awt.image.BufferedImage.TYPE_INT_RGB,
+                )
+                val graphics = image.createGraphics()
+                try {
+                    tabs.printAll(graphics)
+                } finally {
+                    graphics.dispose()
+                }
+                val output = java.nio.file.Path.of("build", "reports", "tab-strip.png")
+                java.nio.file.Files.createDirectories(output.parent)
+                javax.imageio.ImageIO.write(image, "png", output.toFile())
+            }
+        } finally {
+            SwingUtilities.invokeAndWait {
+                frame.dispose()
+                panel.closeSessions()
+                if (previousLookAndFeel != null) javax.swing.UIManager.setLookAndFeel(previousLookAndFeel)
+            }
         }
     }
 }

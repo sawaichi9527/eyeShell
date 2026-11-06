@@ -20,13 +20,21 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 
 - The window titled `eyeShell v<version>` (for example `eyeShell v0.1.2`) opens with the Monitor panel on the left, session tabs on the right, and the bottom dock collapsed.
 - The Monitor header shows a settings gear at its right edge; clicking it opens the Settings dialog.
-- `+` on the tab strip behaves exactly like `Connect...`, is disabled while a connection is in progress, and sits immediately after the last tab.
+- `+` on the tab strip opens the Saved hosts dialog (the same as `Hosts...`), stays enabled while a connection is in progress, and sits immediately after the last tab; only the bottom `Connect...` button opens the ad-hoc SSH dialog.
+- With five or more sessions open, the tab strip stays on one row and scrolls instead of wrapping; every tab stays left-aligned, the strip height does not change, and a long title ends with `…` while its tooltip shows the full name and `user@host:port`.
+- A session opened from a Saved Host shows that profile's Name on its tab; its status line at the bottom still shows `user@host:port`.
 - Closing the last tab restores the `Start` tab.
 
 ## 2. Saved hosts and folders
 
-- `Hosts...` shows a tree table with the columns Name, Host, Port, User, Authentication, Group, and Remark; ungrouped hosts sit at the top level, folders are sorted and labelled with a count, and folder rows expand/collapse on a single click.
-- The filter field above the table matches name, host, port, user, authentication, group, and remark, and keeps matching hosts under their folder; folders with no match are hidden.
+- `Hosts...` shows a tree table with the columns Name, Host, Port, User, Authentication, Group, Remark, and Tags (the same order as the host editor); ungrouped hosts sit at the top level, folders are sorted and labelled with a count, and folder rows expand/collapse on a single click.
+- The filter field above the table matches name, host, port, user, authentication, group, tag, and remark, and keeps matching hosts under their folder; folders with no match are hidden.
+- A Tags value typed in the host editor (`hermes-agent`, `a, b`) shows as `hermes-agent` / `a, b` in the Tags column and is found by the filter.
+- `Export...` writes a `eyeshell-hosts-YYYYMMDD.csv` file; `Import...` reads it back and the summary reports new and updated counts.
+- Exporting and importing the same file twice leaves exactly one profile per host and keeps jump-host references intact.
+- The file never contains a password, private key, or passphrase; opening it in a text editor confirms only the documented columns.
+- A host whose authentication changes from Password to Public Key during import is listed in the confirmation dialog as losing its saved password.
+- The bottom bar separates `Export...`/`Import...` from `Add...`/`Edit...`/`Delete`/`Connect`/`Close` with a vertical line, and the host count on the left is localized.
 - Double-clicking a host row connects to it.
 - Selecting a folder enables only `Add...`, and `Add...` pre-fills that folder into the Group field.
 - Selecting a host enables `Edit...`, `Delete`, and `Connect`.

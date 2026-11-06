@@ -7,6 +7,7 @@ import io.github.sawaichi9527.eyeshell.platform.AppSettings
 import io.github.sawaichi9527.eyeshell.platform.AppIcons
 import io.github.sawaichi9527.eyeshell.platform.I18n
 import io.github.sawaichi9527.eyeshell.ssh.HostSession
+import io.github.sawaichi9527.eyeshell.ssh.SshEndpoint
 import io.github.sawaichi9527.eyeshell.terminal.ReplayTerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalBackgroundImage
 import io.github.sawaichi9527.eyeshell.terminal.TerminalCharsets
@@ -120,10 +121,10 @@ class EyeShellWindow(
                 reconnect != null && workbench.isSessionExited(component) && reconnect(reconnectPreset, component)
             }
             pagesByComponent[component] = page
-            workbench.addSession(hostSession.endpoint.displayName, component, {
+            workbench.addSession(sessionTitle(preset, hostSession.endpoint), component, {
                 pagesByComponent.remove(component)
                 page.close()
-            }, page::sendCommand)
+            }, page::sendCommand, endpointLabel = hostSession.endpoint.displayName)
         } catch (failure: Throwable) {
             try {
                 page.close()
@@ -146,6 +147,13 @@ class EyeShellWindow(
     }
 
     /**
+     * A Saved Host profile names the tab; an ad-hoc connection has no name and keeps the endpoint.
+     * The name is dropped when the endpoint no longer matches the profile that was picked.
+     */
+    private fun sessionTitle(preset: HostConnectionPreset?, endpoint: SshEndpoint): String =
+        preset?.displayName?.takeIf { preset.endpoint == endpoint } ?: endpoint.displayName
+
+    /**
      * Replaces the SSH session of an existing terminal tab in place, so the JediTerm widget,
      * its scrollback, highlight rules, and selection state survive the reconnect.
      * Returns false when the page is gone or its terminal view is still busy; the caller then opens a new tab.
@@ -160,10 +168,10 @@ class EyeShellWindow(
         val page = pagesByComponent[component] ?: return false
         terminal.setCharset(terminalCharset)
         if (!page.reconnect(hostSession, terminal, preset)) return false
-        val title = hostSession.endpoint.displayName
-        workbench.updateSessionTitle(component, title)
+        val title = sessionTitle(preset, hostSession.endpoint)
+        workbench.updateSessionTitle(component, title, hostSession.endpoint.displayName)
         workbench.updateSessionStatus(component, SessionStatus.CONNECTED)
-        workbench.setConnectionState("Connected to $title", false)
+        workbench.setConnectionState(I18n.t("workbench.connectedTo", title), false)
         if (workbench.isSelectedSession(component)) {
             bindMonitorFor(component, resetFirst = true)
             bindSftpFor(component)
@@ -572,9 +580,13 @@ class WorkbenchPanel(
     onOpenSettings: (() -> Unit)? = null,
 ) : JPanel(BorderLayout()) {
     private val canConnect = connectAction != null
+    private val canOpenHosts = hostsAction != null
     private val sessionTabs = JTabbedPane(JTabbedPane.TOP).apply {
         name = "sessionTabs"
         getAccessibleContext().accessibleName = "Sessions"
+        // A single row keeps the tab alignment stable and the terminal area from jumping when a
+        // fifth or sixth session opens; overflowing tabs scroll instead of wrapping.
+        tabLayoutPolicy = JTabbedPane.SCROLL_TAB_LAYOUT
     }
     private val sessions = linkedMapOf<Component, SessionTab>()
     private val emptyStateLabel = JLabel(I18n.t("workbench.empty"), SwingConstants.CENTER).apply {
@@ -597,10 +609,12 @@ class WorkbenchPanel(
     private val newSessionButton = JButton("+").apply {
         name = "newSessionButton"
         toolTipText = I18n.t("workbench.newSession.tooltip")
-        isEnabled = canConnect
+        isEnabled = canOpenHosts
         isFocusable = false
         margin = Insets(0, 6, 0, 6)
-        addActionListener { connectAction?.invoke() }
+        // The "+" belongs to Saved hosts, not to the ad-hoc SSH dialog: only the bottom
+        // Connect... button opens the quick connection form.
+        addActionListener { hostsAction?.invoke() }
     }
     private val sessionTabTrailing = JPanel(BorderLayout()).apply {
         isOpaque = false
@@ -648,14 +662,15 @@ class WorkbenchPanel(
         component: JComponent,
         closeAction: () -> Unit,
         sendCommand: ((String) -> Unit)? = null,
+        endpointLabel: String? = null,
     ) {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal tabs must be added on the Swing EDT" }
         if (sessions.isEmpty()) sessionTabs.remove(emptySession)
-        val tab = SessionTab(title, closeAction, sendCommand)
+        val tab = SessionTab(title, endpointLabel, closeAction, sendCommand)
         sessions[component] = tab
         sessionTabs.addTab(title, component)
         val index = sessionTabs.indexOfComponent(component)
-        sessionTabs.setTabComponentAt(index, createSessionTabHeader(title, component, tab))
+        sessionTabs.setTabComponentAt(index, createSessionTabHeader(tab, component))
         sessionTabs.selectedComponent = component
         setConnectionState(I18n.t("workbench.connectedTo", title), false)
     }
@@ -670,11 +685,13 @@ class WorkbenchPanel(
     }
 
     /** Renames a session tab after an in-place reconnect connected to a different endpoint. */
-    fun updateSessionTitle(component: Component, title: String) {
+    fun updateSessionTitle(component: Component, title: String, endpointLabel: String? = null) {
         check(SwingUtilities.isEventDispatchThread()) { "Session titles must be updated on the Swing EDT" }
         val tab = sessions[component] ?: return
         tab.title = title
+        tab.endpointLabel = endpointLabel
         tab.titleLabel.text = title
+        tab.titleLabel.toolTipDetail = endpointLabel?.takeIf { label -> label != title }
         tab.closeButton.toolTipText = I18n.t("workbench.tab.close", title)
         val index = sessionTabs.indexOfComponent(component)
         if (index >= 0) sessionTabs.setTitleAt(index, title)
@@ -685,7 +702,9 @@ class WorkbenchPanel(
         check(SwingUtilities.isEventDispatchThread()) { "Connection state must be updated on the Swing EDT" }
         this.connecting = connecting
         connectButton.isEnabled = !connecting && canConnect
-        newSessionButton.isEnabled = !connecting && canConnect
+        // Opening the Saved hosts list never starts a connection, so the tab-strip "+" stays
+        // available while another attempt is in flight.
+        newSessionButton.isEnabled = canOpenHosts
         if (connecting || sessions.isEmpty()) {
             connectionStatus.text = message
         } else {
@@ -808,14 +827,14 @@ class WorkbenchPanel(
         if (!connecting) connectionStatus.text = I18n.t("workbench.notConnected")
     }
 
-    private fun createSessionTabHeader(title: String, component: Component, tab: SessionTab): JPanel = JPanel(
+    private fun createSessionTabHeader(tab: SessionTab, component: Component): JPanel = JPanel(
         FlowLayout(FlowLayout.LEADING, 4, 0),
     ).apply {
         isOpaque = false
-        add(tab.titleLabel.also { it.text = title })
+        add(tab.titleLabel.also { it.toolTipDetail = tab.endpointLabel?.takeIf { label -> label != tab.title } })
         add(tab.statusLabel.also { it.text = I18n.t(tab.status.labelKey); it.foreground = tab.status.color })
         add(tab.closeButton.also {
-            it.toolTipText = "Close $title"
+            it.toolTipText = I18n.t("workbench.tab.close", tab.title)
             it.addActionListener { closeSession(component) }
         })
     }
@@ -840,11 +859,14 @@ class WorkbenchPanel(
         if (index < 0) return
         val component = sessionTabs.getComponentAt(index)
         val tab = sessions[component] ?: return
+        // The tab shows the Saved Host name; the status line keeps the real endpoint so a quick
+        // connection and an edited host stay unambiguous.
+        val detail = tab.endpointLabel ?: tab.title
         connectionStatus.text = when (tab.status) {
-            SessionStatus.CONNECTED -> I18n.t("sessionStatus.line.connected", sessionTabs.getTitleAt(index))
-            SessionStatus.EXITED -> I18n.t("sessionStatus.line.exited", sessionTabs.getTitleAt(index))
-            SessionStatus.FAILED -> I18n.t("sessionStatus.line.failed", sessionTabs.getTitleAt(index))
-            SessionStatus.CLOSING -> I18n.t("sessionStatus.line.closing", sessionTabs.getTitleAt(index))
+            SessionStatus.CONNECTED -> I18n.t("sessionStatus.line.connected", detail)
+            SessionStatus.EXITED -> I18n.t("sessionStatus.line.exited", detail)
+            SessionStatus.FAILED -> I18n.t("sessionStatus.line.failed", detail)
+            SessionStatus.CLOSING -> I18n.t("sessionStatus.line.closing", detail)
         }
     }
 
@@ -878,17 +900,23 @@ class WorkbenchPanel(
 
 private class SessionTab(
     title: String,
+    endpointLabel: String?,
     val closeAction: () -> Unit,
     val sendCommand: ((String) -> Unit)? = null,
 ) {
     var title: String = title
+    var endpointLabel: String? = endpointLabel
     var status: SessionStatus = SessionStatus.CONNECTED
-    val titleLabel = JLabel(title)
+    val titleLabel = ElidedLabel(title, TAB_TITLE_MAX_WIDTH)
     val statusLabel = JLabel().apply { name = "sessionStatusLabel" }
     val closeButton = JButton("x").apply {
         name = "closeSessionButton"
         margin = Insets(0, 4, 0, 4)
         isFocusable = false
+    }
+
+    private companion object {
+        const val TAB_TITLE_MAX_WIDTH = 240
     }
 }
 

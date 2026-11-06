@@ -205,6 +205,7 @@ internal class SshConnectionController(
                     endpoint = request.endpoint,
                     authenticationMethod = request.authentication.toConnectionMethod(),
                     jumpHost = request.jumpHost,
+                    displayName = request.displayName,
                 )
                 SwingUtilities.invokeLater {
                     if (owner.isDisplayable && !closed.get()) {
@@ -561,6 +562,7 @@ internal class SshConnectionController(
                 credentialRevision = credentialRevision,
                 jumpHost = jump,
                 jumpAuthentication = jumpAuthentication,
+                displayName = preset?.displayName?.takeIf { preset.endpoint == endpoint },
             )).also { jumpAuthentication = null }
         } catch (failure: IllegalArgumentException) {
             jumpAuthentication?.close()
@@ -689,6 +691,8 @@ internal class SshConnectionController(
         val credentialRevision: Long?,
         val jumpHost: JumpHostPreset? = null,
         val jumpAuthentication: SshAuthentication? = null,
+        /** Saved Host name kept only while the dialog endpoint still matches that profile. */
+        val displayName: String? = null,
     ) : AutoCloseable {
         override fun close() {
             authentication.close()
@@ -837,6 +841,8 @@ internal data class HostConnectionPreset(
     val endpoint: SshEndpoint,
     val authenticationMethod: ConnectionAuthenticationMethod,
     val jumpHost: JumpHostPreset? = null,
+    /** Saved Host name, shown on the tab instead of `user@host:port`. Null for ad-hoc connections. */
+    val displayName: String? = null,
 )
 
 internal data class JumpHostPreset(

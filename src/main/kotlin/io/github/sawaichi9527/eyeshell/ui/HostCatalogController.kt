@@ -8,11 +8,16 @@ import io.github.sawaichi9527.eyeshell.secrets.ProfileCredentialGuard
 import io.github.sawaichi9527.eyeshell.secrets.SessionPasswordCache
 import io.github.sawaichi9527.eyeshell.storage.HostCatalog
 import io.github.sawaichi9527.eyeshell.storage.HostDraft
+import io.github.sawaichi9527.eyeshell.storage.HostTransferError
+import io.github.sawaichi9527.eyeshell.storage.HostTransferException
+import io.github.sawaichi9527.eyeshell.storage.HostTransferFile
+import io.github.sawaichi9527.eyeshell.storage.ImportedHost
 import io.github.sawaichi9527.eyeshell.storage.SavedAuthenticationMethod
 import io.github.sawaichi9527.eyeshell.storage.SavedHost
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Component
+import java.awt.Dimension
 import java.awt.FlowLayout
 import java.awt.Font
 import java.awt.Graphics
@@ -26,6 +31,10 @@ import java.awt.event.MouseEvent
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
 import java.awt.geom.Path2D
+import java.io.File
+import java.nio.file.Path
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
@@ -38,12 +47,14 @@ import javax.swing.JButton
 import javax.swing.JCheckBox
 import javax.swing.JComboBox
 import javax.swing.JDialog
+import javax.swing.JFileChooser
 import javax.swing.JLabel
 import javax.swing.JList
 import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JPasswordField
 import javax.swing.JScrollPane
+import javax.swing.JSeparator
 import javax.swing.JSpinner
 import javax.swing.JTable
 import javax.swing.JTextField
@@ -53,6 +64,7 @@ import javax.swing.SwingUtilities
 import javax.swing.UIManager
 import javax.swing.event.DocumentEvent
 import javax.swing.event.DocumentListener
+import javax.swing.filechooser.FileNameExtensionFilter
 import javax.swing.table.DefaultTableCellRenderer
 
 internal class HostCatalogController(
@@ -158,13 +170,14 @@ internal class HostCatalogController(
             fillsViewportHeight = true
             tableHeader.reorderingAllowed = false
             setDefaultRenderer(Any::class.java, HostTableRenderer())
-            columnModel.getColumn(HostTableModel.NAME_COLUMN).preferredWidth = 200
-            columnModel.getColumn(HostTableModel.HOST_COLUMN).preferredWidth = 170
-            columnModel.getColumn(HostTableModel.PORT_COLUMN).preferredWidth = 55
-            columnModel.getColumn(HostTableModel.USER_COLUMN).preferredWidth = 110
-            columnModel.getColumn(HostTableModel.AUTH_COLUMN).preferredWidth = 130
-            columnModel.getColumn(HostTableModel.GROUP_COLUMN).preferredWidth = 110
-            columnModel.getColumn(HostTableModel.REMARK_COLUMN).preferredWidth = 150
+            columnModel.getColumn(HostTableModel.NAME_COLUMN).preferredWidth = 160
+            columnModel.getColumn(HostTableModel.HOST_COLUMN).preferredWidth = 140
+            columnModel.getColumn(HostTableModel.PORT_COLUMN).preferredWidth = 50
+            columnModel.getColumn(HostTableModel.USER_COLUMN).preferredWidth = 90
+            columnModel.getColumn(HostTableModel.AUTH_COLUMN).preferredWidth = 100
+            columnModel.getColumn(HostTableModel.GROUP_COLUMN).preferredWidth = 100
+            columnModel.getColumn(HostTableModel.REMARK_COLUMN).preferredWidth = 140
+            columnModel.getColumn(HostTableModel.TAGS_COLUMN).preferredWidth = 140
         }
         val search = JTextField().apply {
             name = "hostCatalogSearch"
@@ -177,6 +190,13 @@ internal class HostCatalogController(
         val delete = JButton(I18n.t("hostcat.delete")).apply { isEnabled = false }
         val connectButton = JButton(I18n.t("hostcat.connect")).apply { isEnabled = false }
         val close = JButton(I18n.t("hostcat.close"))
+        val exportButton = JButton(I18n.t("hostcat.export")).apply { name = "hostCatalogExport" }
+        val importButton = JButton(I18n.t("hostcat.import")).apply { name = "hostCatalogImport" }
+        val fileButtonSeparator = JSeparator(JSeparator.VERTICAL).apply {
+            preferredSize = Dimension(1, 20)
+            minimumSize = Dimension(1, 20)
+            maximumSize = Dimension(1, 20)
+        }
         val dialog = JDialog(owner, I18n.t("hostcat.savedHosts"), false).apply {
             name = "hostCatalogDialog"
             defaultCloseOperation = JDialog.DISPOSE_ON_CLOSE
@@ -187,6 +207,9 @@ internal class HostCatalogController(
                 add(JPanel(BorderLayout()).apply {
                     add(status, BorderLayout.WEST)
                     add(JPanel(FlowLayout(FlowLayout.TRAILING, 6, 0)).apply {
+                        add(exportButton)
+                        add(importButton)
+                        add(fileButtonSeparator)
                         add(add)
                         add(edit)
                         add(delete)
@@ -195,10 +218,14 @@ internal class HostCatalogController(
                     }, BorderLayout.EAST)
                 }, BorderLayout.SOUTH)
             }
-            setSize(840, 460)
+            setSize(980, 470)
             setLocationRelativeTo(owner)
         }
-        val state = DialogState(dialog, table, model, search, status, listOf(add, edit, delete, connectButton))
+        val state = DialogState(
+            dialog, table, model, search, status,
+            listOf(add, edit, delete, connectButton),
+            listOf(exportButton, importButton),
+        )
         fun updateSelectionActions() {
             val selected = selectedHost(state) != null && state.busy.not()
             edit.isEnabled = selected
@@ -320,6 +347,8 @@ internal class HostCatalogController(
             val selected = selectedHost(state) ?: return@addActionListener
             connectHost(selected, closeOnStart = true)
         }
+        exportButton.addActionListener { exportHosts(state) }
+        importButton.addActionListener { importHosts(state) }
         close.addActionListener { dialog.dispose() }
         dialog.addWindowListener(object : WindowAdapter() {
             override fun windowClosed(event: WindowEvent) {
@@ -331,7 +360,7 @@ internal class HostCatalogController(
     }
 
     private fun refresh(state: DialogState) {
-        setBusy(state, true, "Loading...")
+        setBusy(state, true, I18n.t("hostcat.loading"))
         submit(
             operation = catalog::listHosts,
             success = { hosts ->
@@ -342,6 +371,155 @@ internal class HostCatalogController(
             failure = { showCatalogFailure(state, it) },
         )
     }
+
+    /** Writes the currently loaded hosts; the interchange file never contains a secret. */
+    private fun exportHosts(state: DialogState) {
+        if (state.busy) return
+        val chooser = JFileChooser().apply {
+            name = "hostCatalogExportChooser"
+            dialogTitle = I18n.t("hostcat.exportTitle")
+            fileFilter = FileNameExtensionFilter(I18n.t("hostcat.fileFilter"), "csv")
+            selectedFile = File("eyeshell-hosts-${LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE)}.csv")
+        }
+        if (chooser.showSaveDialog(state.dialog) != JFileChooser.APPROVE_OPTION) return
+        val target = csvTarget(chooser.selectedFile.toPath())
+        val hosts = currentHosts(state)
+        setBusy(state, true, I18n.t("hostcat.saving"))
+        submit(
+            operation = {
+                HostTransferFile.write(target, hosts)
+                hosts.size
+            },
+            success = { count ->
+                if (!state.dialog.isDisplayable) return@submit
+                setBusy(state, false, I18n.t("hostcat.exportSummary", count))
+                state.status.text = I18n.t("hostcat.exportSummary", count)
+            },
+            failure = { failure ->
+                if (!state.dialog.isDisplayable) return@submit
+                setBusy(state, false, I18n.t("hostcat.exportTitle"))
+                showTransferFailure(state, I18n.t("hostcat.exportFailed", describe(failure)))
+            },
+        )
+    }
+
+    private fun importHosts(state: DialogState) {
+        if (state.busy) return
+        val chooser = JFileChooser().apply {
+            name = "hostCatalogImportChooser"
+            dialogTitle = I18n.t("hostcat.importTitle")
+            fileFilter = FileNameExtensionFilter(I18n.t("hostcat.fileFilter"), "csv")
+        }
+        if (chooser.showOpenDialog(state.dialog) != JFileChooser.APPROVE_OPTION) return
+        val source = chooser.selectedFile.toPath()
+        setBusy(state, true, I18n.t("hostcat.loading"))
+        submit(
+            operation = { HostTransferFile.read(source) },
+            success = { imported ->
+                if (!state.dialog.isDisplayable) return@submit
+                setBusy(state, false, I18n.t("hostcat.importTitle"))
+                confirmImport(state, imported)
+            },
+            failure = { failure ->
+                if (!state.dialog.isDisplayable) return@submit
+                setBusy(state, false, I18n.t("hostcat.importTitle"))
+                showImportFailure(state, failure)
+            },
+        )
+    }
+
+    private fun confirmImport(state: DialogState, imported: List<ImportedHost>) {
+        if (imported.isEmpty()) {
+            state.status.text = I18n.t("hostcat.noHosts")
+            return
+        }
+        val existing = currentHosts(state).associateBy { it.profileId }
+        val plan = planImport(imported, existing.values.toList())
+        val message = buildString {
+            append(I18n.t("hostcat.importConfirm", imported.size, plan.added, plan.updated))
+            if (plan.passwordClearingProfiles.isNotEmpty()) {
+                append("\n\n").append(
+                    I18n.t("hostcat.importAuthClearsPassword", plan.passwordClearingProfiles.size),
+                )
+            }
+        }
+        val confirmed = JOptionPane.showConfirmDialog(
+            state.dialog,
+            message,
+            I18n.t("hostcat.importTitle"),
+            JOptionPane.OK_CANCEL_OPTION,
+            JOptionPane.WARNING_MESSAGE,
+        ) == JOptionPane.OK_OPTION
+        if (!confirmed) return
+        setBusy(state, true, I18n.t("hostcat.saving"))
+        submit(
+            operation = {
+                val outcome = catalog.importHosts(imported)
+                plan.passwordClearingProfiles.forEach { profileId ->
+                    // The host rows are already written; a keyring failure must not undo the import.
+                    runCatching {
+                        credentialGuard.invalidate(profileId) { passwordStore.forget(profileId) }
+                    }
+                    sessionPasswords.invalidate(profileId)
+                }
+                outcome to catalog.listHosts()
+            },
+            success = { (outcome, hosts) ->
+                if (!state.dialog.isDisplayable) return@submit
+                rebuildTable(state, hosts)
+                setBusy(state, false, I18n.t("hostcat.importSummary", outcome.added, outcome.updated))
+                val summary = buildString {
+                    append(I18n.t("hostcat.importSummary", outcome.added, outcome.updated))
+                    if (outcome.missingJumpReferences.isNotEmpty()) {
+                        append("\n\n").append(
+                            I18n.t("hostcat.importJumpMissing", outcome.missingJumpReferences.size),
+                        )
+                    }
+                }
+                state.status.text = I18n.t("hostcat.importSummary", outcome.added, outcome.updated)
+                if (outcome.missingJumpReferences.isNotEmpty()) {
+                    JOptionPane.showMessageDialog(
+                        state.dialog,
+                        summary,
+                        I18n.t("hostcat.importTitle"),
+                        JOptionPane.WARNING_MESSAGE,
+                    )
+                }
+            },
+            failure = { showCatalogFailure(state, it) },
+        )
+    }
+
+    private fun showImportFailure(state: DialogState, failure: Throwable) {
+        val message = when (failure) {
+            is HostTransferException -> when (failure.reason) {
+                HostTransferError.VERSION -> I18n.t("hostcat.importInvalidVersion")
+                else -> I18n.t(
+                    "hostcat.importInvalidRow",
+                    failure.lineNumber ?: 0,
+                    failure.detail.ifEmpty { failure.reason.name },
+                )
+            }
+            else -> I18n.t("hostcat.importFailed", describe(failure))
+        }
+        showTransferFailure(state, message)
+    }
+
+    private fun showTransferFailure(state: DialogState, message: String) {
+        if (!state.dialog.isDisplayable) return
+        JOptionPane.showMessageDialog(
+            state.dialog,
+            message,
+            I18n.t("hostcat.savedHosts"),
+            JOptionPane.ERROR_MESSAGE,
+        )
+    }
+
+    private fun describe(failure: Throwable): String =
+        failure.message?.takeIf(String::isNotBlank) ?: failure.javaClass.simpleName
+
+    private fun csvTarget(path: Path): Path =
+        if (path.fileName.toString().endsWith(".csv", ignoreCase = true)) path else path.resolveSibling("${path.fileName}.csv")
 
     private fun mutate(
         state: DialogState,
@@ -399,6 +577,7 @@ internal class HostCatalogController(
         state.busy = busy
         state.status.text = message
         state.buttons.forEach { it.isEnabled = !busy }
+        state.fileButtons.forEach { it.isEnabled = !busy }
         if (!busy) {
             val selected = selectedHost(state) != null
             state.buttons.drop(1).forEach { it.isEnabled = selected }
@@ -467,8 +646,8 @@ internal class HostCatalogController(
         val shown = state.model.rows().count { it is HostRow.Host }
         state.status.text = when {
             total == 0 -> I18n.t("hostcat.noHosts")
-            state.search.text.isBlank() -> "$total saved hosts"
-            else -> "$shown of $total saved hosts"
+            state.search.text.isBlank() -> I18n.t("hostcat.count", total)
+            else -> I18n.t("hostcat.countFiltered", shown, total)
         }
     }
 
@@ -722,6 +901,7 @@ internal class HostCatalogController(
         val search: JTextField,
         val status: JLabel,
         val buttons: List<JButton>,
+        val fileButtons: List<JButton>,
     ) {
         var busy = false
         var hosts: List<SavedHost> = emptyList()
@@ -752,8 +932,31 @@ internal class HostCatalogController(
     }
 }
 
-internal enum class CredentialAction { NONE, SAVED, CLEARED, SESSION }
+/** How an import will change the catalog, computed before the user confirms it. */
+internal data class ImportPlan(
+    val added: Int,
+    val updated: Int,
+    /** Profiles whose saved password must be forgotten because they leave password authentication. */
+    val passwordClearingProfiles: List<UUID>,
+)
 
+internal fun planImport(imported: List<ImportedHost>, existing: List<SavedHost>): ImportPlan {
+    val byProfile = existing.associateBy { it.profileId }
+    val added = imported.count { host -> host.profileId !in byProfile }
+    val clearing = imported.mapNotNull { host ->
+        val current = byProfile[host.profileId] ?: return@mapNotNull null
+        if (current.draft.authenticationMethod == SavedAuthenticationMethod.PASSWORD &&
+            host.draft.authenticationMethod != SavedAuthenticationMethod.PASSWORD
+        ) {
+            host.profileId
+        } else {
+            null
+        }
+    }
+    return ImportPlan(added, imported.size - added, clearing)
+}
+
+internal enum class CredentialAction { NONE, SAVED, CLEARED, SESSION }
 internal data class HostEditorCredentialState(
     val passwordEnabled: Boolean,
     val rememberEnabled: Boolean,
@@ -797,6 +1000,7 @@ internal fun SavedHost.toPreset(jumpHost: SavedHost? = null): HostConnectionPres
             authenticationMethod = gateway.draft.authenticationMethod.toConnectionMethod(),
         )
     },
+    displayName = draft.name,
 )
 
 private fun SavedAuthenticationMethod.toConnectionMethod(): ConnectionAuthenticationMethod =

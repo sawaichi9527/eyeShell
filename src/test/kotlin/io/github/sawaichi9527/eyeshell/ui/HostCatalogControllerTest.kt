@@ -8,6 +8,7 @@ import io.github.sawaichi9527.eyeshell.secrets.StoredPassword
 import io.github.sawaichi9527.eyeshell.secrets.UnavailablePasswordCredentialStore
 import io.github.sawaichi9527.eyeshell.storage.HostCatalog
 import io.github.sawaichi9527.eyeshell.storage.HostDraft
+import io.github.sawaichi9527.eyeshell.storage.ImportedHost
 import io.github.sawaichi9527.eyeshell.storage.SavedAuthenticationMethod
 import io.github.sawaichi9527.eyeshell.storage.SavedHost
 import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
@@ -97,12 +98,13 @@ class HostCatalogControllerTest {
         assertEquals(savedHost().profileId, preset.profileId)
         assertEquals(ConnectionAuthenticationMethod.PUBLIC_KEY, preset.authenticationMethod)
         assertEquals(
-            setOf("profileId", "endpoint", "authenticationMethod", "jumpHost"),
+            setOf("profileId", "endpoint", "authenticationMethod", "jumpHost", "displayName"),
             HostConnectionPreset::class.java.declaredFields
                 .filterNot { Modifier.isStatic(it.modifiers) }
                 .map { it.name }
                 .toSet(),
         )
+        assertEquals("Lab host", preset.displayName, "The Saved Host name travels with the preset")
     }
 
     @Test
@@ -489,7 +491,7 @@ class HostCatalogControllerTest {
                 host(1, "direct"),
                 host(2, "alpha", "Lab"),
                 host(3, "beta", "Lab"),
-                host(4, "solo", "Zeta"),
+                host(4, "solo", "Zeta", tags = listOf("hermes-agent")),
             ),
         )
         val window = AtomicReference<EyeShellWindow>()
@@ -527,6 +529,10 @@ class HostCatalogControllerTest {
                     listOf("", "", "", "", "", "備援機"),
                     columnValues(table, HostTableModel.REMARK_COLUMN),
                 )
+                assertEquals(
+                    listOf("", "", "", "", "", "hermes-agent"),
+                    columnValues(table, HostTableModel.TAGS_COLUMN),
+                )
 
                 val labRow = rowOfGroup(table, "Lab")
                 table.setRowSelectionInterval(labRow, labRow)
@@ -555,7 +561,7 @@ class HostCatalogControllerTest {
                 host(1, "direct"),
                 host(2, "alpha", "Lab"),
                 host(3, "beta", "Lab"),
-                host(4, "solo", "Zeta"),
+                host(4, "solo", "Zeta", tags = listOf("hermes-agent")),
             ),
         )
         val window = AtomicReference<EyeShellWindow>()
@@ -587,6 +593,98 @@ class HostCatalogControllerTest {
         }
     }
 
+    @Test
+    fun `the saved hosts filter matches a tag`() {
+        val catalog = TestCatalog(listOf(host(1, "direct"), host(4, "solo", "Zeta", tags = listOf("hermes-agent"))))
+        val window = AtomicReference<EyeShellWindow>()
+        val controller = AtomicReference<HostCatalogController>()
+        try {
+            SwingUtilities.invokeAndWait {
+                val owner = EyeShellWindow(terminalViewFactory = { NoopTerminalView() })
+                val created = HostCatalogController(catalog, UnavailablePasswordCredentialStore()) { _, _ -> true }
+                window.set(owner)
+                controller.set(created)
+                created.open(owner)
+            }
+
+            val dialog = awaitCatalogDialog()
+            val table = findComponent(dialog, "hostCatalogTable") as JTable
+            val search = findComponent(dialog, "hostCatalogSearch") as JTextField
+
+            SwingUtilities.invokeAndWait {
+                search.text = "hermes"
+
+                assertEquals(listOf("Zeta (1)", "solo"), columnValues(table, HostTableModel.NAME_COLUMN))
+            }
+        } finally {
+            SwingUtilities.invokeAndWait {
+                controller.get()?.close()
+                window.get()?.dispose()
+            }
+        }
+    }
+
+    @Test
+    fun `the saved hosts dialog separates export and import from the host actions`() {
+        val catalog = TestCatalog(listOf(host(1, "direct")))
+        val window = AtomicReference<EyeShellWindow>()
+        val controller = AtomicReference<HostCatalogController>()
+        try {
+            SwingUtilities.invokeAndWait {
+                val owner = EyeShellWindow(terminalViewFactory = { NoopTerminalView() })
+                val created = HostCatalogController(catalog, UnavailablePasswordCredentialStore()) { _, _ -> true }
+                window.set(owner)
+                controller.set(created)
+                created.open(owner)
+            }
+
+            val dialog = awaitCatalogDialog()
+            SwingUtilities.invokeAndWait {
+                val exportButton = findComponent(dialog, "hostCatalogExport") as JButton
+                val importButton = findComponent(dialog, "hostCatalogImport") as JButton
+                assertTrue(exportButton.isEnabled)
+                assertTrue(importButton.isEnabled)
+                assertTrue(findButton(dialog, "Add...").isEnabled)
+                val separators = collect(dialog) { it is javax.swing.JSeparator }.filterIsInstance<javax.swing.JSeparator>()
+                assertEquals(1, separators.size, "The file actions need their own group")
+                assertEquals(javax.swing.JSeparator.VERTICAL, separators.single().orientation)
+            }
+        } finally {
+            SwingUtilities.invokeAndWait {
+                controller.get()?.close()
+                window.get()?.dispose()
+            }
+        }
+    }
+
+    @Test
+    fun `an import plan counts new and updated hosts and password clearing profiles`() {
+        val existing = savedHost()
+        val newProfile = UUID.fromString("00000000-0000-0000-0000-0000000000b2")
+        val imported = listOf(
+            ImportedHost(
+                existing.profileId,
+                existing.draft.copy(authenticationMethod = SavedAuthenticationMethod.PUBLIC_KEY),
+                3,
+            ),
+            ImportedHost(
+                newProfile,
+                HostDraft(
+                    name = "New host",
+                    endpoint = SshEndpoint("new.test", 22, "operator"),
+                    authenticationMethod = SavedAuthenticationMethod.PASSWORD,
+                ),
+                4,
+            ),
+        )
+
+        val plan = planImport(imported, listOf(existing))
+
+        assertEquals(1, plan.added)
+        assertEquals(1, plan.updated)
+        assertEquals(listOf(existing.profileId), plan.passwordClearingProfiles)
+    }
+
     private fun awaitCatalogDialog(): JDialog {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
         while (System.nanoTime() < deadline) {
@@ -607,8 +705,7 @@ class HostCatalogControllerTest {
         error("The saved hosts dialog did not finish loading")
     }
 
-    private fun findComponent(root: Container, name: String): Component? {
-        if (root.name == name) return root
+    private fun findComponent(root: Container, name: String): Component? {        if (root.name == name) return root
         for (child in root.components) {
             if (child.name == name) return child
             if (child is Container) findComponent(child, name)?.let { return it }
@@ -627,6 +724,16 @@ class HostCatalogControllerTest {
             if (child is JButton && child.text == text) found += child
             if (child is Container) collectButtons(child, text, found)
         }
+    }
+
+    private fun collect(root: Container, predicate: (Component) -> Boolean): List<Component> {
+        val found = mutableListOf<Component>()
+        fun walk(component: Component) {
+            if (predicate(component)) found += component
+            if (component is Container) component.components.forEach(::walk)
+        }
+        walk(root)
+        return found
     }
 
     @Test
@@ -699,7 +806,7 @@ class HostCatalogControllerTest {
     private fun columnValues(table: JTable, column: Int): List<String> =
         (0 until table.rowCount).map { row -> table.model.getValueAt(row, column).toString() }
 
-    private fun host(id: Long, name: String, group: String? = null) = SavedHost(
+    private fun host(id: Long, name: String, group: String? = null, tags: List<String> = emptyList()) = SavedHost(
         id,
         UUID(id, 0),
         HostDraft(
@@ -707,6 +814,7 @@ class HostCatalogControllerTest {
             endpoint = SshEndpoint("host$id.test", 22, "operator"),
             authenticationMethod = SavedAuthenticationMethod.PASSWORD,
             group = group,
+            tags = tags,
             remark = if (id == 4L) "備援機" else null,
         ),
     )

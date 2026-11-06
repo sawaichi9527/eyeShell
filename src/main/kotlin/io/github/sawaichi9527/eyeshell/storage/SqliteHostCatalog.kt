@@ -125,6 +125,103 @@ class SqliteHostCatalog(
         }
     }
 
+    @Synchronized
+    override fun importHosts(hosts: List<ImportedHost>): HostImportOutcome = writeTransaction { connection ->
+        if (hosts.isEmpty()) return@writeTransaction HostImportOutcome(0, 0)
+        val existingIds = connection.prepareStatement("SELECT id, profile_uuid FROM hosts").use { statement ->
+            statement.executeQuery().use { results ->
+                buildMap {
+                    while (results.next()) {
+                        put(UUID.fromString(results.getString("profile_uuid")), results.getLong("id"))
+                    }
+                }
+            }
+        }
+        var added = 0
+        var updated = 0
+        hosts.forEach { imported ->
+            val normalized = imported.draft.normalized()
+            val groupId = normalized.group?.let { resolveNameId(connection, "host_groups", it) }
+            val existingId = existingIds[imported.profileId]
+            val hostId = if (existingId == null) {
+                added++
+                connection.prepareStatement(IMPORT_INSERT_HOST).use { statement ->
+                    statement.setString(1, imported.profileId.toString())
+                    statement.setObject(2, groupId)
+                    statement.setString(3, normalized.name)
+                    statement.setString(4, normalized.endpoint.host)
+                    statement.setInt(5, normalized.endpoint.port)
+                    statement.setString(6, normalized.endpoint.username)
+                    statement.setString(7, normalized.authenticationMethod.name)
+                    statement.setString(8, normalized.remark)
+                    statement.executeQuery().use { results ->
+                        check(results.next()) { "Host import did not return an identifier" }
+                        results.getLong(1)
+                    }
+                }
+            } else {
+                updated++
+                connection.prepareStatement(IMPORT_UPDATE_HOST).use { statement ->
+                    statement.setObject(1, groupId)
+                    statement.setString(2, normalized.name)
+                    statement.setString(3, normalized.endpoint.host)
+                    statement.setInt(4, normalized.endpoint.port)
+                    statement.setString(5, normalized.endpoint.username)
+                    statement.setString(6, normalized.authenticationMethod.name)
+                    statement.setString(7, normalized.remark)
+                    statement.setString(8, imported.profileId.toString())
+                    statement.executeUpdate()
+                }
+                existingId
+            }
+            replaceTags(connection, hostId, normalized.tags)
+        }
+        val missing = applyImportedJumpHosts(connection, hosts)
+        HostImportOutcome(added, updated, missing)
+    }
+
+    /**
+     * Jump references are written after every profile exists. A self reference, a missing target, a
+     * target that already is a jump host, or a cycle inside the file cannot be represented by the
+     * single-hop model, so those references are cleared and reported instead of failing the import.
+     */
+    private fun applyImportedJumpHosts(connection: Connection, hosts: List<ImportedHost>): List<String> {
+        val requested = hosts.mapNotNull { host ->
+            host.draft.jumpHostProfileId?.let { target -> host.profileId to target }
+        }.toMap()
+        if (requested.isEmpty()) return emptyList()
+        val currentJumps = connection.prepareStatement("SELECT profile_uuid, jump_host_uuid FROM hosts").use { statement ->
+            statement.executeQuery().use { results ->
+                buildMap {
+                    while (results.next()) {
+                        put(UUID.fromString(results.getString("profile_uuid")), results.getString("jump_host_uuid"))
+                    }
+                }
+            }
+        }
+        val missing = mutableListOf<String>()
+        val apply = mutableListOf<Pair<UUID, UUID>>()
+        hosts.forEach { host ->
+            val target = requested[host.profileId] ?: return@forEach
+            val targetExists = currentJumps.containsKey(target)
+            val targetHasJump = currentJumps[target] != null
+            val nestedInsideFile = requested.containsKey(target)
+            if (target == host.profileId || !targetExists || targetHasJump || nestedInsideFile) {
+                missing += host.draft.name
+            } else {
+                apply += host.profileId to target
+            }
+        }
+        apply.forEach { (profileId, target) ->
+            connection.prepareStatement(IMPORT_SET_JUMP_HOST).use { statement ->
+                statement.setString(1, target.toString())
+                statement.setString(2, profileId.toString())
+                statement.executeUpdate()
+            }
+        }
+        return missing
+    }
+
     private fun resolveJumpHostReference(
         connection: Connection,
         jumpHostProfileId: UUID?,
@@ -628,6 +725,20 @@ class SqliteHostCatalog(
             SET group_id = ?, name = ?, host = ?, port = ?, username = ?, authentication_method = ?,
                 jump_host_uuid = ?, remark = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
+        """
+        private const val IMPORT_INSERT_HOST = """
+            INSERT INTO hosts(profile_uuid, group_id, name, host, port, username, authentication_method, jump_host_uuid, remark)
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)
+            RETURNING id
+        """
+        private const val IMPORT_UPDATE_HOST = """
+            UPDATE hosts
+            SET group_id = ?, name = ?, host = ?, port = ?, username = ?, authentication_method = ?,
+                jump_host_uuid = NULL, remark = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE profile_uuid = ?
+        """
+        private const val IMPORT_SET_JUMP_HOST = """
+            UPDATE hosts SET jump_host_uuid = ?, updated_at = CURRENT_TIMESTAMP WHERE profile_uuid = ?
         """
         private val PROFILE_ID_MIGRATION_PREFIX = listOf(
             "CREATE TEMP TABLE host_tags_v1 AS SELECT host_id, tag_id FROM host_tags",

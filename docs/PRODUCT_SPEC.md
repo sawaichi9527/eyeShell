@@ -425,6 +425,10 @@ M1I 增加：
 - 每個已建立的 Session tab 擁有獨立 `TerminalView`、JediTerm widget、Search、Current Session Highlight 與 Output controller，不在 tabs 間重用 terminal buffer 或 worker
 - 成功連線建立並選取新 tab；既有 tabs 不阻止後續 Connect，第一版同一時間仍只允許一個 connection dialog／連線嘗試
 - 每個 tab 提供 close action，只關閉該 tab 的 output work、terminal view、SSH shell channel 與 transport；window close 必須嘗試關閉全部 tabs，即使其中一個 close 失敗
+- Session tab 標題：由已儲存主機連線時顯示該 profile 的 display name；快速連線（無 profile）時顯示 `user@host:port`。若連線對話框把 host／port／username 改成與 profile 不同，標題退回 `user@host:port`，不得沿用舊名稱
+- 分頁列固定在單列，超出寬度時以捲動方式瀏覽，不得換行成多列；分頁標題超過上限時以省略號截斷，完整名稱與 `user@host:port` 置於 tooltip
+- 底部狀態列一律顯示實際 endpoint（`user@host:port`），不隨 tab 名稱改成 profile name，讓快速連線與已編輯主機保持可辨識
+- 分頁列尾端的 `+` 等同 workbench 的 `Hosts...`，只開啟已儲存主機清單；Ad-hoc SSH 連線對話框只能由 `Connect...` 開啟
 - Monitor 保持在 Session tabs 外層；Command Input／Quick Tools row 與尚未實作的 SFTP／Commands dock 仍為 workbench 共用 shell，功能接入時必須依 selected session 綁定
 - 額外連線取消或失敗不得把仍存在的 selected session 顯示為 disconnected；無 session 時才顯示全域 disconnected／failure state
 - 第一版尚未由 terminal engine 回報 natural remote exit 至 tab header；remote-exit status callback 為後續 lifecycle hardening，不得虛構 Connected state transition
@@ -843,6 +847,20 @@ LANG=C
 - 第一版不保存 Private Key File path；Password、key content、passphrase、interactive response、agent data 與 credential token 永不進入 catalog model/schema
 - Host Catalog blocking contract 由單一 background virtual-thread executor 序列化；Swing EDT 只接收 immutable results，不直接執行 JDBC
 - `Hosts...` 由 workbench command bar 開啟，不占用 Monitor；active terminal 期間仍可管理 profiles，但 Connect 在執行瞬間拒絕第二個 terminal
+- Saved hosts 表格欄位固定為 Name／Host／Port／User／Authentication／Group／Remark／Tags（與主機編輯器的群組→備註→標籤順序一致）；Tags 以 `, ` 串接顯示，且與 name、host、user、authentication、group、remark 同列於篩選比對範圍
+- 表格底部左側一律顯示主機數量（篩選中顯示「符合／總數」），右側依序為檔案動作（Export、Import）與主機動作（Add、Edit、Delete、Connect、Close），兩組之間以垂直分隔線區隔
+
+### 14.3a Saved hosts 匯出／匯入
+
+- 匯出與匯入使用同一份版本化 CSV（UTF-8 含 BOM、CRLF、RFC 4180 引號跳脫），檔頭為 `# eyeShell saved hosts v1`，欄位固定為 `profileId,name,host,port,username,authentication,group,tags,jumpHostProfileId,remark`
+- 檔案不得包含 Password、Private Key 內容或路徑、Passphrase、Keychain token；匯入也不得讀寫 OS credential store 的既有 secret
+- tags 在單一欄位內以 `;` 分隔
+- 匯出的暫存檔與目標檔位於同一目錄，並以 atomic replace 完成；失敗時不得留下半寫入的檔案
+- 匯入必須先完整解析與驗證；任一列不合法（版本、欄數、UUID、port、驗證方式、重複 profileId）即整批中止並回報列號，不得部分套用
+- 匯入以 `profileId` 為 identity：相同 profileId 更新、不存在則以原 profileId 新增，使 Jump Host 參照得以保留
+- 匯入套用前必須顯示摘要（新增／更新數量），並在驗證方式由 Password 改為其他時明確提示將清除該主機已儲存的密碼
+- Jump Host 參照在寫入本體後才套用；自我參照、目標不存在、目標本身已是 jump host（含檔案內形成的巢狀／循環）一律清除該參照並於結果回報，不阻斷整批匯入
+- 匯入完成後以既有的 `profileId` 為單位清除不再使用密碼的 profile 之 saved password 與 session password cache
 
 ### 14.4 Secret 儲存
 

@@ -348,6 +348,88 @@ class SqliteHostCatalogTest {
         }
     }
 
+    @Test
+    fun `an import adds new profiles with their identity and updates existing ones`() {
+        val database = temporaryDirectory.resolve("import.db")
+        val existing = SqliteHostCatalog(database).use { catalog ->
+            catalog.createHost(draft("Keep", "keep.example"))
+        }
+        val addedProfile = java.util.UUID.fromString("00000000-0000-0000-0000-0000000000b1")
+
+        val outcome = SqliteHostCatalog(database).use { catalog ->
+            catalog.importHosts(
+                listOf(
+                    ImportedHost(
+                        existing.profileId,
+                        draft("Renamed", "renamed.example").copy(tags = listOf("imported")),
+                        3,
+                    ),
+                    ImportedHost(addedProfile, draft("Added", "added.example"), 4),
+                ),
+            )
+        }
+
+        assertEquals(1, outcome.added)
+        assertEquals(1, outcome.updated)
+        assertTrue(outcome.missingJumpReferences.isEmpty())
+        SqliteHostCatalog(database).use { catalog ->
+            val hosts = catalog.listHosts()
+            assertEquals(2, hosts.size)
+            val kept = hosts.single { it.profileId == existing.profileId }
+            assertEquals("Renamed", kept.draft.name)
+            assertEquals("renamed.example", kept.draft.endpoint.host)
+            assertEquals(listOf("imported"), kept.draft.tags)
+            val added = hosts.single { it.profileId == addedProfile }
+            assertEquals("Added", added.draft.name)
+        }
+    }
+
+    @Test
+    fun `an import resolves a jump reference when the target is in the file`() {
+        val database = temporaryDirectory.resolve("import-jump.db")
+        val bastion = java.util.UUID.fromString("00000000-0000-0000-0000-0000000000c1")
+        val target = java.util.UUID.fromString("00000000-0000-0000-0000-0000000000c2")
+
+        SqliteHostCatalog(database).use { catalog ->
+            catalog.importHosts(
+                listOf(
+                    ImportedHost(bastion, draft("Bastion", "bastion.example"), 3),
+                    ImportedHost(target, draft("Target", "target.example").copy(jumpHostProfileId = bastion), 4),
+                ),
+            )
+        }
+
+        SqliteHostCatalog(database).use { catalog ->
+            val hosts = catalog.listHosts().associateBy { it.profileId }
+            assertEquals(bastion, hosts.getValue(target).draft.jumpHostProfileId)
+        }
+    }
+
+    @Test
+    fun `an import clears a jump reference that the single-hop model cannot represent`() {
+        val database = temporaryDirectory.resolve("import-bad-jump.db")
+        val bastion = java.util.UUID.fromString("00000000-0000-0000-0000-0000000000d1")
+        val middle = java.util.UUID.fromString("00000000-0000-0000-0000-0000000000d2")
+        val leaf = java.util.UUID.fromString("00000000-0000-0000-0000-0000000000d3")
+
+        val outcome = SqliteHostCatalog(database).use { catalog ->
+            catalog.importHosts(
+                listOf(
+                    ImportedHost(bastion, draft("Bastion", "bastion.example"), 3),
+                    ImportedHost(middle, draft("Middle", "middle.example").copy(jumpHostProfileId = bastion), 4),
+                    ImportedHost(leaf, draft("Leaf", "leaf.example").copy(jumpHostProfileId = middle), 5),
+                ),
+            )
+        }
+
+        assertEquals(listOf("Leaf"), outcome.missingJumpReferences)
+        SqliteHostCatalog(database).use { catalog ->
+            val hosts = catalog.listHosts().associateBy { it.profileId }
+            assertEquals(bastion, hosts.getValue(middle).draft.jumpHostProfileId)
+            assertNull(hosts.getValue(leaf).draft.jumpHostProfileId)
+        }
+    }
+
     private fun draft(name: String, host: String) = HostDraft(
         name = name,
         endpoint = SshEndpoint(host, 22, "operator"),
