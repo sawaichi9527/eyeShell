@@ -4,7 +4,7 @@ Older milestone plans and superseded validation evidence are archived in `docs/H
 
 ## Current Status
 
-Version `0.1.7` is cut (2026-11-06) with three fixes on top of the `0.1.6` release: a newly connected or selected session receives keyboard focus immediately; clicking a tab's title text always selects that tab (the tooltip on the title used to swallow the press); and saved-host connections (`Hosts...` → `Connect`, double-click, Enter-to-reconnect) no longer show the SSH dialog when their credentials are usable. The dialog remains only for `Connect...` and for profiles missing an unsaved password or a Private Key file. Full suite runs 434 tests with 0 failures and 24 skips, and `check` passes; the Windows portable package and the `v0.1.7` GitHub release are produced from this commit.
+Version `0.1.7` is cut (2026-11-06) with three fixes on top of the `0.1.6` release: a newly connected or selected session receives keyboard focus immediately; clicking a tab's title text always selects that tab (the tooltip on the title used to swallow the press); and saved-host connections (`Hosts...` → `Connect`, double-click, Enter-to-reconnect) no longer show the SSH dialog when their credentials are usable. The dialog remains only for `Connect...` and for profiles missing an unsaved password or a Private Key file. Full suite runs 434 tests with 0 failures and 24 skips, and `check` passes. Release commit `4364789` and tag `v0.1.7` are pushed, and `eyeShell-0.1.7.zip` is attached to the `v0.1.7` GitHub release (release id `436515716`, asset id `717216128`).
 
 Working tree carries the `0.1.6` release (2026-11-06): version is `0.1.6`, the five owner-reported Windows GUI issues (Tags column, `+` behaviour, tab naming, tab wrapping, host export/import) are implemented, and the Windows portable package was rebuilt as `eyeShell-0.1.6.zip`. Full suite passes (430 tests, 0 failures, 23 skips, `check` passing), the archive contains `app/eyeShell-0.1.6.jar` with `version=0.1.6`, and the extracted `eyeShell.exe` starts without a JDK on `PATH` and titles itself `eyeShell v0.1.6`. Release commit `0d96e7e` and tag `v0.1.6` are pushed, and the ZIP is attached to the `v0.1.6` GitHub release (release id `436276912`, asset id `716503632`).
 
@@ -271,7 +271,7 @@ Cumulative project usage (each line = one session/milestone):
 
 Active work is validation, quality debt, and documentation (2026-10-24 decision).
 
-- `0.1.6` is released for Windows only (portable ZIP); build and attach the Linux AppImage from the Ubuntu host (`./scripts/bootstrap-appimagetool.sh`, `./scripts/gradlew-local.sh appImage`) so both platforms match, then re-run `test check` there.
+- `0.1.7` is released for Windows only (portable ZIP); build and attach the Linux AppImage from the Ubuntu host (`./scripts/bootstrap-appimagetool.sh`, `./scripts/gradlew-local.sh appImage`) so both platforms match, then re-run `test check` there.
 
 - Terminal background image and character encoding are implemented and pass the automated suite on this Windows host; an owner GUI pass is still needed for: choosing a real photo, resize behaviour, a non-UTF-8 host (GBK/BIG5) in a live session, and restart read-back of `terminal.charset` / `terminal.background.*`.
 - M1J, M1K, M1L, and M1M are implemented and validated on Ubuntu 26.04 and re-validated on the Windows host (97 tests, 7 skips, `check` passed); Windows-specific platform validation is complete except the MSI/ZIP installers, which are deferred.- M2 monitoring and SFTP are implemented and Windows-validated (125 tests, 8 skips); both are also validated live against this Linux host (2026-10-24). SFTP drag-and-drop upload and transfer progress percentages are implemented (2026-10-24). Command Snippets are implemented with SQLite persistence and session-bound Run (2026-10-24). Saved Hosts folder tree is implemented (2026-10-24).
@@ -375,6 +375,14 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - The encoding list is fixed to the ten JDK-standard charsets; there is no free-form charset entry, no per-host encoding, and no automatic detection (FinalShell behaves the same way). Export is always UTF-8 regardless of the terminal encoding (PRODUCT_SPEC §10.4).
 
 ## Validation Evidence
+
+### Release 0.1.7 (Windows portable ZIP, 2026-11-06)
+
+- Version: `build.gradle.kts` declares `version = "0.1.7"`; the packaged jar is `app/eyeShell-0.1.7.jar` and `eyeshell-build.properties` reports `version=0.1.7`.
+- Commands: `scripts\gradlew-local.cmd test check --console=plain`; `scripts\gradlew-local.cmd jpackagePortable --console=plain`; `jar --list --file build\package\eyeShell-0.1.7.zip`; `Expand-Archive` into `%TEMP%\opencode\eyeshell-0.1.7-verify`; launch `eyeShell.exe` with `JAVA_HOME`/`JDK_HOME` cleared and `PATH` reduced to the system directories.
+- Result: **434 tests: 434 executed, 0 failures, 0 errors, 24 skipped** and `check` passes. `jpackagePortable` produced `build\package\eyeShell-0.1.7.zip` (**72,739,442 bytes, 448 entries**, SHA-256 `18bc886e0d59990b7479008cab8861c7368fb9e01497cf5ed06ee1804704a3cd`) containing `app/eyeShell-0.1.7.jar`, the 17 dependency jars, and the bundled `runtime/`. The extracted launcher started without a JDK on `PATH`, titled itself `eyeShell v0.1.7`, and was closed cleanly.
+- Release: `git push origin main` pushed `35752c8..4364789`, `git push origin v0.1.7` created the remote tag, and the REST API created release `v0.1.7` (id `436515716`) with `eyeShell-0.1.7.zip` (asset id `717216128`, `state=uploaded`, digest matches the local hash) at https://github.com/sawaichi9527/eyeShell/releases/tag/v0.1.7.
+- Not verified in this entry: no live SSH/SFTP session was driven through this 0.1.7 archive (the owner ran the same tree from `gradlew run` and accepted the three fixes); nothing ran on Linux this session, so no 0.1.7 AppImage exists yet.
 
 ### Saved-host direct connect (0.1.7-SNAPSHOT, 2026-11-06)
 
