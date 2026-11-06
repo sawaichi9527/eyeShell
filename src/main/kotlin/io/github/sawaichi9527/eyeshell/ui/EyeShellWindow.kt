@@ -24,6 +24,8 @@ import java.awt.Insets
 import java.awt.KeyboardFocusManager
 import java.awt.KeyEventDispatcher
 import java.awt.event.KeyEvent
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
 import java.nio.charset.Charset
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -81,6 +83,7 @@ class EyeShellWindow(
         commandsController = commandsController,
         monitorSelectionChanged = { component -> bindMonitorFor(component) },
         sftpSelectionChanged = { component -> bindSftpFor(component) },
+        sessionSelectionChanged = { component -> pagesByComponent[component]?.requestTerminalFocus() },
         onOpenSettings = { settingsController.open(this) },
     )
     private var initialized = false
@@ -173,6 +176,7 @@ class EyeShellWindow(
         workbench.updateSessionStatus(component, SessionStatus.CONNECTED)
         workbench.setConnectionState(I18n.t("workbench.connectedTo", title), false)
         if (workbench.isSelectedSession(component)) {
+            page.requestTerminalFocus()
             bindMonitorFor(component, resetFirst = true)
             bindSftpFor(component)
         }
@@ -328,6 +332,24 @@ internal class TerminalSessionPage(
     }
 
     fun applyFontSize(size: Float) = terminalView.setFontSize(size)
+
+    /**
+     * Moves keyboard focus into the terminal grid.
+     *
+     * Adding or selecting a tab does not move focus by itself in Swing, so a freshly connected
+     * session used to ignore typing until the user clicked it. Called on attach, reconnect, and
+     * every tab selection change; the deferred attempt covers a tab that is still being laid out.
+     */
+    fun requestTerminalFocus() {
+        SwingUtilities.invokeLater {
+            if (closed.get()) return@invokeLater
+            if (!terminalView.component.requestFocusInWindow()) {
+                SwingUtilities.invokeLater {
+                    if (!closed.get()) terminalView.component.requestFocusInWindow()
+                }
+            }
+        }
+    }
 
     fun applyFontFamilies(latin: String, cjk: String) = terminalView.setFontFamilies(latin, cjk)
 
@@ -578,6 +600,7 @@ class WorkbenchPanel(
     monitorSelectionChanged: ((Component) -> Unit)? = null,
     sftpSelectionChanged: ((Component?) -> Unit)? = null,
     onOpenSettings: (() -> Unit)? = null,
+    sessionSelectionChanged: ((Component) -> Unit)? = null,
 ) : JPanel(BorderLayout()) {
     private val canConnect = connectAction != null
     private val canOpenHosts = hostsAction != null
@@ -598,6 +621,7 @@ class WorkbenchPanel(
     private val monitorPanel = MonitorPanel(onOpenSettings = onOpenSettings)
     private val onMonitorSelectionChanged = monitorSelectionChanged
     private val onSftpSelectionChanged = sftpSelectionChanged
+    private val onSessionSelectionChanged = sessionSelectionChanged
     private val connectionStatus = JLabel(I18n.t("workbench.notConnected")).apply {
         name = "connectionStatus"
     }
@@ -645,6 +669,9 @@ class WorkbenchPanel(
             if (selected != null && sessions.containsKey(selected)) {
                 onMonitorSelectionChanged?.invoke(selected)
                 onSftpSelectionChanged?.invoke(selected)
+                // Keyboard focus must follow the selected tab, otherwise a connected session
+                // ignores typing until the user clicks inside the terminal.
+                onSessionSelectionChanged?.invoke(selected)
             } else {
                 monitorPanel.resetToIdle()
                 onSftpSelectionChanged?.invoke(selected)
@@ -827,16 +854,32 @@ class WorkbenchPanel(
         if (!connecting) connectionStatus.text = I18n.t("workbench.notConnected")
     }
 
-    private fun createSessionTabHeader(tab: SessionTab, component: Component): JPanel = JPanel(
-        FlowLayout(FlowLayout.LEADING, 4, 0),
-    ).apply {
-        isOpaque = false
-        add(tab.titleLabel.also { it.toolTipDetail = tab.endpointLabel?.takeIf { label -> label != tab.title } })
-        add(tab.statusLabel.also { it.text = I18n.t(tab.status.labelKey); it.foreground = tab.status.color })
-        add(tab.closeButton.also {
+    private fun createSessionTabHeader(tab: SessionTab, component: Component): JPanel {
+        val header = JPanel(FlowLayout(FlowLayout.LEADING, 4, 0))
+        header.isOpaque = false
+        // A label that carries a tooltip installs ToolTipManager as a mouse listener, which makes
+        // it the mouse target and stops the click from reaching the tabbed pane. Selecting the tab
+        // explicitly keeps the title clickable while its tooltip stays available.
+        val selectTab = object : MouseAdapter() {
+            override fun mousePressed(event: MouseEvent) {
+                if (SwingUtilities.isLeftMouseButton(event)) sessionTabs.selectedComponent = component
+            }
+        }
+        header.add(tab.titleLabel.also {
+            it.toolTipDetail = tab.endpointLabel?.takeIf { label -> label != tab.title }
+            it.addMouseListener(selectTab)
+        })
+        header.add(tab.statusLabel.also {
+            it.text = I18n.t(tab.status.labelKey)
+            it.foreground = tab.status.color
+            it.addMouseListener(selectTab)
+        })
+        header.add(tab.closeButton.also {
             it.toolTipText = I18n.t("workbench.tab.close", tab.title)
             it.addActionListener { closeSession(component) }
         })
+        header.addMouseListener(selectTab)
+        return header
     }
 
     private fun closeSession(component: Component) {

@@ -429,6 +429,8 @@ M1I 增加：
 - 分頁列固定在單列，超出寬度時以捲動方式瀏覽，不得換行成多列；分頁標題超過上限時以省略號截斷，完整名稱與 `user@host:port` 置於 tooltip
 - 底部狀態列一律顯示實際 endpoint（`user@host:port`），不隨 tab 名稱改成 profile name，讓快速連線與已編輯主機保持可辨識
 - 分頁列尾端的 `+` 等同 workbench 的 `Hosts...`，只開啟已儲存主機清單；Ad-hoc SSH 連線對話框只能由 `Connect...` 開啟
+- 新增、切換、重連或關閉分頁後，鍵盤焦點必須自動移到該 session 的 terminal；使用者不得需要先點擊分頁或終端機才能輸入。連線完成當下即可直接打字
+- 分頁標題、狀態文字與標題列空白處的左鍵點擊都必須選取該分頁；標題的 tooltip（完整名稱與 `user@host:port`）不得造成點擊被吞掉
 - Monitor 保持在 Session tabs 外層；Command Input／Quick Tools row 與尚未實作的 SFTP／Commands dock 仍為 workbench 共用 shell，功能接入時必須依 selected session 綁定
 - 額外連線取消或失敗不得把仍存在的 selected session 顯示為 disconnected；無 session 時才顯示全域 disconnected／failure state
 - 第一版尚未由 terminal engine 回報 natural remote exit 至 tab header；remote-exit status callback 為後續 lifecycle hardening，不得虛構 Connected state transition
@@ -472,6 +474,15 @@ Cloud Relay Transport 不列入首版。
 - 目標 SSH Transport 經跳板建立 ephemeral loopback 轉送；Known Hosts 的比對、寫入與 Changed Host Key 回報一律使用目標 `host:port`，不記錄 loopback 轉送位址
 - 跳板 Host Key 必須在送出跳板憑證前由使用者確認；跳板 key 已信任時，目標 key 僅需單一確認畫面並同時顯示跳板信任狀態；任一 Changed Host Key 一律拒絕
 - 不支援 agent forwarding；ad-hoc 連線的跳板需先保存為 Saved Host
+
+### 8.6 連線入口與二次確認
+
+- 「SSH 連線」對話框只用於下方功能列 `Connect...` 的 ad-hoc 快速連線，以及 profile 仍缺少 catalog 不保存的 secret 時（未儲存的 Password、Private Key File）
+- 已儲存主機清單的 `Connect` 必須直接以該 profile 的 endpoint、驗證方式與 jump host 連線，不得再顯示連線對話框
+- 已結束分頁按 Enter 重連時，同樣必須直接重連；不得再要求使用者按一次「連線」
+- Password profile 只要 OS credential store 或 session password cache 有可用密碼即視為可直接連線；SSH agent 與 keyboard-interactive 亦同（後者於認證過程中顯示 challenge dialog）
+- Jump host 的認證也必須可用；任一 hop 需要密碼而未儲存、或使用 Private Key File 時，才顯示預填的連線對話框
+- 直接連線成功後，密碼仍沿用既有規則存入 session password cache，供下一次重連使用
 
 ---
 

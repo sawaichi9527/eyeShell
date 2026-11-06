@@ -35,7 +35,7 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 - The file never contains a password, private key, or passphrase; opening it in a text editor confirms only the documented columns.
 - A host whose authentication changes from Password to Public Key during import is listed in the confirmation dialog as losing its saved password.
 - The bottom bar separates `Export...`/`Import...` from `Add...`/`Edit...`/`Delete`/`Connect`/`Close` with a vertical line, and the host count on the left is localized.
-- Double-clicking a host row connects to it.
+- Double-clicking a host row connects to it directly; with a usable saved password, agent, or keyboard-interactive profile no SSH dialog appears.
 - Selecting a folder enables only `Add...`, and `Add...` pre-fills that folder into the Group field.
 - Selecting a host enables `Edit...`, `Delete`, and `Connect`.
 - Expanding/collapsing folders survives an add or edit; the edited host stays selected (its folder expands if the host moved).
@@ -51,7 +51,9 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 ## 3. Connection flows
 
 - Password, Public Key (with and without passphrase), keyboard-interactive, and agent each open a terminal.
-- Connecting to a Saved Host with a stored password shows `********` in the empty Password field; typing removes the mask, and leaving it untouched uses the stored password.
+- `Connect...` is the only button that always opens the SSH dialog, for ad-hoc connections that are not saved.
+- `Hosts...` → `Connect` connects straight to the selected profile when its credentials are usable; the dialog only appears for a profile that still needs a secret the catalog never stores (a password that was not saved, or a Public Key file).
+- Connecting to a Saved Host with a stored password shows `********` in the empty Password field when the dialog does appear; typing removes the mask, and leaving it untouched uses the stored password.
 - A new host key shows the confirmation screen; rejecting it aborts the connection.
 - A changed host key is rejected with no automatic replacement prompt.
 
@@ -64,9 +66,11 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 
 ## 5. Session lifecycle
 
+- Typing works immediately after a connection completes: the terminal has keyboard focus without clicking the tab or the terminal first. Switching to another session tab also moves the focus to that terminal, and reconnecting an exited tab puts the cursor back in the shell.
+- Clicking anywhere in a tab header — the title text (which has a tooltip), the status text, or the empty space — selects that tab on the first click.
 - Typing `exit` marks the tab `Exited` and keeps the scrollback visible.
-- Pressing Enter in the exited session reconnects **into the same tab**: the tab title and position stay, the previous scrollback remains above the new shell's output, and the password typed for that session is reused without asking again.
-- Cancelling the reconnect dialog and pressing Enter again reopens it; a failed attempt can be retried the same way.
+- Pressing Enter in the exited session reconnects **into the same tab** without showing the SSH dialog: the tab title and position stay, the previous scrollback remains above the new shell's output, and the password typed for that session is reused without asking again.
+- If a reconnect needs a missing secret and its dialog is cancelled, pressing Enter again reopens it; a failed attempt can be retried the same way.
 - Exiting while an alternate-screen application (for example `vim` or `less`) was killed leaves no alternate-screen residue after the reconnect.
 - Editing the Host/Port before connecting on a reconnect renames the tab to the new endpoint instead of leaving the old name.
 - A new session never shows another session's output in the same tab.

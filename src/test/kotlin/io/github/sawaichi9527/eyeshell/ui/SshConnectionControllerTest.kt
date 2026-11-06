@@ -27,6 +27,17 @@ import org.junit.jupiter.api.Test
 
 class SshConnectionControllerTest {
     @Test
+    fun `only profiles without a usable secret need the connection dialog`() {
+        assertTrue(connectionNeedsDialog(ConnectionAuthenticationMethod.PASSWORD, hasPassword = false))
+        assertFalse(connectionNeedsDialog(ConnectionAuthenticationMethod.PASSWORD, hasPassword = true))
+        assertTrue(connectionNeedsDialog(ConnectionAuthenticationMethod.PUBLIC_KEY, hasPassword = true))
+        assertFalse(connectionNeedsDialog(ConnectionAuthenticationMethod.SSH_AGENT, hasPassword = false))
+        assertFalse(
+            connectionNeedsDialog(ConnectionAuthenticationMethod.KEYBOARD_INTERACTIVE, hasPassword = false),
+        )
+    }
+
+    @Test
     fun `describes the full cause chain`() {
         val failure = IllegalStateException(
             "Could not open terminal tab",

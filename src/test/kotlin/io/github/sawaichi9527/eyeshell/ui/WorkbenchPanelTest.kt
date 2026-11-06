@@ -440,6 +440,97 @@ class WorkbenchPanelTest {
     }
 
     @Test
+    fun `selecting a session notifies the terminal focus hook`() {
+        SwingUtilities.invokeAndWait {
+            val focused = java.util.concurrent.atomic.AtomicReference<Component?>()
+            val panel = WorkbenchPanel(connectAction = {}, sessionSelectionChanged = { focused.set(it) })
+            val firstView = TestTerminalView(JPanel())
+            val secondView = TestTerminalView(JPanel())
+            val firstPage = TerminalSessionPage(panel, firstView, TestHostSession(TestTerminalSession("first"))).also { it.attach() }
+            val secondPage = TerminalSessionPage(panel, secondView, TestHostSession(TestTerminalSession("second"))).also { it.attach() }
+            panel.addSession("first", firstPage.component, firstPage::close)
+            panel.addSession("second", secondPage.component, secondPage::close)
+            val tabs = panel.findByName("sessionTabs") as JTabbedPane
+
+            assertSame(secondPage.component, focused.get(), "A new session must take the keyboard focus")
+            tabs.selectedComponent = firstPage.component
+            assertSame(firstPage.component, focused.get(), "Switching tabs must move the keyboard focus")
+
+            panel.closeSessions()
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable(named = "EYESHELL_TEST_FOCUS", matches = "1")
+    fun `a newly attached session receives keyboard focus`() {
+        lateinit var window: EyeShellWindow
+        val terminal = JPanel().apply {
+            isFocusable = true
+            name = "focusableTerminal"
+        }
+        val session = BlockingExitTerminalSession("focused-session")
+
+        SwingUtilities.invokeAndWait {
+            window = EyeShellWindow(
+                terminalViewFactory = { TestTerminalView(terminal) },
+                connectAction = {},
+                closeAction = {},
+            )
+            window.isVisible = true
+            window.toFront()
+            window.requestFocus()
+        }
+
+        try {
+            SwingUtilities.invokeAndWait { }
+            SwingUtilities.invokeAndWait {
+                window.attachTerminal(TestHostSession(session), session)
+            }
+            // Let the deferred focus request run, then inspect the real focus owner.
+            SwingUtilities.invokeAndWait { }
+            SwingUtilities.invokeAndWait { }
+            val focusOwner = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
+
+            assertSame(terminal, focusOwner, "Typing must reach the terminal without clicking it")
+        } finally {
+            SwingUtilities.invokeAndWait { window.dispose() }
+        }
+    }
+
+    @Test
+    fun `clicking a tab title selects the tab even though it carries a tooltip`() {
+        SwingUtilities.invokeAndWait {
+            val panel = WorkbenchPanel(connectAction = {})
+            val firstPage = TerminalSessionPage(panel, TestTerminalView(JPanel()), TestHostSession(TestTerminalSession("first"))).also { it.attach() }
+            val secondPage = TerminalSessionPage(panel, TestTerminalView(JPanel()), TestHostSession(TestTerminalSession("second"))).also { it.attach() }
+            panel.addSession("first", firstPage.component, firstPage::close, endpointLabel = "operator@first.example:22")
+            panel.addSession("second", secondPage.component, secondPage::close, endpointLabel = "operator@second.example:22")
+            val tabs = panel.findByName("sessionTabs") as JTabbedPane
+            assertSame(secondPage.component, tabs.selectedComponent)
+
+            val header = tabs.getTabComponentAt(0) as Container
+            val title = header.components.filterIsInstance<JLabel>().first()
+            assertNotNull(title.toolTipText, "The tab title keeps the full name and endpoint as a tooltip")
+            title.dispatchEvent(
+                java.awt.event.MouseEvent(
+                    title,
+                    java.awt.event.MouseEvent.MOUSE_PRESSED,
+                    System.currentTimeMillis(),
+                    0,
+                    title.width / 2,
+                    title.height / 2,
+                    1,
+                    false,
+                    java.awt.event.MouseEvent.BUTTON1,
+                ),
+            )
+
+            assertSame(firstPage.component, tabs.selectedComponent, "Clicking the title must select its tab")
+            panel.closeSessions()
+        }
+    }
+
+    @Test
     fun `the new session button sits right after the last tab`() {
         SwingUtilities.invokeAndWait {
             val panel = WorkbenchPanel(connectAction = {})

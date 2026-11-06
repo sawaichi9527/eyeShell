@@ -86,6 +86,16 @@ internal class SshConnectionController(
             ?: LoadedCredential(CredentialStoreStatus.UNAVAILABLE, null, null, CredentialSource.NONE)
         try {
             while (!closed.get()) {
+                // A saved host that already has usable credentials connects immediately; the
+                // connection dialog is reserved for the ad-hoc Connect... flow and for profiles
+                // that still need a secret the catalog never stores.
+                if (preset != null) {
+                    val direct = directRequest(owner, preset, credential, jumpCredential)
+                    if (direct != null) {
+                        connectRequest(owner, direct, target)
+                        return
+                    }
+                }
                 val password = credential.password?.copyValue()
                 val jumpPassword = jumpCredential.password?.copyValue()
                 val decision = try {
@@ -169,6 +179,66 @@ internal class SshConnectionController(
         if (!snapshot.active) return LoadedCredential(CredentialStoreStatus.UNAVAILABLE, null, null, CredentialSource.NONE)
         val stored = snapshot.value ?: return LoadedCredential(storeStatus, null, null, CredentialSource.NONE)
         return LoadedCredential(safeStoreStatus(), stored, snapshot.revision, CredentialSource.OS_STORE)
+    }
+
+    /**
+     * Builds a connection request from a saved profile without opening the dialog, or returns null
+     * when the profile still needs something only the dialog can collect (a password that is not
+     * saved, or a private-key file that the catalog deliberately never stores).
+     */
+    private fun directRequest(
+        owner: EyeShellWindow,
+        preset: HostConnectionPreset,
+        credential: LoadedCredential,
+        jumpCredential: LoadedCredential,
+    ): ConnectionRequest? {
+        if (connectionNeedsDialog(preset.authenticationMethod, credential.password != null)) return null
+        val jump = preset.jumpHost
+        if (jump != null && connectionNeedsDialog(jump.authenticationMethod, jumpCredential.password != null)) {
+            return null
+        }
+        val authentication = directAuthentication(owner, preset.authenticationMethod, credential) ?: return null
+        val jumpAuthentication = jump?.let { gateway ->
+            directAuthentication(owner, gateway.authenticationMethod, jumpCredential).also { built ->
+                if (built == null) {
+                    authentication.close()
+                    return null
+                }
+            }
+        }
+        return ConnectionRequest(
+            endpoint = preset.endpoint,
+            authentication = authentication,
+            passwordProfileId = preset.profileId.takeIf {
+                preset.authenticationMethod == ConnectionAuthenticationMethod.PASSWORD
+            },
+            rememberPassword = false,
+            credentialRevision = credential.credentialRevision,
+            jumpHost = jump,
+            jumpAuthentication = jumpAuthentication,
+            displayName = preset.displayName,
+        )
+    }
+
+    private fun directAuthentication(
+        owner: EyeShellWindow,
+        method: ConnectionAuthenticationMethod,
+        credential: LoadedCredential,
+    ): SshAuthentication? = when (method) {
+        ConnectionAuthenticationMethod.PASSWORD -> credential.password?.copyValue()?.let { password ->
+            try {
+                SshAuthentication.Password(password)
+            } finally {
+                password.fill('\u0000')
+            }
+        }
+        ConnectionAuthenticationMethod.SSH_AGENT ->
+            runCatching { SshAuthentication.Agent.system() }.getOrNull()
+        ConnectionAuthenticationMethod.KEYBOARD_INTERACTIVE -> SshAuthentication.KeyboardInteractive(
+            responder = KeyboardInteractiveResponder { challenge -> respondToKeyboardInteractive(owner, challenge) },
+            cancel = ::dismissKeyboardInteractiveDialog,
+        )
+        ConnectionAuthenticationMethod.PUBLIC_KEY -> null
     }
 
     private fun connectRequest(owner: EyeShellWindow, request: ConnectionRequest, target: JComponent?) {
@@ -902,4 +972,21 @@ internal enum class ConnectionAuthenticationMethod(
     ;
 
     override fun toString(): String = I18n.t(label)
+}
+
+/**
+ * Whether a saved profile still needs the connection dialog before it can connect.
+ *
+ * The dialog is reserved for the ad-hoc `Connect...` flow and for profiles that need a secret the
+ * catalog deliberately never stores: a password that is not available, or a private-key file.
+ */
+internal fun connectionNeedsDialog(
+    method: ConnectionAuthenticationMethod,
+    hasPassword: Boolean,
+): Boolean = when (method) {
+    ConnectionAuthenticationMethod.PASSWORD -> !hasPassword
+    ConnectionAuthenticationMethod.PUBLIC_KEY -> true
+    ConnectionAuthenticationMethod.SSH_AGENT,
+    ConnectionAuthenticationMethod.KEYBOARD_INTERACTIVE,
+    -> false
 }
