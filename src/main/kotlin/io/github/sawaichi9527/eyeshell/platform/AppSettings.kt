@@ -111,6 +111,34 @@ class AppSettings private constructor(
             save()
         }
 
+    /**
+     * Main-window geometry and maximized state, or `null` when nothing complete is stored. A
+     * partially written or damaged placement is ignored, so startup falls back to the default size
+     * instead of restoring a broken frame.
+     */
+    var windowPlacement: WindowPlacement?
+        get() {
+            val x = properties.getProperty(KEY_WINDOW_X)?.toIntOrNull() ?: return null
+            val y = properties.getProperty(KEY_WINDOW_Y)?.toIntOrNull() ?: return null
+            val width = properties.getProperty(KEY_WINDOW_WIDTH)?.toIntOrNull() ?: return null
+            val height = properties.getProperty(KEY_WINDOW_HEIGHT)?.toIntOrNull() ?: return null
+            if (width <= 0 || height <= 0) return null
+            val maximized = properties.getProperty(KEY_WINDOW_MAXIMIZED)?.toBooleanStrictOrNull() ?: false
+            return WindowPlacement(x, y, width, height, maximized)
+        }
+        set(value) {
+            if (value == null) {
+                WINDOW_KEYS.forEach(properties::remove)
+            } else {
+                properties.setProperty(KEY_WINDOW_X, value.x.toString())
+                properties.setProperty(KEY_WINDOW_Y, value.y.toString())
+                properties.setProperty(KEY_WINDOW_WIDTH, value.width.toString())
+                properties.setProperty(KEY_WINDOW_HEIGHT, value.height.toString())
+                properties.setProperty(KEY_WINDOW_MAXIMIZED, value.maximized.toString())
+            }
+            save()
+        }
+
     private fun save() {
         val target = file ?: return
         try {
@@ -144,6 +172,19 @@ class AppSettings private constructor(
         private const val KEY_TERMINAL_BACKGROUND_ENABLED = "terminal.background.enabled"
         private const val KEY_TERMINAL_BACKGROUND_IMAGE = "terminal.background.image"
         private const val KEY_TERMINAL_BACKGROUND_OPACITY = "terminal.background.opacity"
+        private const val KEY_WINDOW_X = "window.x"
+        private const val KEY_WINDOW_Y = "window.y"
+        private const val KEY_WINDOW_WIDTH = "window.width"
+        private const val KEY_WINDOW_HEIGHT = "window.height"
+        private const val KEY_WINDOW_MAXIMIZED = "window.maximized"
+
+        private val WINDOW_KEYS = listOf(
+            KEY_WINDOW_X,
+            KEY_WINDOW_Y,
+            KEY_WINDOW_WIDTH,
+            KEY_WINDOW_HEIGHT,
+            KEY_WINDOW_MAXIMIZED,
+        )
 
         fun load(file: Path): AppSettings {
             val properties = Properties()

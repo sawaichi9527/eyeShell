@@ -24,6 +24,8 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 - With five or more sessions open, the tab strip stays on one row and scrolls instead of wrapping; every tab stays left-aligned, the strip height does not change, and a long title ends with `…` while its tooltip shows the full name and `user@host:port`.
 - A session opened from a Saved Host shows that profile's Name on its tab; its status line at the bottom still shows `user@host:port`.
 - Closing the last tab restores the `Start` tab.
+- Resizing and moving the window, then closing and reopening eyeShell, restores the same size and position; maximizing before closing reopens maximized, and un-maximizing after the restart returns to the previous normal size.
+- After a resolution change or an unplugged secondary monitor, the window still opens fully reachable on a remaining screen instead of off-screen.
 
 ## 2. Saved hosts and folders
 
@@ -75,6 +77,8 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 - Editing the Host/Port before connecting on a reconnect renames the tab to the new endpoint instead of leaving the old name.
 - A new session never shows another session's output in the same tab.
 - Connection failures show the full cause chain, and monitor/SFTP failures never abort terminal attachment.
+- Clicking the window `X` (or pressing Alt+F4) while any session tab is open shows a confirmation whose default button is `Cancel`; cancelling keeps the window open and every session connected with its scrollback intact.
+- With no sessions open, `X` closes eyeShell immediately without a prompt.
 
 ## 6. Terminal behaviour
 

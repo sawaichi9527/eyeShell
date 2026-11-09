@@ -11,6 +11,7 @@ import java.awt.BorderLayout
 import java.awt.Component
 import java.awt.Container
 import java.awt.Dimension
+import java.awt.event.WindowEvent
 import java.io.Writer
 import java.time.Duration
 import java.util.concurrent.CountDownLatch
@@ -159,6 +160,71 @@ class WorkbenchPanelTest {
             }
         } finally {
             onEdt { window.dispose() }
+        }
+    }
+
+    @Test
+    fun `closing the window with an open session asks before disconnecting`() {
+        val asks = AtomicInteger()
+        val closes = AtomicInteger()
+        val session = TestTerminalSession("close-confirm")
+        lateinit var window: EyeShellWindow
+
+        onEdt {
+            val view = TestTerminalView(JPanel())
+            window = EyeShellWindow(
+                terminalViewFactory = { view },
+                connectAction = {},
+                closeAction = { closes.incrementAndGet() },
+                confirmClose = { asks.incrementAndGet(); false },
+            )
+            window.attachTerminal(TestHostSession(session), session)
+            window.dispatchEvent(WindowEvent(window, WindowEvent.WINDOW_CLOSING))
+
+            assertEquals(1, asks.get(), "closing with an open session must ask first")
+            assertEquals(0, closes.get(), "a cancelled close must keep the session alive")
+        }
+
+        onEdt { window.dispose() }
+    }
+
+    @Test
+    fun `confirming the close disconnects every session`() {
+        val closes = AtomicInteger()
+        val session = TestTerminalSession("close-confirmed")
+        lateinit var window: EyeShellWindow
+
+        onEdt {
+            val view = TestTerminalView(JPanel())
+            window = EyeShellWindow(
+                terminalViewFactory = { view },
+                connectAction = {},
+                closeAction = { closes.incrementAndGet() },
+                confirmClose = { true },
+            )
+            window.attachTerminal(TestHostSession(session), session)
+            window.dispatchEvent(WindowEvent(window, WindowEvent.WINDOW_CLOSING))
+
+            assertEquals(1, closes.get(), "the confirmed close must tear the window down once")
+        }
+    }
+
+    @Test
+    fun `closing an empty window does not ask`() {
+        val asks = AtomicInteger()
+        val closes = AtomicInteger()
+
+        onEdt {
+            val window = EyeShellWindow(
+                terminalViewFactory = { error("no terminal requested") },
+                connectAction = {},
+                closeAction = { closes.incrementAndGet() },
+                confirmClose = { asks.incrementAndGet(); false },
+            )
+            window.dispatchEvent(WindowEvent(window, WindowEvent.WINDOW_CLOSING))
+
+            assertEquals(0, asks.get(), "an empty workbench closes without a prompt")
+            assertEquals(1, closes.get())
         }
     }
 

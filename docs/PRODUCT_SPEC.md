@@ -432,6 +432,8 @@ M1I 增加：
 - 分頁列尾端的 `+` 等同 workbench 的 `Hosts...`，只開啟已儲存主機清單；Ad-hoc SSH 連線對話框只能由 `Connect...` 開啟
 - 新增、切換、重連或關閉分頁後，鍵盤焦點必須自動移到該 session 的 terminal；使用者不得需要先點擊分頁或終端機才能輸入。連線完成當下即可直接打字
 - 分頁標題、狀態文字與標題列空白處的左鍵點擊都必須選取該分頁；標題的 tooltip（完整名稱與 `user@host:port`）不得造成點擊被吞掉
+- 主視窗的正常大小、位置與最大化狀態保存在非機密的 `settings.properties`（`window.x`、`window.y`、`window.width`、`window.height`、`window.maximized`）：關閉時寫入、啟動時還原；還原位置與任何螢幕工作區的交集不足或超出目前解析度時，必須回到主螢幕置中，尺寸限制在最低視窗尺寸與目標螢幕工作區內
+- 關閉主視窗時若仍有開啟中的 session tab，必須先顯示確認對話框，預設動作為「取消」；取消不得關閉視窗、中斷連線或清除 scrollback。沒有 session 時直接關閉，不顯示提示
 - Monitor 保持在 Session tabs 外層；Command Input／Quick Tools row 與尚未實作的 SFTP／Commands dock 仍為 workbench 共用 shell，功能接入時必須依 selected session 綁定
 - 額外連線取消或失敗不得把仍存在的 selected session 顯示為 disconnected；無 session 時才顯示全域 disconnected／failure state
 - 第一版尚未由 terminal engine 回報 natural remote exit 至 tab header；remote-exit status callback 為後續 lifecycle hardening，不得虛構 Connected state transition

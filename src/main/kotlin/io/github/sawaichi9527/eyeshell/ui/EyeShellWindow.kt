@@ -6,6 +6,9 @@ import io.github.sawaichi9527.eyeshell.platform.AppInfo
 import io.github.sawaichi9527.eyeshell.platform.AppSettings
 import io.github.sawaichi9527.eyeshell.platform.AppIcons
 import io.github.sawaichi9527.eyeshell.platform.I18n
+import io.github.sawaichi9527.eyeshell.platform.WindowPlacement
+import io.github.sawaichi9527.eyeshell.platform.resolveWindowPlacement
+import io.github.sawaichi9527.eyeshell.platform.screenWorkAreas
 import io.github.sawaichi9527.eyeshell.ssh.HostSession
 import io.github.sawaichi9527.eyeshell.ssh.SshEndpoint
 import io.github.sawaichi9527.eyeshell.terminal.ReplayTerminalSession
@@ -19,13 +22,19 @@ import java.awt.Color
 import java.awt.Component
 import java.awt.Dimension
 import java.awt.Font
+import java.awt.Frame
 import java.awt.FlowLayout
 import java.awt.Insets
 import java.awt.KeyboardFocusManager
 import java.awt.KeyEventDispatcher
+import java.awt.Rectangle
+import java.awt.event.ComponentAdapter
+import java.awt.event.ComponentEvent
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.awt.event.WindowAdapter
+import java.awt.event.WindowEvent
 import java.nio.charset.Charset
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -36,6 +45,7 @@ import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JFrame
 import javax.swing.JLabel
+import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JSplitPane
 import javax.swing.JTabbedPane
@@ -58,10 +68,16 @@ class EyeShellWindow(
     hostsAction: ((EyeShellWindow) -> Unit)? = null,
     commandsController: CommandsController? = null,
     private val closeAction: () -> Unit = {},
-    appSettings: AppSettings = AppSettings.inMemory(),
+    private val appSettings: AppSettings = AppSettings.inMemory(),
+    /**
+     * Asked before the window closes while sessions are open. The default implementation shows a
+     * localized confirmation; tests inject a stub so they never open a modal dialog.
+     */
+    private val confirmClose: ((sessionCount: Int) -> Boolean)? = null,
 ) : JFrame(AppInfo.windowTitle) {
     private val closed = AtomicBoolean()
     private val pagesByComponent = mutableMapOf<JComponent, TerminalSessionPage>()
+    private var lastNormalBounds: Rectangle? = null
     private var terminalCharset: Charset = TerminalCharsets.charsetFromId(appSettings.terminalCharsetId)
     private var terminalBackgroundImage: TerminalBackgroundImage? = TerminalBackgroundImage.fromSettings(
         enabled = appSettings.terminalBackgroundEnabled,
@@ -89,13 +105,85 @@ class EyeShellWindow(
     private var initialized = false
 
     init {
-        defaultCloseOperation = DISPOSE_ON_CLOSE
-        minimumSize = Dimension(960, 640)
-        size = Dimension(1280, 800)
+        defaultCloseOperation = DO_NOTHING_ON_CLOSE
+        minimumSize = Dimension(WindowPlacement.MINIMUM_WIDTH, WindowPlacement.MINIMUM_HEIGHT)
         contentPane = workbench
         iconImages = AppIcons.images()
-        setLocationRelativeTo(null)
+        restoreWindowPlacement()
+        addComponentListener(object : ComponentAdapter() {
+            override fun componentMoved(event: ComponentEvent) = rememberNormalBounds()
+            override fun componentResized(event: ComponentEvent) = rememberNormalBounds()
+        })
+        addWindowListener(object : WindowAdapter() {
+            override fun windowClosing(event: WindowEvent) {
+                if (mayCloseWindow()) dispose()
+            }
+        })
         initialized = true
+    }
+
+    /**
+     * Applies the stored geometry, or centers the default size on the primary screen. The physical
+     * size is clamped to the current screens so a resolution change cannot restore an oversized or
+     * unreachable window.
+     */
+    private fun restoreWindowPlacement() {
+        val placement = resolveWindowPlacement(
+            stored = appSettings.windowPlacement,
+            screens = screenWorkAreas(),
+            minimumSize = Dimension(WindowPlacement.MINIMUM_WIDTH, WindowPlacement.MINIMUM_HEIGHT),
+        )
+        bounds = placement.bounds
+        lastNormalBounds = placement.bounds
+        if (placement.maximized) {
+            extendedState = extendedState or Frame.MAXIMIZED_BOTH
+        }
+    }
+
+    /** Remembers the size to restore when the user later un-maximizes or closes a maximized window. */
+    private fun rememberNormalBounds() {
+        if (!isVisible) return
+        if (extendedState and (Frame.MAXIMIZED_BOTH or Frame.ICONIFIED) != 0) return
+        lastNormalBounds = bounds
+    }
+
+    private fun saveWindowPlacement() {
+        val state = extendedState
+        val maximized = state and Frame.MAXIMIZED_BOTH == Frame.MAXIMIZED_BOTH
+        val normal = if (maximized || state and Frame.ICONIFIED != 0) lastNormalBounds else bounds
+        val target = normal ?: bounds
+        if (target.width <= 0 || target.height <= 0) return
+        appSettings.windowPlacement = WindowPlacement(
+            target.x,
+            target.y,
+            target.width,
+            target.height,
+            maximized,
+        )
+    }
+
+    /**
+     * Closing with open session tabs asks first, because it disconnects every session and discards
+     * their scrollback. An empty workbench closes immediately; the confirmation defaults to Cancel.
+     */
+    private fun mayCloseWindow(): Boolean {
+        val count = workbench.sessionCount
+        if (count == 0) return true
+        return confirmClose?.invoke(count) ?: confirmClosingWithSessions(count)
+    }
+
+    private fun confirmClosingWithSessions(count: Int): Boolean {
+        val options = arrayOf(I18n.t("window.close.confirm"), I18n.t("window.close.cancel"))
+        return JOptionPane.showOptionDialog(
+            this,
+            I18n.t("window.close.message", count),
+            I18n.t("window.close.title"),
+            JOptionPane.DEFAULT_OPTION,
+            JOptionPane.WARNING_MESSAGE,
+            null,
+            options,
+            options[1],
+        ) == 0
     }
 
     internal fun attachTerminal(
@@ -277,6 +365,7 @@ class EyeShellWindow(
 
     override fun dispose() {
         if (!closed.compareAndSet(false, true)) return
+        saveWindowPlacement()
         var failure: Throwable? = null
         try {
             settingsController.close()

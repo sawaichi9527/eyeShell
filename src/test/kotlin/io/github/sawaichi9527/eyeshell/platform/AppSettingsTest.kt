@@ -3,6 +3,7 @@ package io.github.sawaichi9527.eyeshell.platform
 import java.nio.file.Files
 import java.nio.file.Path
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
@@ -126,5 +127,42 @@ class AppSettingsTest {
         AppSettings.load(file).terminalFontSize = 18
 
         assertEquals(18, AppSettings.load(file).terminalFontSize)
+    }
+
+    @Test
+    fun `the window placement survives a reload`() {
+        val file = directory.resolve("settings.properties")
+        assertNull(AppSettings.load(file).windowPlacement)
+
+        AppSettings.load(file).windowPlacement = WindowPlacement(120, 80, 1400, 900, maximized = true)
+
+        assertEquals(
+            WindowPlacement(120, 80, 1400, 900, maximized = true),
+            AppSettings.load(file).windowPlacement,
+        )
+    }
+
+    @Test
+    fun `an incomplete or damaged window placement is ignored`() {
+        val file = directory.resolve("settings.properties")
+        Files.writeString(file, "window.x=10\nwindow.y=20\nwindow.width=1200\n")
+        assertNull(AppSettings.load(file).windowPlacement)
+
+        Files.writeString(file, "window.x=10\nwindow.y=20\nwindow.width=0\nwindow.height=700\n")
+        assertNull(AppSettings.load(file).windowPlacement)
+
+        Files.writeString(file, "window.x=abc\nwindow.y=20\nwindow.width=1200\nwindow.height=700\n")
+        assertNull(AppSettings.load(file).windowPlacement)
+    }
+
+    @Test
+    fun `clearing the window placement removes its keys`() {
+        val file = directory.resolve("settings.properties")
+        val settings = AppSettings.load(file)
+        settings.windowPlacement = WindowPlacement(10, 20, 1200, 700)
+
+        settings.windowPlacement = null
+
+        assertNull(AppSettings.load(file).windowPlacement)
     }
 }
