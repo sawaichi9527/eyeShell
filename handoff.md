@@ -282,6 +282,8 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 
 - Owner GUI acceptance of the 0.1.8 Windows ZIP: resize/move/maximize then close and restart, the `X`/Alt+F4 confirmation (Cancel keeps every session), and the left-aligned port field in the Saved Host editor and the SSH dialog.
 
+- Diagnose the terminal-tab freeze seen during `sudo apt dist-upgrade` (2026-11-09, second occurrence): next time it happens, record `jcmd <pid> Thread.print`, whether the tab accepts typed input, and `ss -tnp` on both ends; then add a regression test or a visible failure path (file logging plus an emulator-thread exception hook) before changing behaviour.
+
 - Terminal background image and character encoding are implemented and pass the automated suite on this Windows host; an owner GUI pass is still needed for: choosing a real photo, resize behaviour, a non-UTF-8 host (GBK/BIG5) in a live session, and restart read-back of `terminal.charset` / `terminal.background.*`.
 - M1J, M1K, M1L, and M1M are implemented and validated on Ubuntu 26.04 and re-validated on the Windows host (97 tests, 7 skips, `check` passed); Windows-specific platform validation is complete except the MSI/ZIP installers, which are deferred.- M2 monitoring and SFTP are implemented and Windows-validated (125 tests, 8 skips); both are also validated live against this Linux host (2026-10-24). SFTP drag-and-drop upload and transfer progress percentages are implemented (2026-10-24). Command Snippets are implemented with SQLite persistence and session-bound Run (2026-10-24). Saved Hosts folder tree is implemented (2026-10-24).
 - Multi-session resources: the opt-in heap probe measures 3 × 100,000-line sessions at 160 MiB retained (53 MiB per session) inside a 512 MiB test heap (2026-10-24). Repeat it with the highlight rule set grown beyond three rules.
@@ -297,6 +299,7 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 
 ## Known Issues
 
+- A terminal tab can appear frozen during `sudo apt dist-upgrade` on Ubuntu 24.04.5 (reported 2026-11-09, second occurrence): the kernel package progress/`needrestart` output stops updating and the last lines overlap (`Progress: [ 98%] …` followed by `Scanning processes...` and the prompt), while a new tab connects normally and the host reports load 0.0 / CPU 0.2%. The tab's emulator thread is either blocked in `TerminalDataStream.getChar()` (channel or server stopped delivering bytes) or died on an unexpected exception (packaged builds have no console to show it); the EDT itself stayed responsive because a new session could be opened. Not diagnosed yet — capture `jcmd <pid> Thread.print` and the `TerminalEmulator-*` thread state while it recurs, and check `ss -tn` Recv-Q/Send-Q on both ends.
 - The main-window geometry is written when the window is disposed, so a forced termination (Task Manager, power loss) loses the latest size and position. Windows 11 Snap groups are restored as a plain rectangle, not a snap layout.
 - Native Wayland does not let a client place its own window; `window.x`/`window.y` are applied only as far as the compositor allows (the pinned Temurin 21 runtime uses XWayland, where placement works).
 - The close confirmation counts every open session tab, including `Exited` ones, because closing them discards their scrollback; it does not distinguish sessions that are mid-command.
@@ -389,6 +392,16 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - The encoding list is fixed to the ten JDK-standard charsets; there is no free-form charset entry, no per-host encoding, and no automatic detection (FinalShell behaves the same way). Export is always UTF-8 regardless of the terminal encoding (PRODUCT_SPEC §10.4).
 
 ## Validation Evidence
+
+### 2026-11-09 session close (0.1.8 released, 0.1.9-dev started)
+
+- Commands: `git status --short --branch`; `git diff --stat`; `scripts\gradlew-local.cmd test check --console=plain` (final run after the `0.1.9-dev` version bump); earlier in the session `scripts\gradlew-local.cmd jpackagePortable --console=plain`, archive inspection, and a packaged-launch smoke test with `JAVA_HOME`/`JDK_HOME` cleared.
+- Executed at: 2026-11-09T14:45+08:00; test duration 29.7 s (build 48 s).
+- Exit codes: 0 for the full suite and `check`, and 0 for `jpackagePortable`; `git diff --check` reported no whitespace errors.
+- Result: **460 tests: 460 executed, 0 failures, 0 errors, 25 skipped** and `check` passes. Working tree clean, `main` in sync with `origin/main` at `ebb7abb`. Release `0.1.8` is published from `4dc1d65` (tag `v0.1.8`, release id `438810457`) with `eyeShell-0.1.8.zip` (asset id `726501033`); development continues as `0.1.9-dev` (`ebb7abb`). Old local archives (`0.1.5`, `0.1.6`, `0.1.7`, `0.1.8-dev`) were deleted from `build/package/` on the owner's instruction.
+- Test environment: Windows 11 x64, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 with caches under `.local/gradle-home`, Kotlin 2.4.10.
+- Artifacts: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`; `build/package/eyeShell-0.1.8.zip` (72,756,738 bytes, SHA-256 `b5b5edaa11d710fa355e0753adc68512a617a7360e3280cc6df557cb625b43f4`).
+- Not verified in this entry: a live SSH/SFTP session through the 0.1.8 archive; the owner's Windows 10 GUI acceptance (window restore, `X`/Alt+F4 cancel, left-aligned port field); the Linux AppImage for 0.1.8 (deferred to the Ubuntu development host); native Wayland placement.
 
 ### Release 0.1.8 (Windows portable ZIP, 2026-11-09)
 
