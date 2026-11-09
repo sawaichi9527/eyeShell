@@ -4,7 +4,7 @@ Older milestone plans and superseded validation evidence are archived in `docs/H
 
 ## Current Status
 
-Version `0.1.8` is cut (2026-11-09) with the 2026-11-07 fixes already on `origin/main` (left-aligned port fields without digit grouping, Secret Service transport release on close, and host-key review time excluded from the handshake timeout) plus the two changes from this session: the main window now remembers its size, position, and maximized state across restarts, and closing the window while sessions are open asks for confirmation with `Cancel` as the default. Full suite passes with 460 tests, 0 failures and 25 skips, and `check` passes. The Windows portable package is `eyeShell-0.1.8.zip`; the Linux AppImage will be built later on the Ubuntu development host (owner decision), so the release starts with the Windows ZIP only. Development continues as `0.1.9-dev` (2026-11-09).
+Version `0.1.8` is cut (2026-11-09) with the 2026-11-07 fixes already on `origin/main` (left-aligned port fields without digit grouping, Secret Service transport release on close, and host-key review time excluded from the handshake timeout) plus the two changes from this session: the main window now remembers its size, position, and maximized state across restarts, and closing the window while sessions are open asks for confirmation with `Cancel` as the default. Full suite passes with 460 tests, 0 failures and 25 skips, and `check` passes. The Windows portable package is `eyeShell-0.1.8.zip`; the Linux AppImage was built on the Ubuntu development host (2026-11-09) from tag `v0.1.8` and attached to the same release (`eyeShell-0.1.8-x86_64.AppImage`, 72,575,480 bytes, SHA-256 `a470e2f06236fd1f211fb4266b8e8206ea2fedad4ef4485675de2b74e51c4648`). Development continues as `0.1.9-dev` (2026-11-09).
 
 Version `0.1.7` is cut (2026-11-06) with three fixes on top of the `0.1.6` release: a newly connected or selected session receives keyboard focus immediately; clicking a tab's title text always selects that tab (the tooltip on the title used to swallow the press); and saved-host connections (`Hosts...` → `Connect`, double-click, Enter-to-reconnect) no longer show the SSH dialog when their credentials are usable. The dialog remains only for `Connect...` and for profiles missing an unsaved password or a Private Key file. Full suite runs 434 tests with 0 failures and 24 skips, and `check` passes. Release commit `4364789` and tag `v0.1.7` are pushed, and `eyeShell-0.1.7.zip` is attached to the `v0.1.7` GitHub release (release id `436515716`, asset id `717216128`). The Linux AppImage for `0.1.7` was then built and validated on Ubuntu 26.04.1 (Wayland) and attached to the same release (2026-11-06): `eyeShell-0.1.7-x86_64.AppImage` (72,559,096 bytes, SHA-256 `06b087942054f39f6278c5cb3994b63f97dfb8492d61a69c6e875efef8a10b21`, asset id `717632372`) plus its `.sha256` (asset id `717633611`). A real SSH session to `192.168.35.207` was driven through that AppImage (terminal, keyboard focus, Monitor sampling, SFTP listing). The AppImage is deployed to `~/Applications/eyeShell-0.1.7-x86_64.AppImage` with a working `eyeshell.desktop` shortcut (the superseded 0.1.5 image was deleted), and closing a window after a Saved Host connection was found to leave the JVM alive — fixed in `0.1.8-SNAPSHOT` (see Completed).
 
@@ -246,7 +246,7 @@ The SFTP file pane was then brought closer to FinalShell (2026-10-28): six colum
 
 ## In Progress
 
-`0.1.9-dev` is in progress (2026-11-09). `0.1.8` is released for Windows (`eyeShell-0.1.8.zip` on the `v0.1.8` release); the Linux AppImage for 0.1.8 is still to be built on the Ubuntu development host, and the owner's Windows GUI acceptance of main-window placement and the close confirmation is pending. The `0.1.7` release remains complete on both platforms (Windows ZIP and validated Linux AppImage on the `v0.1.7` release).
+`0.1.9-dev` is in progress (2026-11-09). `0.1.8` is released on both platforms (`eyeShell-0.1.8.zip` and `eyeShell-0.1.8-x86_64.AppImage` on the `v0.1.8` release); the owner's Windows GUI acceptance of main-window placement and the close confirmation is still pending. The `0.1.7` release remains complete on both platforms (Windows ZIP and validated Linux AppImage on the `v0.1.7` release).
 
 ## Deferred / Backlog
 
@@ -277,8 +277,6 @@ Cumulative project usage (each line = one session/milestone):
 ## Next Actions
 
 Active work is validation, quality debt, and documentation (2026-10-24 decision).
-
-- `0.1.8` is released for Windows (portable ZIP `eyeShell-0.1.8.zip` on the `v0.1.8` release, 2026-11-09). Build the Linux AppImage on the Ubuntu development host and attach it to the same release; then re-run `test check` there.
 
 - Owner GUI acceptance of the 0.1.8 Windows ZIP: resize/move/maximize then close and restart, the `X`/Alt+F4 confirmation (Cancel keeps every session), and the left-aligned port field in the Saved Host editor and the SSH dialog.
 
@@ -392,6 +390,16 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - The encoding list is fixed to the ten JDK-standard charsets; there is no free-form charset entry, no per-host encoding, and no automatic detection (FinalShell behaves the same way). Export is always UTF-8 regardless of the terminal encoding (PRODUCT_SPEC §10.4).
 
 ## Validation Evidence
+
+### 0.1.8 Linux AppImage (Ubuntu 26.04.1, 2026-11-09)
+
+- Commands: `git checkout v0.1.8`; `./scripts/gradlew-local.sh test check --rerun-tasks --console=plain`; `./scripts/gradlew-local.sh appImage --console=plain`; `eyeShell-0.1.8-x86_64.AppImage --appimage-extract`; launch of the AppImage with `APPIMAGELAUNCHER_DISABLE=1` and isolated `XDG_DATA_HOME`/`XDG_CONFIG_HOME`; `wmctrl -l`; `sha256sum`; REST upload to release `438810457`.
+- Executed at: 2026-11-09T21:20+08:00
+- Exit codes: 0 for the suite, `check`, `appImage`, the extraction, and both uploads.
+- Result: **460 tests: 460 executed, 0 failures, 0 errors, 22 skipped** on Ubuntu (the Windows run skips 25; the platform-gated sets differ) and `check` passes. `appImage` produced `build/package/eyeShell-0.1.8-x86_64.AppImage` (**72,575,480 bytes**, SHA-256 `a470e2f06236fd1f211fb4266b8e8206ea2fedad4ef4485675de2b74e51c4648`); extraction confirmed `usr/lib/eyeShell/lib/app/eyeShell-0.1.8.jar` with `eyeshell-build.properties` reporting `version=0.1.8`, and a `.desktop` entry with `Icon=eyeshell` and `StartupWMClass=io-github-sawaichi9527-eyeshell-MainKt`. The packaged app launched as `eyeShell v0.1.8` from `/tmp/.mount_eyeShe…/usr/lib/eyeShell/bin/eyeShell` and exited cleanly with no process or mount left behind.
+- Release: `v0.1.8` (id `438810457`) now carries `eyeShell-0.1.8-x86_64.AppImage` (asset id `727576911`, `state=uploaded`, digest matches the local hash) and `eyeShell-0.1.8-x86_64.AppImage.sha256` (asset id `727577988`) alongside `eyeShell-0.1.8.zip` (72,756,738 bytes).
+- Environment: Ubuntu 26.04.1 LTS x86_64, GNOME Wayland session, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 under `.local/gradle-home`, Kotlin 2.4.10, appimagetool 1.9.0.
+- Not verified in this entry: a live SSH/SFTP session through the 0.1.8 AppImage, the owner's Windows GUI acceptance of window placement and the close confirmation, and a second-machine run of the AppImage.
 
 ### 2026-11-09 session close (0.1.8 released, 0.1.9-dev started)
 
