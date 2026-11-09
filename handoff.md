@@ -278,9 +278,9 @@ Cumulative project usage (each line = one session/milestone):
 
 Active work is validation, quality debt, and documentation (2026-10-24 decision).
 
-- `0.1.8-SNAPSHOT`: re-check the two `0.1.7` findings on real hosts — close a window after a Saved Host connection on a keyring-capable Linux desktop and confirm the process exits, and accept an unknown host key slowly on a real server.
+- `0.1.8` is released for Windows (portable ZIP `eyeShell-0.1.8.zip` on the `v0.1.8` release, 2026-11-09). Build the Linux AppImage on the Ubuntu development host and attach it to the same release; then re-run `test check` there.
 
-- `0.1.7` is released for both platforms; the Linux AppImage is validated on Ubuntu 26.04.1 (Wayland) and attached to the `v0.1.7` release. Optionally deploy it with `./scripts/install-linux-shortcut.sh build/package/eyeShell-0.1.7-x86_64.AppImage` and re-run the owner GUI pass on the packaged build.
+- Owner GUI acceptance of the 0.1.8 Windows ZIP: resize/move/maximize then close and restart, the `X`/Alt+F4 confirmation (Cancel keeps every session), and the left-aligned port field in the Saved Host editor and the SSH dialog.
 
 - Terminal background image and character encoding are implemented and pass the automated suite on this Windows host; an owner GUI pass is still needed for: choosing a real photo, resize behaviour, a non-UTF-8 host (GBK/BIG5) in a live session, and restart read-back of `terminal.charset` / `terminal.background.*`.
 - M1J, M1K, M1L, and M1M are implemented and validated on Ubuntu 26.04 and re-validated on the Windows host (97 tests, 7 skips, `check` passed); Windows-specific platform validation is complete except the MSI/ZIP installers, which are deferred.- M2 monitoring and SFTP are implemented and Windows-validated (125 tests, 8 skips); both are also validated live against this Linux host (2026-10-24). SFTP drag-and-drop upload and transfer progress percentages are implemented (2026-10-24). Command Snippets are implemented with SQLite persistence and session-bound Run (2026-10-24). Saved Hosts folder tree is implemented (2026-10-24).
@@ -389,6 +389,14 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - The encoding list is fixed to the ten JDK-standard charsets; there is no free-form charset entry, no per-host encoding, and no automatic detection (FinalShell behaves the same way). Export is always UTF-8 regardless of the terminal encoding (PRODUCT_SPEC §10.4).
 
 ## Validation Evidence
+
+### Release 0.1.8 (Windows portable ZIP, 2026-11-09)
+
+- Version: `build.gradle.kts` declares `version = "0.1.8"`; the packaged jar is `app/eyeShell-0.1.8.jar` and `eyeshell-build.properties` reports `version=0.1.8`.
+- Commands: `scripts\gradlew-local.cmd test check --console=plain`; `scripts\gradlew-local.cmd jpackagePortable --console=plain`; `tar -tf build\package\eyeShell-0.1.8.zip | Measure-Object -Line`; `Expand-Archive` into `%TEMP%\opencode\eyeshell-018-release-verify`; launch `eyeShell.exe` with `JAVA_HOME`/`JDK_HOME` cleared and `PATH` reduced to the system directories.
+- Result: **460 tests: 460 executed, 0 failures, 0 errors, 25 skipped**, `check` passes (30.2 s), and `jpackagePortable` produced `build\package\eyeShell-0.1.8.zip` (**72,756,738 bytes, 448 entries**, SHA-256 `b5b5edaa11d710fa355e0753adc68512a617a7360e3280cc6df557cb625b43f4`) containing `app/eyeShell-0.1.8.jar`, the dependency jars, and the bundled `runtime/`. The extracted launcher started without a JDK on `PATH`, titled itself `eyeShell v0.1.8`, and was closed cleanly.
+- Release: `git push origin main` pushed `7ea0453..4dc1d65`, `git push origin v0.1.8` created the remote tag, and the REST API created release `v0.1.8` (id `438810457`) with `eyeShell-0.1.8.zip` (asset id `726501033`, `state=uploaded`, digest matches the local hash) at https://github.com/sawaichi9527/eyeShell/releases/tag/v0.1.8. Only the Windows ZIP is attached; the Linux AppImage is deferred to the Ubuntu development host (owner decision, 2026-11-09).
+- Not verified in this entry: no live SSH/SFTP session was driven through this release archive, and nothing ran on Linux this session, so no 0.1.8 AppImage exists yet.
 
 ### 2026-11-09 window placement and close confirmation (0.1.8-SNAPSHOT)
 
