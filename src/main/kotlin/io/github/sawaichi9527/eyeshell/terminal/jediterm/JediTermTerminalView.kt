@@ -186,7 +186,10 @@ class JediTermTerminalView(
         val cursorX = terminal.cursorX
         val cursorY = terminal.cursorY
         terminal.resetScrollRegions()
-        terminal.cursorPosition(cursorX + 1, cursorY)
+        // getCursorX() is already 1-based (myCursorX + 1) and cursorPosition() subtracts one, so
+        // passing cursorX unchanged restores the exact column. Adding one shifted the cursor right
+        // on every reset.
+        terminal.cursorPosition(cursorX, cursorY)
     }
 
     private fun stopWatchdog() {
@@ -302,6 +305,11 @@ class JediTermTerminalView(
         widget.terminal.setScrollingRegion(top, bottom)
     }
 
+    /** Test hook: places the cursor with the same 1-based coordinates a program would use. */
+    internal fun setCursorForTest(x: Int, y: Int) {
+        widget.terminal.cursorPosition(x, y)
+    }
+
     /**
      * User-visible reset for a program that left the terminal in a strange state. Mature terminals
      * offer the same escape hatch; the scrollback and the screen content are kept.
@@ -313,7 +321,10 @@ class JediTermTerminalView(
         val cursorY = terminal.cursorY
         terminal.setModeEnabled(com.jediterm.terminal.TerminalMode.OriginMode, false)
         terminal.resetScrollRegions()
-        terminal.cursorPosition(cursorX + 1, cursorY)
+        // getCursorX() is already 1-based (myCursorX + 1) and cursorPosition() subtracts one, so
+        // passing cursorX unchanged restores the exact column. Adding one shifted the cursor right
+        // on every reset.
+        terminal.cursorPosition(cursorX, cursorY)
         logger.info("Terminal state reset from the context menu (origin mode and scroll region restored)")
     }
 
@@ -331,7 +342,10 @@ class JediTermTerminalView(
         val cursorY = terminal.cursorY
         terminal.setModeEnabled(com.jediterm.terminal.TerminalMode.OriginMode, false)
         terminal.resetScrollRegions()
-        terminal.cursorPosition(cursorX + 1, cursorY)
+        // getCursorX() is already 1-based (myCursorX + 1) and cursorPosition() subtracts one, so
+        // passing cursorX unchanged restores the exact column. Adding one shifted the cursor right
+        // on every reset.
+        terminal.cursorPosition(cursorX, cursorY)
     }
 
     override fun captureAllOutput(): TerminalOutputSnapshot {

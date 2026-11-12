@@ -46,6 +46,32 @@ class ReattachScrollRegionTest {
         }
     }
 
+    @Test
+    fun `resetting the terminal keeps the cursor column`() {
+        val view = onEdt { JediTermTerminalView(columns = 80, rows = 10) }
+        try {
+            onEdt { view.setCursorForTest(x = 7, y = 4) }
+            val before = cursorColumn(view)
+
+            onEdt { view.resetForReattach() }
+            assertTrue(
+                cursorColumn(view) == before,
+                "the reset must not shift the cursor: $before -> ${cursorColumn(view)}",
+            )
+
+            onEdt { view.resetForReattach() }
+            assertTrue(
+                cursorColumn(view) == before,
+                "repeated resets must not accumulate a shift: $before -> ${cursorColumn(view)}",
+            )
+        } finally {
+            onEdt { view.close() }
+        }
+    }
+
+    private fun cursorColumn(view: JediTermTerminalView): String =
+        view.terminalState().substringAfter("cursor=").substringBefore(",")
+
     private fun <T> onEdt(action: () -> T): T {
         var result: Result<T>? = null
         SwingUtilities.invokeAndWait { result = runCatching(action) }
