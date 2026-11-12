@@ -148,6 +148,13 @@ val jpackageTool = "${System.getProperty("java.home")}/bin/jpackage"
 val jarTool = "${System.getProperty("java.home")}/bin/jar"
 val packageVersion = version.toString().substringBefore('-')
 
+/**
+ * File-name version: keeps a development suffix (`0.1.9-dev`) so a locally built archive is never
+ * mistaken for the released `0.1.9`, which is only ever cut from a bare version. jpackage itself
+ * still receives the numeric [packageVersion], because it rejects anything else as `--app-version`.
+ */
+val artifactVersion = version.toString().trim().ifBlank { packageVersion }
+
 val preparePackageInput by tasks.registering(Sync::class) {
     from(configurations.runtimeClasspath)
     from(tasks.jar)
@@ -221,13 +228,13 @@ tasks.register<Exec>("jpackageInstaller") {
 }
 
 val cleanPackagePortable by tasks.registering(Delete::class) {
-    delete(layout.buildDirectory.file("package/eyeShell-${packageVersion}.${if (isWindowsBuild) "zip" else "tar.gz"}"))
+    delete(layout.buildDirectory.file("package/eyeShell-${artifactVersion}.${if (isWindowsBuild) "zip" else "tar.gz"}"))
 }
 
 tasks.register<Exec>("jpackagePortable") {
     dependsOn("jpackageAppImage", cleanPackagePortable)
     val appImageDir = layout.buildDirectory.dir("package/eyeShell").get().asFile
-    val portable = layout.buildDirectory.file("package/eyeShell-${packageVersion}.${if (isWindowsBuild) "zip" else "tar.gz"}")
+    val portable = layout.buildDirectory.file("package/eyeShell-${artifactVersion}.${if (isWindowsBuild) "zip" else "tar.gz"}")
     inputs.dir(appImageDir)
     outputs.file(portable)
     val archivePath = portable.get().asFile.absolutePath
@@ -245,7 +252,7 @@ tasks.register<Exec>("jpackagePortable") {
  * with an `AppRun`, a `.desktop` entry, and the 512 px icon, then squashed by the pinned
  * `appimagetool` installed by `scripts/bootstrap-appimagetool.sh`.
  */
-val appImageFileName = "eyeShell-${packageVersion}-x86_64.AppImage"
+val appImageFileName = "eyeShell-${artifactVersion}-x86_64.AppImage"
 val appImageTool = rootProject.file(".local/appimagetool/AppRun")
 
 // The bundled jlink runtime ships read-only legal files; restaging over them fails on Windows-style

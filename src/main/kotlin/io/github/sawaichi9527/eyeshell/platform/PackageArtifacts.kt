@@ -5,6 +5,10 @@ object PackageArtifacts {
     const val LINUX_PACKAGE_NAME = "eyeshell"
     const val MAIN_CLASS = "io.github.sawaichi9527.eyeshell.MainKt"
 
+    /**
+     * Numeric version for package metadata (`0.1.9`), because jpackage rejects a suffix as
+     * `--app-version`. File names keep the full version; see [portableFileName].
+     */
     fun version(projectVersion: String): String = projectVersion.substringBefore('-')
 
     /**

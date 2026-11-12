@@ -18,6 +18,12 @@ class PackageArtifactsTest {
     }
 
     @Test
+    fun `a development version keeps its suffix in the file name`() {
+        assertEquals("eyeShell-0.1.9-dev.zip", PackageArtifacts.portableFileName("0.1.9-dev", windows = true))
+        assertEquals("eyeShell-0.1.9-dev-x86_64.AppImage", PackageArtifacts.appImageFileName("0.1.9-dev"))
+    }
+
+    @Test
     fun `installer archive uses the platform naming`() {
         assertEquals("eyeshell_0.1.0_amd64.deb", PackageArtifacts.installerFileName("0.1.0", windows = false))
         assertEquals("eyeShell-0.1.0.msi", PackageArtifacts.installerFileName("0.1.0", windows = true))

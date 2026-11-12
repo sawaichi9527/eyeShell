@@ -7,18 +7,21 @@ import org.junit.jupiter.api.Test
 
 class AppInfoTest {
     @Test
-    fun `build version is expanded into the resource and shown without a snapshot suffix`() {
+    fun `build version is expanded into the resource`() {
         assertFalse(AppInfo.rawVersion.isBlank(), "eyeshell-build.properties was not expanded")
-        assertEquals(AppInfo.rawVersion.substringBefore('-'), AppInfo.version)
-        assertFalse(AppInfo.version.contains("-"), AppInfo.version)
+        assertEquals(AppInfo.rawVersion, AppInfo.version)
     }
 
     @Test
-    fun `window title carries the application name and the package version`() {
-        assertTrue(
-            AppInfo.windowTitle.matches(Regex("""eyeShell v\d+\.\d+\.\d+""")),
-            AppInfo.windowTitle,
-        )
-        assertEquals("eyeShell v${AppInfo.version}", AppInfo.windowTitle)
+    fun `a development build announces its suffix in the window title`() {
+        // The release is cut from a bare version, so a suffix can only mean a development build.
+        assertEquals("eyeShell v${AppInfo.rawVersion}", AppInfo.windowTitle)
+        assertTrue(AppInfo.windowTitle.startsWith("eyeShell v"), AppInfo.windowTitle)
+    }
+
+    @Test
+    fun `package metadata still gets the numeric version`() {
+        assertEquals(AppInfo.rawVersion.substringBefore('-'), PackageArtifacts.version(AppInfo.rawVersion))
+        assertFalse(PackageArtifacts.version(AppInfo.rawVersion).contains("-"))
     }
 }
