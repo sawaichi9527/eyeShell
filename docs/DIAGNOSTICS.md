@@ -32,6 +32,7 @@ A freeze produces these lines without any user action:
 | `No terminal output for <n>s on <session>; … (localWindow=…, remoteWindow=…)` | The emulator is alive and polling but no bytes arrived for a minute. `localWindow` at or near 0 means the server is blocked because eyeShell stopped consuming; a healthy `localWindow` means the peer simply had nothing to send. |
 | `Uncaught exception in thread "…"` with a stack trace | Any uncaught failure, including a Swing paint that threw. Previously this went to a stderr nobody can read in a packaged build. |
 | `Terminal session attached/ended/closed …` | Lifecycle timeline: when a tab started, when the remote side ended it (`exitStatus=`), and when the user closed it. |
+| `Terminal input is queued on <session>: the SSH remote window is 0 …` | The user typed, but the server has not consumed the previous bytes, so the channel queued them and the shell never saw the keystroke. Logged at most once per 30 s. |
 | `Terminal output is being consumed but the panel has not repainted` | The repaint watchdog: characters arrive and are parsed, but the panel never paints. A `thread-dump-*.txt` is written. |
 | `Settings → About → Write diagnostics` | Writes every open tab's model state: size, cursor, scroll-region top, visible rows, screen/history line counts, alternate-screen flag, paint counter, last paint age, consumed characters. Use this while the tab is frozen. |
 
