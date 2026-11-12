@@ -296,6 +296,8 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 
 - Owner GUI acceptance of the 0.1.8 Windows ZIP: resize/move/maximize then close and restart, the `X`/Alt+F4 confirmation (Cancel keeps every session), and the left-aligned port field in the Saved Host editor and the SSH dialog.
 
+- Publish the `v0.1.9` GitHub release (tag pushed as `7150d20`; no `gh` CLI or token is available on the Windows host) with `eyeShell-0.1.9.zip` (SHA-256 `950f95b62c7426e9fcb50db9f86f24e99ad1dbb9ac6d2ea6a2e49875c561fb90`) and a `.sha256` sidecar, then build the Linux AppImage on the Ubuntu 26.04 host and attach it to the same release. The owner will re-run the VM smoke test (192.168.23.46, Ubuntu 24.04.5) at home; port 22 was unreachable from the Windows host at release time.
+
 - Diagnose the terminal-tab freeze seen during kernel package work (2026-11-09 and 2026-11-12): the confirmed mechanism is a scroll region left behind by a program, which is now prevented for invalid DECSTBM regions, reversible with `Reset Terminal`, and auto-recovered after 30 s for a valid but abandoned region. Still to confirm: whether the `apt` trigger was an invalid (now ignored) or a valid short region; if the log shows `Restoring a shortened terminal scroll region (N..N of M)`, the latter is confirmed and per-buffer scroll margins (the Windows Terminal approach) would be the next step.
 
 - Terminal background image and character encoding are implemented and pass the automated suite on this Windows host; an owner GUI pass is still needed for: choosing a real photo, resize behaviour, a non-UTF-8 host (GBK/BIG5) in a live session, and restart read-back of `terminal.charset` / `terminal.background.*`.
