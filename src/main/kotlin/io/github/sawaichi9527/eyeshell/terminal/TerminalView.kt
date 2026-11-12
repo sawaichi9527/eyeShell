@@ -38,6 +38,12 @@ interface TerminalView : AutoCloseable {
     fun clearScrollback()
 
     /**
+     * Terminal model state for diagnostics: size, cursor, scroll region, alternate-screen flag,
+     * buffer size, and the paint/consumption counters. Empty when the view has no model to report.
+     */
+    fun terminalState(): String = ""
+
+    /**
      * Applies a new terminal font size in points. Views that cannot re-flow their cell grid keep
      * their current size; the JediTerm view reinitialises its metrics and resizes the PTY.
      */

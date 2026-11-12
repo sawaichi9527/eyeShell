@@ -36,16 +36,31 @@ internal class EmulatorStallDetector(
 ) {
     private var signature: String? = null
     private var repeats = 0
+    private var lastProgress: Long = Long.MIN_VALUE
     private var reportState = ReportState.NONE
 
     private enum class ReportState { NONE, SUSPECTED, STALLED }
 
-    fun sample(state: Thread.State, frames: List<String>): StallSample {
-        if (state == Thread.State.RUNNABLE || state == Thread.State.NEW || isIdle(frames)) {
-            reset()
+    /**
+     * [progress] is a monotonic counter of characters the emulator has consumed. A thread that is
+     * blocked in a native channel read often reports `RUNNABLE` on Windows, so the state alone
+     * cannot distinguish "busy" from "stuck"; only actual progress can.
+     */
+    fun sample(state: Thread.State, frames: List<String>, progress: Long): StallSample {
+        if (state == Thread.State.NEW || isIdle(frames)) {
+            reset(progress)
             return StallSample.NONE
         }
         val current = frames.joinToString("\n")
+        val progressed = progress != lastProgress
+        if (signature == null || progressed) {
+            // First observation, or the emulator consumed something since the last sample: healthy.
+            lastProgress = progress
+            signature = current
+            repeats = 1
+            reportState = ReportState.NONE
+            return StallSample.NONE
+        }
         if (current == signature) {
             repeats += 1
         } else {
@@ -59,17 +74,18 @@ internal class EmulatorStallDetector(
             reportState = ReportState.STALLED
             return StallSample.STALLED
         }
-        if (repeats == 1 && reportState == ReportState.NONE) {
+        if (repeats == 2 && reportState == ReportState.NONE) {
             reportState = ReportState.SUSPECTED
             return StallSample.SUSPECTED
         }
         return StallSample.NONE
     }
 
-    fun reset() {
+    fun reset(progress: Long = lastProgress) {
         signature = null
         repeats = 0
         reportState = ReportState.NONE
+        lastProgress = progress
     }
 
     internal companion object {
@@ -90,6 +106,8 @@ internal class EmulatorStallDetector(
  */
 internal class EmulatorWatchdog(
     private val thread: () -> Thread?,
+    /** Monotonic count of consumed characters, so a native read that reports RUNNABLE is still caught. */
+    private val progress: () -> Long = { 0 },
     private val intervalMillis: Long = SAMPLE_INTERVAL_MILLIS,
     private val detector: EmulatorStallDetector = EmulatorStallDetector(),
     private val onStall: (List<String>) -> Unit,
@@ -112,13 +130,13 @@ internal class EmulatorWatchdog(
                     continue
                 }
                 val frames = sampled.stackTrace.map { "${it.className}.${it.methodName}" }
-                when (detector.sample(sampled.state, frames)) {
+                when (detector.sample(sampled.state, frames, progress())) {
                     StallSample.SUSPECTED -> logger.log(
                         Level.WARNING,
                         buildString {
                             append("Terminal emulator thread ")
                             append(sampled.name)
-                            append(" has not moved for ${intervalMillis / 1000}s (")
+                            append(" has made no progress for ${intervalMillis / 1000}s (")
                             append(sampled.state)
                             append("); sampling again, stack:")
                             frames.forEach { frame -> append("\n    at ").append(frame) }
@@ -144,5 +162,55 @@ internal class EmulatorWatchdog(
     private companion object {
         const val SAMPLE_INTERVAL_MILLIS = 5_000L
         val logger: Logger = Logger.getLogger(EmulatorWatchdog::class.java.name)
+    }
+}
+
+/** One render sample: characters handed to the emulator and paints the panel performed. */
+internal data class RepaintSample(val consumedCharacters: Long, val paints: Long)
+
+/**
+ * Detects the "consumed but never painted" state: output keeps arriving and the emulator keeps
+ * parsing it, yet the panel does not repaint, so the user sees a frozen screen while the tab still
+ * says Connected and the rest of the window works.
+ */
+internal class RepaintWatchdog(
+    private val sample: () -> RepaintSample?,
+    private val intervalMillis: Long = SAMPLE_INTERVAL_MILLIS,
+    private val onStuck: (RepaintSample) -> Unit,
+) {
+    private val running = java.util.concurrent.atomic.AtomicBoolean()
+    private var worker: Thread? = null
+
+    fun start() {
+        if (!running.compareAndSet(false, true)) return
+        worker = Thread.ofVirtual().name("eyeshell-repaint-watchdog").start {
+            var last: RepaintSample? = null
+            while (running.get()) {
+                try {
+                    Thread.sleep(intervalMillis)
+                } catch (_: InterruptedException) {
+                    return@start
+                }
+                val current = sample() ?: continue
+                val previous = last
+                last = current
+                if (previous == null) continue
+                val consumedGrew = current.consumedCharacters > previous.consumedCharacters
+                val painted = current.paints > previous.paints
+                if (consumedGrew && !painted) {
+                    onStuck(current)
+                }
+            }
+        }
+    }
+
+    fun stop() {
+        running.set(false)
+        worker?.interrupt()
+        worker = null
+    }
+
+    private companion object {
+        const val SAMPLE_INTERVAL_MILLIS = 5_000L
     }
 }

@@ -97,6 +97,25 @@ internal class EyeShellTerminalPanel(
         TerminalFallbackFonts.fallbackFamiliesWith(eyeSettings.cjkFontFamily),
     )
 
+    /**
+     * Repaint heartbeat. A frozen tab that keeps consuming output but stops painting leaves this
+     * counter still, which is what distinguishes a renderer failure from a stalled stream.
+     */
+    private val paintCounter = java.util.concurrent.atomic.AtomicLong()
+    private val lastPaintAt = java.util.concurrent.atomic.AtomicLong()
+
+    internal val paintCount: Long
+        get() = paintCounter.get()
+
+    internal val millisSinceLastPaint: Long
+        get() = System.currentTimeMillis() - lastPaintAt.get()
+
+    override fun paintComponent(g: java.awt.Graphics) {
+        paintCounter.incrementAndGet()
+        lastPaintAt.set(System.currentTimeMillis())
+        super.paintComponent(g)
+    }
+
     private var backgroundSelection: TerminalBackgroundImage? = null
     private var backgroundSource: BufferedImage? = null
     private var backgroundScaled: BufferedImage? = null

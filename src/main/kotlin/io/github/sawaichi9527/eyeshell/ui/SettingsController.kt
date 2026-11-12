@@ -80,6 +80,8 @@ internal class SettingsController(
     private val applyLocale: () -> Unit = {},
     private val chooseBackgroundImage: (Component) -> Path? = ::chooseBackgroundImageFile,
     private val backgroundDirectory: Path = BackgroundImages.defaultDirectory(),
+    /** Live terminal state lines included in a manually written diagnostics snapshot. */
+    private val diagnostics: () -> List<String> = { emptyList() },
 ) {
     private val activeDialog = AtomicReference<JDialog>()
     private var owner: Frame? = null
@@ -584,7 +586,7 @@ internal class SettingsController(
 
     /** Writes a thread dump next to the log so a frozen tab can be reported without any tooling. */
     private fun writeDiagnostics(parent: Component) {
-        val file = Diagnostics.write(EyeShellPaths.logDirectory(), "manual", emptyList())
+        val file = Diagnostics.write(EyeShellPaths.logDirectory(), "manual", diagnostics())
         val detail = file?.toString() ?: EyeShellPaths.logDirectory().toString()
         JOptionPane.showMessageDialog(
             parent,

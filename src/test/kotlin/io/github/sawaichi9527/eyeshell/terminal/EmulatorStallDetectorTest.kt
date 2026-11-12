@@ -18,41 +18,64 @@ class EmulatorStallDetectorTest {
 
     @Test
     fun `a sleeping poll loop is never a stall`() {
-        val detector = EmulatorStallDetector(requiredSamples = 2)
+        val detector = EmulatorStallDetector(requiredSamples = 3)
 
         repeat(10) {
-            assertEquals(StallSample.NONE, detector.sample(Thread.State.TIMED_WAITING, idle), "an idle terminal is healthy")
+            assertEquals(
+                StallSample.NONE,
+                detector.sample(Thread.State.TIMED_WAITING, idle, progress = 0),
+                "an idle terminal is healthy",
+            )
+        }
+    }
+
+    /**
+     * A thread blocked in a native channel read reports RUNNABLE on Windows, so the state is not
+     * used: the detector only trusts the absence of consumed characters on an unchanged stack.
+     */
+    @Test
+    fun `no progress on the same stack is suspected and then confirmed once`() {
+        val detector = EmulatorStallDetector(requiredSamples = 3)
+
+        assertEquals(StallSample.NONE, detector.sample(Thread.State.RUNNABLE, blocked, progress = 100), "baseline")
+        assertEquals(StallSample.SUSPECTED, detector.sample(Thread.State.RUNNABLE, blocked, progress = 100))
+        assertEquals(StallSample.STALLED, detector.sample(Thread.State.RUNNABLE, blocked, progress = 100))
+        assertEquals(StallSample.NONE, detector.sample(Thread.State.RUNNABLE, blocked, progress = 100), "one report")
+    }
+
+    @Test
+    fun `a runnable thread that keeps consuming is healthy`() {
+        val detector = EmulatorStallDetector(requiredSamples = 2)
+
+        var progress = 0L
+        repeat(6) {
+            assertEquals(
+                StallSample.NONE,
+                detector.sample(Thread.State.RUNNABLE, blocked, progress = progress),
+                "progress means the emulator is working",
+            )
+            progress += 1_000
         }
     }
 
     @Test
-    fun `a repeatedly blocked stack is suspected first and then confirmed once`() {
+    fun `progress on an otherwise identical stack re-arms the detector`() {
         val detector = EmulatorStallDetector(requiredSamples = 3)
 
-        assertEquals(StallSample.SUSPECTED, detector.sample(Thread.State.WAITING, blocked))
-        assertEquals(StallSample.NONE, detector.sample(Thread.State.WAITING, blocked))
-        assertEquals(StallSample.STALLED, detector.sample(Thread.State.WAITING, blocked), "the third identical sample confirms")
-        assertEquals(StallSample.NONE, detector.sample(Thread.State.WAITING, blocked), "one report per episode")
+        assertEquals(StallSample.NONE, detector.sample(Thread.State.WAITING, blocked, progress = 10), "baseline")
+        assertEquals(StallSample.NONE, detector.sample(Thread.State.WAITING, blocked, progress = 20), "progress is health")
+        assertEquals(StallSample.SUSPECTED, detector.sample(Thread.State.WAITING, blocked, progress = 20))
+        assertEquals(StallSample.STALLED, detector.sample(Thread.State.WAITING, blocked, progress = 20))
     }
 
     @Test
-    fun `a busy or changing emulator is not reported`() {
-        val detector = EmulatorStallDetector(requiredSamples = 2)
+    fun `a changed stack restarts the repeated-sample count`() {
+        val detector = EmulatorStallDetector(requiredSamples = 3)
 
-        repeat(5) { assertEquals(StallSample.NONE, detector.sample(Thread.State.RUNNABLE, blocked)) }
-
-        assertEquals(StallSample.SUSPECTED, detector.sample(Thread.State.BLOCKED, blocked))
+        assertEquals(StallSample.NONE, detector.sample(Thread.State.BLOCKED, blocked, progress = 5), "baseline")
+        assertEquals(StallSample.SUSPECTED, detector.sample(Thread.State.BLOCKED, blocked, progress = 5))
         val other = blocked + "com.jediterm.terminal.model.TerminalTextBuffer.lock"
-        assertEquals(StallSample.SUSPECTED, detector.sample(Thread.State.BLOCKED, other), "a new stack restarts the episode")
-    }
-
-    @Test
-    fun `progress between samples re-arms the detector`() {
-        val detector = EmulatorStallDetector(requiredSamples = 2)
-
-        assertEquals(StallSample.SUSPECTED, detector.sample(Thread.State.WAITING, blocked))
-        assertEquals(StallSample.NONE, detector.sample(Thread.State.TIMED_WAITING, idle))
-        assertEquals(StallSample.SUSPECTED, detector.sample(Thread.State.WAITING, blocked), "the idle sample cleared the episode")
-        assertEquals(StallSample.STALLED, detector.sample(Thread.State.WAITING, blocked))
-    }
+        assertEquals(StallSample.NONE, detector.sample(Thread.State.BLOCKED, other, progress = 5), "new stack, new count")
+        assertEquals(StallSample.SUSPECTED, detector.sample(Thread.State.BLOCKED, other, progress = 5))
+        assertEquals(StallSample.STALLED, detector.sample(Thread.State.BLOCKED, other, progress = 5))    }
 }

@@ -94,6 +94,7 @@ class EyeShellWindow(
         applyCharset = { charset -> applyTerminalCharset(charset) },
         applyBackgroundImage = { image -> applyTerminalBackgroundImage(image) },
         applyLocale = { workbench.relocalize() },
+        diagnostics = { pagesByComponent.values.map { page -> page.terminalState() } },
     )
     private val workbench: WorkbenchPanel = WorkbenchPanel(
         connectAction = connectAction?.let { action -> { action(this) } },
@@ -502,6 +503,9 @@ internal class TerminalSessionPage(
     }
 
     fun applyFontSize(size: Float) = terminalView.setFontSize(size)
+
+    /** Terminal model state for the manual diagnostics snapshot. */
+    fun terminalState(): String = terminalView.terminalState()
 
     /**
      * Moves keyboard focus into the terminal grid.

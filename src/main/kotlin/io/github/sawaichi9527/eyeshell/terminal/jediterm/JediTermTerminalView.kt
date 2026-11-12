@@ -25,6 +25,8 @@ import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
 import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputSnapshot
 import io.github.sawaichi9527.eyeshell.terminal.EmulatorStallDetector
 import io.github.sawaichi9527.eyeshell.terminal.EmulatorWatchdog
+import io.github.sawaichi9527.eyeshell.terminal.RepaintSample
+import io.github.sawaichi9527.eyeshell.terminal.RepaintWatchdog
 import io.github.sawaichi9527.eyeshell.terminal.TerminalReadStall
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
@@ -63,6 +65,7 @@ class JediTermTerminalView(
     @Volatile
     private var emulatorStopHandler: ((unexpected: Boolean) -> Unit)? = null
     private var watchdog: EmulatorWatchdog? = null
+    private var repaintWatchdog: RepaintWatchdog? = null
 
     init {
         widget.terminalPanel.setPopupMenuActionProvider(contextActionProvider)
@@ -82,7 +85,9 @@ class JediTermTerminalView(
         check(SwingUtilities.isEventDispatchThread()) { "Terminal sessions must be attached on the Swing EDT" }
         check(widget.canOpenSession()) { "A terminal session is already attached" }
         contextActionProvider.hasSession = true
-        val connector = SessionTtyConnector(session)
+        val connector = SessionTtyConnector(session) {
+            ", paints=${terminalPanel.paintCount}, lastPaint=${terminalPanel.millisSinceLastPaint}ms"
+        }
         activeConnector = connector
         widget.setTtyConnector(connector)
         widget.start()
@@ -126,15 +131,51 @@ class JediTermTerminalView(
         stopWatchdog()
         watchdog = EmulatorWatchdog(
             thread = { activeConnector?.emulatorThread },
+            progress = { activeConnector?.consumedCharacters ?: 0 },
             intervalMillis = emulatorStallSampleMillis,
             detector = EmulatorStallDetector(emulatorStallSamples),
             onStall = ::handleEmulatorStall,
+        ).also { it.start() }
+        repaintWatchdog = RepaintWatchdog(
+            sample = {
+                activeConnector?.let { connector ->
+                    RepaintSample(connector.consumedCharacters, terminalPanel.paintCount)
+                }
+            },
+            intervalMillis = emulatorStallSampleMillis,
+            onStuck = ::handleRepaintStuck,
         ).also { it.start() }
     }
 
     private fun stopWatchdog() {
         watchdog?.stop()
         watchdog = null
+        repaintWatchdog?.stop()
+        repaintWatchdog = null
+    }
+
+    /**
+     * Output keeps arriving but nothing is painted. That is a rendering failure, not a transport
+     * problem: the tab still says Connected, the session is healthy, and only the screen is stale.
+     */
+    private fun handleRepaintStuck(sample: RepaintSample) {
+        val connector = activeConnector ?: return
+        logger.severe(
+            "Terminal output is being consumed but the panel has not repainted " +
+                "(consumed=${sample.consumedCharacters}, paints=${sample.paints}) on ${connector.sessionName}",
+        )
+        diagnosticsDirectory?.let { directory ->
+            Diagnostics.write(
+                directory = directory,
+                reason = "terminal-repaint-${connector.sessionName}",
+                sessions = listOf(
+                    "session=${connector.sessionName} state=not-repainting" +
+                        " consumed=${sample.consumedCharacters} paints=${sample.paints}" +
+                        " lastPaint=${terminalPanel.millisSinceLastPaint}ms" +
+                        connector.flowForDiagnostics(),
+                ),
+            )
+        }
     }
 
     private fun handleEmulatorStall(frames: List<String>) {
@@ -311,8 +352,28 @@ class JediTermTerminalView(
     internal val terminalPanel: EyeShellTerminalPanel
         get() = widget.terminalPanel as EyeShellTerminalPanel
 
+    override fun terminalState(): String = runCatching {
+        val terminal = widget.terminal
+        val buffer = widget.terminalTextBuffer
+        buildString {
+            append("size=").append(terminal.terminalWidth).append('x').append(terminal.terminalHeight)
+            append(" cursor=").append(terminal.cursorX).append(',').append(terminal.cursorY)
+            append(" scrollTop=").append((terminal as? com.jediterm.terminal.model.JediTerminal)?.scrollRegionTop ?: -1)
+            append(" visibleRows=").append(widget.terminalPanel.visibleStartRow)
+                .append("..").append(widget.terminalPanel.visibleEndRow)
+            append(" screenLines=").append(buffer.screenLinesCount)
+            append(" historyLines=").append(buffer.historyLinesCount)
+            append(" alternate=").append(buffer.isUsingAlternateBuffer)
+            append(" paints=").append(terminalPanel.paintCount)
+            append(" lastPaint=").append(terminalPanel.millisSinceLastPaint).append("ms")
+            append(" consumed=").append(activeConnector?.consumedCharacters ?: 0)
+        }
+    }.getOrDefault("")
+
     override fun close() {
         stopWatchdog()
+        // A tab the user closes stops its emulator on purpose; do not report that as a failure.
+        activeConnector?.markExpectedEnd()
         highlightController.close()
         searchController.close()
         widget.close()
@@ -386,6 +447,8 @@ private class ContextActionProvider(
 
 internal class SessionTtyConnector(
     private val session: TerminalSession,
+    /** Extra render diagnostics appended to the silence warning; the view owns the paint counter. */
+    private val renderDiagnostics: () -> String = { "" },
 ) : TtyConnector {
     @Volatile
     private var detached = false
@@ -421,6 +484,16 @@ internal class SessionTtyConnector(
     fun markStallReported() {
         stallReported = true
     }
+
+    /** Marks a deliberate end (tab closed, widget stopped) so it is not reported as a failure. */
+    fun markExpectedEnd() {
+        expectedEnd = true
+    }
+
+    /** Characters handed to the emulator, next to the panel's paint counter in the silence warning. */
+    @Volatile
+    var consumedCharacters = 0L
+        private set
 
     private val stall = TerminalReadStall()
 
@@ -463,7 +536,10 @@ internal class SessionTtyConnector(
             // is not lost when a stream reports closed while its reader still has characters.
             if (session.ready()) {
                 val count = session.read(buffer, offset, length)
-                if (count > 0) stall.progress()
+                if (count > 0) {
+                    stall.progress()
+                    consumedCharacters += count
+                }
                 return count
             }
             if (!session.isOpen) {
@@ -471,13 +547,17 @@ internal class SessionTtyConnector(
                 return -1
             }
             if (stall.shouldReport()) {
+                val flow = session.flowControl()
+                val transport = if (flow == null) {
+                    ""
+                } else {
+                    "localWindow=${flow.localWindow}/${flow.localWindowMax}, " +
+                        "remoteWindow=${flow.remoteWindow}/${flow.remoteWindowMax}, "
+                }
                 logger.warning(
                     "No terminal output for ${stall.silenceMillis() / 1000}s on ${session.name}; " +
-                        "the session is still open and the emulator is waiting" +
-                        session.flowControl()?.let { flow ->
-                            " (localWindow=${flow.localWindow}/${flow.localWindowMax}, " +
-                                "remoteWindow=${flow.remoteWindow}/${flow.remoteWindowMax})"
-                        }.orEmpty(),
+                        "the session is still open and the emulator is waiting " +
+                        "(${transport}consumed=$consumedCharacters${renderDiagnostics()})",
                 )
             }
             Thread.sleep(READ_POLL_MILLIS)

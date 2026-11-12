@@ -69,3 +69,62 @@ class EmulatorWatchdogTest {
         assertTrue(thread.state == state, "expected $state but was ${thread.state}")
     }
 }
+
+class RepaintWatchdogTest {
+    @Test
+    fun `output consumed without a paint is reported`() {
+        val consumed = java.util.concurrent.atomic.AtomicLong(100)
+        val reports = AtomicInteger()
+        val watchdog = RepaintWatchdog(
+            sample = { RepaintSample(consumed.getAndAdd(10), paints = 7) },
+            intervalMillis = 10,
+            onStuck = { reports.incrementAndGet() },
+        )
+        watchdog.start()
+        try {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
+            while (reports.get() == 0 && System.nanoTime() < deadline) Thread.sleep(10)
+            assertTrue(reports.get() > 0, "a stale screen must be reported")
+        } finally {
+            watchdog.stop()
+        }
+    }
+
+    @Test
+    fun `painting while consuming is healthy`() {
+        val counter = java.util.concurrent.atomic.AtomicLong(0)
+        val reports = AtomicInteger()
+        val watchdog = RepaintWatchdog(
+            sample = {
+                val step = counter.incrementAndGet()
+                RepaintSample(consumedCharacters = step * 10, paints = step)
+            },
+            intervalMillis = 10,
+            onStuck = { reports.incrementAndGet() },
+        )
+        watchdog.start()
+        try {
+            Thread.sleep(150)
+            assertEquals(0, reports.get(), "a repainting terminal is never reported")
+        } finally {
+            watchdog.stop()
+        }
+    }
+
+    @Test
+    fun `a silent terminal without output is not reported`() {
+        val reports = AtomicInteger()
+        val watchdog = RepaintWatchdog(
+            sample = { RepaintSample(consumedCharacters = 42, paints = 3) },
+            intervalMillis = 10,
+            onStuck = { reports.incrementAndGet() },
+        )
+        watchdog.start()
+        try {
+            Thread.sleep(150)
+            assertEquals(0, reports.get(), "no output means no repaint is expected")
+        } finally {
+            watchdog.stop()
+        }
+    }
+}
