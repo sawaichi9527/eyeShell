@@ -227,6 +227,72 @@ internal class FlowControlWatchdog(
     }
 }
 
+/** State of the terminal's scrolling region. */
+internal data class ScrollRegionSample(
+    val top: Int,
+    val bottom: Int,
+    val height: Int,
+    val alternateScreen: Boolean,
+) {
+    /** A program that exited mid-screen leaves a region that does not cover the whole screen. */
+    val isShortened: Boolean
+        get() = !alternateScreen && (top > 1 || bottom < height)
+}
+
+/**
+ * Watches for a shortened scroll region that survives its program. Everything written afterwards is
+ * confined to the region's bottom row, so the tab looks frozen while the session is perfectly
+ * healthy — and a reconnect into the same widget used to inherit the state.
+ */
+internal class ScrollRegionWatchdog(
+    private val sample: () -> ScrollRegionSample?,
+    private val intervalMillis: Long = SAMPLE_INTERVAL_MILLIS,
+    private val requiredSamples: Int = REQUIRED_SAMPLES,
+    private val onShortened: (ScrollRegionSample) -> Unit,
+) {
+    private val running = java.util.concurrent.atomic.AtomicBoolean()
+    private var worker: Thread? = null
+
+    fun start() {
+        if (!running.compareAndSet(false, true)) return
+        worker = Thread.ofVirtual().name("eyeshell-scroll-region-watchdog").start {
+            var samples = 0
+            var reported = false
+            while (running.get()) {
+                try {
+                    Thread.sleep(intervalMillis)
+                } catch (_: InterruptedException) {
+                    return@start
+                }
+                val current = sample()
+                if (current == null || !current.isShortened) {
+                    samples = 0
+                    reported = false
+                    continue
+                }
+                samples += 1
+                if (samples >= requiredSamples && !reported) {
+                    reported = true
+                    onShortened(current)
+                }
+            }
+        }
+    }
+
+    fun stop() {
+        running.set(false)
+        worker?.interrupt()
+        worker = null
+    }
+
+    internal companion object {
+        const val SAMPLE_INTERVAL_MILLIS = 5_000L
+
+        /** 30 s is long enough that no interactive program is mid-screen by accident. */
+        const val REQUIRED_SAMPLES = 6
+    }
+}
+
 /**
  * Detects the "consumed but never painted" state: output keeps arriving and the emulator keeps
  * parsing it, yet the panel does not repaint, so the user sees a frozen screen while the tab still

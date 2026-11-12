@@ -67,6 +67,7 @@ class JediTermTerminalView(
     private var watchdog: EmulatorWatchdog? = null
     private var repaintWatchdog: RepaintWatchdog? = null
     private var flowWatchdog: io.github.sawaichi9527.eyeshell.terminal.FlowControlWatchdog? = null
+    private var regionWatchdog: io.github.sawaichi9527.eyeshell.terminal.ScrollRegionWatchdog? = null
 
     init {
         widget.terminalPanel.setPopupMenuActionProvider(contextActionProvider)
@@ -151,6 +152,41 @@ class JediTermTerminalView(
             intervalMillis = emulatorStallSampleMillis,
             onStuck = ::handleFlowStuck,
         ).also { it.start() }
+        regionWatchdog = io.github.sawaichi9527.eyeshell.terminal.ScrollRegionWatchdog(
+            sample = { scrollRegionSample() },
+            intervalMillis = emulatorStallSampleMillis,
+            onShortened = ::handleShortenedScrollRegion,
+        ).also { it.start() }
+    }
+
+    private fun scrollRegionSample(): io.github.sawaichi9527.eyeshell.terminal.ScrollRegionSample? {
+        val terminal = widget.terminal as? com.jediterm.terminal.model.JediTerminal ?: return null
+        return io.github.sawaichi9527.eyeshell.terminal.ScrollRegionSample(
+            top = terminal.scrollRegionTop,
+            bottom = terminal.scrollRegionBottom,
+            height = terminal.terminalHeight,
+            alternateScreen = widget.terminalTextBuffer.isUsingAlternateBuffer,
+        )
+    }
+
+    /**
+     * A shortened region is what makes a healthy tab look frozen: every new line is drawn on the
+     * region's bottom row. It can only be left behind by a program that exited mid-screen, so after
+     * 30 s the region is restored and the event is logged (the cursor position is preserved, and the
+     * scrollback is untouched).
+     */
+    private fun handleShortenedScrollRegion(sample: io.github.sawaichi9527.eyeshell.terminal.ScrollRegionSample) {
+        val connector = activeConnector
+        logger.warning(
+            "Restoring a shortened terminal scroll region (${sample.top}..${sample.bottom} of " +
+                "${sample.height}) on ${connector?.sessionName ?: "the terminal"}; " +
+                "new output was confined to that row",
+        )
+        val terminal = widget.terminal as? com.jediterm.terminal.model.JediTerminal ?: return
+        val cursorX = terminal.cursorX
+        val cursorY = terminal.cursorY
+        terminal.resetScrollRegions()
+        terminal.cursorPosition(cursorX + 1, cursorY)
     }
 
     private fun stopWatchdog() {
@@ -160,6 +196,8 @@ class JediTermTerminalView(
         repaintWatchdog = null
         flowWatchdog?.stop()
         flowWatchdog = null
+        regionWatchdog?.stop()
+        regionWatchdog = null
     }
 
     /**
@@ -410,6 +448,7 @@ class JediTermTerminalView(
             append("size=").append(terminal.terminalWidth).append('x').append(terminal.terminalHeight)
             append(" cursor=").append(terminal.cursorX).append(',').append(terminal.cursorY)
             append(" scrollTop=").append((terminal as? com.jediterm.terminal.model.JediTerminal)?.scrollRegionTop ?: -1)
+            append(" scrollBottom=").append((terminal as? com.jediterm.terminal.model.JediTerminal)?.scrollRegionBottom ?: -1)
             append(" visibleRows=").append(widget.terminalPanel.visibleStartRow)
                 .append("..").append(widget.terminalPanel.visibleEndRow)
             append(" screenLines=").append(buffer.screenLinesCount)

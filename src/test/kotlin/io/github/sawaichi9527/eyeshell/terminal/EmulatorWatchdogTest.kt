@@ -181,3 +181,51 @@ class FlowControlWatchdogTest {
         assertEquals(true, FlowControlWatchdog.isExhausted(flow(local = 1, remote = 0)))
     }
 }
+
+class ScrollRegionWatchdogTest {
+    @Test
+    fun `a shortened region is reported once`() {
+        val reports = AtomicInteger()
+        val watchdog = ScrollRegionWatchdog(
+            sample = { ScrollRegionSample(top = 1, bottom = 1, height = 10, alternateScreen = false) },
+            intervalMillis = 10,
+            requiredSamples = 2,
+            onShortened = { reports.incrementAndGet() },
+        )
+        watchdog.start()
+        try {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
+            while (reports.get() == 0 && System.nanoTime() < deadline) Thread.sleep(10)
+            Thread.sleep(80)
+            assertEquals(1, reports.get(), "one report per episode")
+        } finally {
+            watchdog.stop()
+        }
+    }
+
+    @Test
+    fun `a full region and the alternate screen are healthy`() {
+        assertEquals(false, ScrollRegionSample(1, 10, 10, false).isShortened)
+        assertEquals(false, ScrollRegionSample(1, 3, 10, alternateScreen = true).isShortened)
+        assertEquals(true, ScrollRegionSample(1, 1, 10, false).isShortened)
+        assertEquals(true, ScrollRegionSample(3, 10, 10, false).isShortened)
+    }
+
+    @Test
+    fun `a full region is never reported`() {
+        val reports = AtomicInteger()
+        val watchdog = ScrollRegionWatchdog(
+            sample = { ScrollRegionSample(1, 10, 10, false) },
+            intervalMillis = 10,
+            requiredSamples = 2,
+            onShortened = { reports.incrementAndGet() },
+        )
+        watchdog.start()
+        try {
+            Thread.sleep(120)
+            assertEquals(0, reports.get())
+        } finally {
+            watchdog.stop()
+        }
+    }
+}
