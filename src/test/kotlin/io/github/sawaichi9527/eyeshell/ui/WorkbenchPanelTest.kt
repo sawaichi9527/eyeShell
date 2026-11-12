@@ -73,6 +73,46 @@ class WorkbenchPanelTest {
     }
 
     @Test
+    fun `session lifecycle is logged with the session name`() {
+        val records = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val logger = java.util.logging.Logger.getLogger(TerminalSessionPage::class.java.name)
+        val handler = object : java.util.logging.Handler() {
+            override fun publish(record: java.util.logging.LogRecord) {
+                if (record.level.intValue() >= java.util.logging.Level.INFO.intValue()) records.add(record.message)
+            }
+
+            override fun flush() = Unit
+
+            override fun close() = Unit
+        }
+        logger.addHandler(handler)
+
+        lateinit var page: TerminalSessionPage
+        try {
+            SwingUtilities.invokeAndWait {
+                val panel = WorkbenchPanel()
+                val view = TestTerminalView(JPanel())
+                val session = TestTerminalSession("logged-session")
+                page = TerminalSessionPage(panel, view, TestHostSession(session), session)
+                page.attach()
+                panel.addSession("logged", page.component, page::close)
+            }
+            SwingUtilities.invokeAndWait { page.close() }
+
+            assertTrue(
+                records.contains("Terminal session attached: logged-session"),
+                "the log must show when the tab started; found $records",
+            )
+            assertTrue(
+                records.any { it.startsWith("Terminal session closed from the user interface: logged-session") },
+                "the log must show when the tab was closed; found $records",
+            )
+        } finally {
+            logger.removeHandler(handler)
+        }
+    }
+
+    @Test
     fun `an emulator failure closes the session and reports failed`() {
         lateinit var panel: WorkbenchPanel
         lateinit var page: TerminalSessionPage

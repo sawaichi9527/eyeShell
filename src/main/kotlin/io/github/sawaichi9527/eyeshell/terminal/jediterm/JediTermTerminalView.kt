@@ -150,7 +150,10 @@ class JediTermTerminalView(
             Diagnostics.write(
                 directory = directory,
                 reason = "terminal-stall-${connector.sessionName}",
-                sessions = listOf("session=${connector.sessionName} state=stalled"),
+                sessions = listOf(
+                    "session=${connector.sessionName} state=stalled" +
+                        connector.flowForDiagnostics(),
+                ),
             )
         }
         // The page closes the session and shows the failure; closing the channel is what makes a
@@ -399,6 +402,12 @@ internal class SessionTtyConnector(
     val sessionName: String
         get() = session.name
 
+    /** Appends the channel window sizes to a diagnostic line when the transport can report them. */
+    fun flowForDiagnostics(): String = session.flowControl()?.let { flow ->
+        " localWindow=${flow.localWindow}/${flow.localWindowMax}" +
+            " remoteWindow=${flow.remoteWindow}/${flow.remoteWindowMax}"
+    }.orEmpty()
+
     /** The emulator thread, captured from the first read so the watchdog can sample it. */
     @Volatile
     var emulatorThread: Thread? = null
@@ -464,7 +473,11 @@ internal class SessionTtyConnector(
             if (stall.shouldReport()) {
                 logger.warning(
                     "No terminal output for ${stall.silenceMillis() / 1000}s on ${session.name}; " +
-                        "the session is still open and the emulator is waiting",
+                        "the session is still open and the emulator is waiting" +
+                        session.flowControl()?.let { flow ->
+                            " (localWindow=${flow.localWindow}/${flow.localWindowMax}, " +
+                                "remoteWindow=${flow.remoteWindow}/${flow.remoteWindowMax})"
+                        }.orEmpty(),
                 )
             }
             Thread.sleep(READ_POLL_MILLIS)

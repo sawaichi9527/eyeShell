@@ -370,6 +370,7 @@ class EyeShellWindow(
 
     override fun dispose() {
         if (!closed.compareAndSet(false, true)) return
+        windowLogger.info("eyeShell window closing")
         saveWindowPlacement()
         var failure: Throwable? = null
         try {
@@ -393,6 +394,11 @@ class EyeShellWindow(
             failure = accumulateFailure(failure, error)
         }
         failure?.let { throw it }
+    }
+
+    private companion object {
+        val windowLogger: java.util.logging.Logger =
+            java.util.logging.Logger.getLogger(EyeShellWindow::class.java.name)
     }
 }
 
@@ -617,6 +623,7 @@ internal class TerminalSessionPage(
         preset: HostConnectionPreset? = null,
         requestReconnect: ((HostConnectionPreset) -> Boolean)? = null,
     ) {
+        logger.info("Terminal session attached: ${session.name}")
         terminalView.attach(session)
         outputController.install(
             owner,
@@ -642,6 +649,7 @@ internal class TerminalSessionPage(
         terminalView.resetForReattach()
         terminalView.attach(newSession)
         emulatorFailed.set(false)
+        logger.info("Terminal session reconnected in place: ${newSession.name}")
 
         exitGeneration.incrementAndGet()
         monitorStarted.set(false)
@@ -700,8 +708,13 @@ internal class TerminalSessionPage(
         val watched = session
         val generation = exitGeneration.incrementAndGet()
         Thread.ofVirtual().name("terminal-exit-${watched.name}").start {
-            watched.awaitExit()
+            val status = watched.awaitExit()
             if (closed.get() || exitGeneration.get() != generation) return@start
+            val failure = emulatorFailed.get()
+            logger.info(
+                "Terminal session ended: ${watched.name} exitStatus=$status " +
+                    "outcome=${if (failure) "failed" else "closed"}",
+            )
             SwingUtilities.invokeLater {
                 if (!closed.get() && exitGeneration.get() == generation) callback()
             }
@@ -738,6 +751,7 @@ internal class TerminalSessionPage(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        logger.info("Terminal session closed from the user interface: ${session.name} (emulatorFailed=$hasEmulatorFailed)")
         exitGeneration.incrementAndGet()
         removeReconnectOnEnter()
         monitorSampler.close()

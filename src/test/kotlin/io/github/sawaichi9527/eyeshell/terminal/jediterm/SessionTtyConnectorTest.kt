@@ -3,6 +3,7 @@ package io.github.sawaichi9527.eyeshell.terminal.jediterm
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import java.util.concurrent.atomic.AtomicBoolean
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /**
@@ -34,11 +35,30 @@ class SessionTtyConnectorTest {
         assertEquals("ls\r", session.text.toString())
     }
 
+    @Test
+    fun `the channel windows are available for diagnostics`() {
+        val session = RecordingSession()
+        session.flow = io.github.sawaichi9527.eyeshell.terminal.TerminalFlowControl(
+            localWindow = 0,
+            localWindowMax = 2_097_152,
+            remoteWindow = 1_000_000,
+            remoteWindowMax = 2_097_152,
+        )
+
+        val text = SessionTtyConnector(session).flowForDiagnostics()
+
+        assertTrue(text.contains("localWindow=0/2097152"), text)
+        assertTrue(text.contains("remoteWindow=1000000/2097152"), text)
+    }
+
     private class RecordingSession : TerminalSession {
         private val closed = AtomicBoolean()
 
         @Volatile
         var open: Boolean = true
+
+        @Volatile
+        var flow: io.github.sawaichi9527.eyeshell.terminal.TerminalFlowControl? = null
 
         var writeCount = 0
         val text = StringBuilder()
@@ -47,6 +67,8 @@ class SessionTtyConnectorTest {
 
         override val isOpen: Boolean
             get() = open && !closed.get()
+
+        override fun flowControl(): io.github.sawaichi9527.eyeshell.terminal.TerminalFlowControl? = flow
 
         override fun read(buffer: CharArray, offset: Int, length: Int): Int = -1
 

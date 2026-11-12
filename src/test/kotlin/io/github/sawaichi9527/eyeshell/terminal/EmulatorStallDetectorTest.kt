@@ -1,7 +1,6 @@
 package io.github.sawaichi9527.eyeshell.terminal
 
-import org.junit.jupiter.api.Assertions.assertFalse
-import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
 class EmulatorStallDetectorTest {
@@ -22,38 +21,38 @@ class EmulatorStallDetectorTest {
         val detector = EmulatorStallDetector(requiredSamples = 2)
 
         repeat(10) {
-            assertFalse(detector.sample(Thread.State.TIMED_WAITING, idle), "an idle terminal is healthy")
+            assertEquals(StallSample.NONE, detector.sample(Thread.State.TIMED_WAITING, idle), "an idle terminal is healthy")
         }
     }
 
     @Test
-    fun `a repeatedly blocked stack is reported exactly once`() {
+    fun `a repeatedly blocked stack is suspected first and then confirmed once`() {
         val detector = EmulatorStallDetector(requiredSamples = 3)
 
-        assertFalse(detector.sample(Thread.State.WAITING, blocked))
-        assertFalse(detector.sample(Thread.State.WAITING, blocked))
-        assertTrue(detector.sample(Thread.State.WAITING, blocked), "the third identical sample reports")
-        assertFalse(detector.sample(Thread.State.WAITING, blocked), "one report per episode")
+        assertEquals(StallSample.SUSPECTED, detector.sample(Thread.State.WAITING, blocked))
+        assertEquals(StallSample.NONE, detector.sample(Thread.State.WAITING, blocked))
+        assertEquals(StallSample.STALLED, detector.sample(Thread.State.WAITING, blocked), "the third identical sample confirms")
+        assertEquals(StallSample.NONE, detector.sample(Thread.State.WAITING, blocked), "one report per episode")
     }
 
     @Test
     fun `a busy or changing emulator is not reported`() {
         val detector = EmulatorStallDetector(requiredSamples = 2)
 
-        repeat(5) { detector.sample(Thread.State.RUNNABLE, blocked) }
+        repeat(5) { assertEquals(StallSample.NONE, detector.sample(Thread.State.RUNNABLE, blocked)) }
 
-        assertFalse(detector.sample(Thread.State.BLOCKED, blocked))
+        assertEquals(StallSample.SUSPECTED, detector.sample(Thread.State.BLOCKED, blocked))
         val other = blocked + "com.jediterm.terminal.model.TerminalTextBuffer.lock"
-        assertFalse(detector.sample(Thread.State.BLOCKED, other), "a moving stack is progress")
+        assertEquals(StallSample.SUSPECTED, detector.sample(Thread.State.BLOCKED, other), "a new stack restarts the episode")
     }
 
     @Test
     fun `progress between samples re-arms the detector`() {
         val detector = EmulatorStallDetector(requiredSamples = 2)
 
-        detector.sample(Thread.State.WAITING, blocked)
-        detector.sample(Thread.State.TIMED_WAITING, idle)
-        assertFalse(detector.sample(Thread.State.WAITING, blocked), "the idle sample cleared the episode")
-        assertTrue(detector.sample(Thread.State.WAITING, blocked))
+        assertEquals(StallSample.SUSPECTED, detector.sample(Thread.State.WAITING, blocked))
+        assertEquals(StallSample.NONE, detector.sample(Thread.State.TIMED_WAITING, idle))
+        assertEquals(StallSample.SUSPECTED, detector.sample(Thread.State.WAITING, blocked), "the idle sample cleared the episode")
+        assertEquals(StallSample.STALLED, detector.sample(Thread.State.WAITING, blocked))
     }
 }

@@ -35,9 +35,27 @@ interface TerminalSession : AutoCloseable {
      */
     fun rawOutput(): ByteArray? = null
 
+    /**
+     * Transport flow control, when the session can report it. A depleted `localWindow` means the
+     * peer has been told to wait and is blocked writing to us — the shape of a terminal that stopped
+     * consuming while the SSH connection still looks open.
+     */
+    fun flowControl(): TerminalFlowControl? = null
+
     fun resize(columns: Int, rows: Int)
 
     fun ready(): Boolean
 
     fun awaitExit(): Int
 }
+
+/**
+ * SSH channel windows for a live terminal. [localWindow] is what the peer may still send to us; when
+ * it reaches zero the remote is blocked and every channel on that connection can stall.
+ */
+data class TerminalFlowControl(
+    val localWindow: Long,
+    val localWindowMax: Long,
+    val remoteWindow: Long,
+    val remoteWindowMax: Long,
+)

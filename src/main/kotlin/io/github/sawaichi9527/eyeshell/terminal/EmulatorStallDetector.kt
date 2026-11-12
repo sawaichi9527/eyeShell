@@ -3,6 +3,18 @@ package io.github.sawaichi9527.eyeshell.terminal
 import java.util.logging.Level
 import java.util.logging.Logger
 
+/** Outcome of one watchdog sample. */
+internal enum class StallSample {
+    /** Healthy: idle poll loop, a runnable thread, or fewer repeated samples than the threshold. */
+    NONE,
+
+    /** A non-idle blocked stack repeated for the first time; worth recording even if it recovers. */
+    SUSPECTED,
+
+    /** The threshold was reached: treat the terminal as failed. */
+    STALLED,
+}
+
 /**
  * Decides whether the terminal emulator thread has stopped making progress.
  *
@@ -14,19 +26,24 @@ import java.util.logging.Logger
  * A runnable thread is never reported, because a busy emulator is still making progress (even a long
  * parse shows a moving stack only at coarse resolution, so treating it as a stall would disconnect
  * healthy sessions).
+ *
+ * The first repeated observation is reported as [StallSample.SUSPECTED] so a user who closes the tab
+ * early still leaves a stack trace in the log; the confirmed [StallSample.STALLED] follows after
+ * [requiredSamples] identical samples.
  */
 internal class EmulatorStallDetector(
     internal val requiredSamples: Int = 3,
 ) {
     private var signature: String? = null
     private var repeats = 0
-    private var reported = false
+    private var reportState = ReportState.NONE
 
-    /** Returns true exactly once when the same non-progressing stack has been seen [requiredSamples] times. */
-    fun sample(state: Thread.State, frames: List<String>): Boolean {
+    private enum class ReportState { NONE, SUSPECTED, STALLED }
+
+    fun sample(state: Thread.State, frames: List<String>): StallSample {
         if (state == Thread.State.RUNNABLE || state == Thread.State.NEW || isIdle(frames)) {
             reset()
-            return false
+            return StallSample.NONE
         }
         val current = frames.joinToString("\n")
         if (current == signature) {
@@ -34,18 +51,25 @@ internal class EmulatorStallDetector(
         } else {
             signature = current
             repeats = 1
+            // A different blocked stack is a new episode worth reporting, but a confirmed stall
+            // stays confirmed for this session.
+            if (reportState == ReportState.SUSPECTED) reportState = ReportState.NONE
         }
-        if (repeats >= requiredSamples && !reported) {
-            reported = true
-            return true
+        if (repeats >= requiredSamples && reportState != ReportState.STALLED) {
+            reportState = ReportState.STALLED
+            return StallSample.STALLED
         }
-        return false
+        if (repeats == 1 && reportState == ReportState.NONE) {
+            reportState = ReportState.SUSPECTED
+            return StallSample.SUSPECTED
+        }
+        return StallSample.NONE
     }
 
     fun reset() {
         signature = null
         repeats = 0
-        reported = false
+        reportState = ReportState.NONE
     }
 
     internal companion object {
@@ -88,13 +112,24 @@ internal class EmulatorWatchdog(
                     continue
                 }
                 val frames = sampled.stackTrace.map { "${it.className}.${it.methodName}" }
-                if (detector.sample(sampled.state, frames)) {
-                    logger.log(
+                when (detector.sample(sampled.state, frames)) {
+                    StallSample.SUSPECTED -> logger.log(
                         Level.WARNING,
-                        "Terminal emulator thread ${sampled.name} stopped making progress " +
-                            "(${sampled.state}) for at least ${intervalMillis * detector.requiredSamples / 1000}s",
+                        buildString {
+                            append("Terminal emulator thread ")
+                            append(sampled.name)
+                            append(" has not moved for ${intervalMillis / 1000}s (")
+                            append(sampled.state)
+                            append("); sampling again, stack:")
+                            frames.forEach { frame -> append("\n    at ").append(frame) }
+                        },
                     )
-                    onStall(frames)
+
+                    StallSample.STALLED -> {
+                        onStall(frames)
+                    }
+
+                    StallSample.NONE -> Unit
                 }
             }
         }

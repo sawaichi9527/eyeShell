@@ -2,6 +2,7 @@ package io.github.sawaichi9527.eyeshell.ssh
 
 import io.github.sawaichi9527.eyeshell.sftp.SftpClient
 import io.github.sawaichi9527.eyeshell.terminal.RawOutputLog
+import io.github.sawaichi9527.eyeshell.terminal.TerminalFlowControl
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import java.nio.ByteBuffer
 import java.nio.CharBuffer
@@ -542,6 +543,22 @@ private class MinaSshTerminalSession(
      * continue through the live decoder, so replaying them as well would duplicate characters.
      */
     override fun rawOutput(): ByteArray? = synchronized(stateLock) { rawLog.snapshot(undecoded.position()) }
+
+    /**
+     * Reports the SSH channel windows. A `localWindow` at zero means the peer cannot send another
+     * byte until this session consumes data, which is exactly the state a "connected but frozen"
+     * terminal is in when the emulator stopped reading.
+     */
+    override fun flowControl(): TerminalFlowControl? = runCatching {
+        val local = channel.localWindow
+        val remote = channel.remoteWindow
+        TerminalFlowControl(
+            localWindow = local.size,
+            localWindowMax = local.maxSize,
+            remoteWindow = remote.size,
+            remoteWindowMax = remote.maxSize,
+        )
+    }.getOrNull()
 
     @Synchronized
     override fun write(bytes: ByteArray) {
