@@ -411,8 +411,11 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - The replay depends on the emulator stopping promptly: the connector polls every 5 ms, and if the detach does not finish within 2 s the tab keeps its current text and only new output follows the new encoding (a warning is logged). Bytes that were already inside the TTY buffer when the switch happened are part of the replayed prefix, so a rare duplicated/garbled character at the switch point is possible.
 - Retaining raw output costs up to 8 MiB per open session in addition to the 100,000-line scrollback; the cap is fixed in `RawOutputLog` and not user-configurable yet.
 - The encoding list is fixed to the ten JDK-standard charsets; there is no free-form charset entry, no per-host encoding, and no automatic detection (FinalShell behaves the same way). Export is always UTF-8 regardless of the terminal encoding (PRODUCT_SPEC §10.4).
+- Running the suite over a headless SSH session needs a virtual display: without `DISPLAY`, 35 Swing tests throw `HeadlessException`; `xvfb-run -a ./scripts/gradlew-local.sh test check` runs them. Under Xvfb there is no window manager, so `EyeShellWindowPlacementTest > a maximized window is restored maximized` fails by design — a real desktop (or a WM) is required for that one assertion.
 
 ## Validation Evidence
+
+- Linux smoke test on the local VM (2026-11-12, tag `v0.1.9`, host `w540vm01` 192.168.23.46, Ubuntu 24.04.5 / kernel 7.0.0-43, 2 vCPU, 7 GB): cloned the release tag with its submodule (fork `f2b0f53`), bootstrapped Temurin 21.0.12+8 and Gradle 9.5.0, then ran `./scripts/gradlew-local.sh test check`. A plain SSH session (no `DISPLAY`) produced **35 `HeadlessException` failures in Swing tests**; re-running under `xvfb-run -a` produced **505 tests: 1 failed, 0 errors, 22 skipped**. The single failure is `EyeShellWindowPlacementTest > a maximized window is restored maximized`: Xvfb has no window manager, so `setExtendedState(MAXIMIZED_BOTH)` never reaches a WM and `extendedState` stays 0. No product defect was found on Linux; the release code compiles and runs under the project-local toolchain.
 
 ### Release 0.1.9 (Windows portable ZIP, 2026-11-12)
 
