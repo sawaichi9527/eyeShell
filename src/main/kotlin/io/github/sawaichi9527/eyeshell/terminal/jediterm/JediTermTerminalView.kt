@@ -23,6 +23,7 @@ import io.github.sawaichi9527.eyeshell.terminal.TerminalColorSchemes
 import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
 import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
 import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputSnapshot
+import io.github.sawaichi9527.eyeshell.terminal.EmulatorStallDetector
 import io.github.sawaichi9527.eyeshell.terminal.EmulatorWatchdog
 import io.github.sawaichi9527.eyeshell.terminal.TerminalReadStall
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
@@ -46,6 +47,10 @@ class JediTermTerminalView(
     cjkFontFamily: String? = null,
     /** Where a stall writes its thread dump; null keeps diagnostics out of tests and other embeddings. */
     private val diagnosticsDirectory: java.nio.file.Path? = null,
+    /** How often the watchdog samples the emulator thread; tests shorten the 5 s default. */
+    private val emulatorStallSampleMillis: Long = 5_000,
+    /** Consecutive identical blocked samples that count as a stall (3 x 5 s = 15 s by default). */
+    private val emulatorStallSamples: Int = 3,
 ) : TerminalView {
     private val settings = EyeShellTerminalSettings(scrollbackLines, maxRefreshRate, font, colorScheme, cjkFontFamily)
     private val widget = EyeShellTerminalWidget(columns, rows, settings)
@@ -121,6 +126,8 @@ class JediTermTerminalView(
         stopWatchdog()
         watchdog = EmulatorWatchdog(
             thread = { activeConnector?.emulatorThread },
+            intervalMillis = emulatorStallSampleMillis,
+            detector = EmulatorStallDetector(emulatorStallSamples),
             onStall = ::handleEmulatorStall,
         ).also { it.start() }
     }
