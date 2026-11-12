@@ -32,6 +32,8 @@ A freeze produces these lines without any user action:
 | `No terminal output for <n>s on <session>; … (localWindow=…, remoteWindow=…)` | The emulator is alive and polling but no bytes arrived for a minute. `localWindow` at or near 0 means the server is blocked because eyeShell stopped consuming; a healthy `localWindow` means the peer simply had nothing to send. |
 | `Uncaught exception in thread "…"` with a stack trace | Any uncaught failure, including a Swing paint that threw. Previously this went to a stderr nobody can read in a packaged build. |
 | `Terminal session attached/ended/closed …` | Lifecycle timeline: when a tab started, when the remote side ended it (`exitStatus=`), and when the user closed it. |
+| `Terminal output is being consumed but the panel has not repainted` | The repaint watchdog: characters arrive and are parsed, but the panel never paints. A `thread-dump-*.txt` is written. |
+| `Settings → About → Write diagnostics` | Writes every open tab's model state: size, cursor, scroll-region top, visible rows, screen/history line counts, alternate-screen flag, paint counter, last paint age, consumed characters. Use this while the tab is frozen. |
 
 A failed tab keeps its scrollback and can be reconnected in place with Enter. When it fails, the
 session is closed, so a keystroke can no longer reach a remote shell the user cannot see.
@@ -41,10 +43,14 @@ session is closed, so a keystroke can no longer reach a remote shell the user ca
 1. Reproduce the freeze (for example `sudo apt autoremove` on the host).
 2. **Wait 20–30 seconds** before copying: the watchdog confirms a stall after 15 s and writes the
    stack, and the 60-second silence warning adds the channel windows.
-3. Copy the whole `%LOCALAPPDATA%\eyeShell\logs\` folder. Closing the tab first is **not** required —
+3. **While the tab is frozen, use `Settings → About → Write diagnostics`** and include the
+   `thread-dump-manual-*.txt` it writes: it contains each tab's cursor, scroll region, visible rows,
+   screen/history counts, alternate-screen flag, and paint counters, which is what separates a stuck
+   cursor/scroll state from a renderer or transport problem.
+4. Copy the whole `%LOCALAPPDATA%\eyeShell\logs\` folder. Closing the tab first is **not** required —
    the file handler flushes after every record, so the log is current while eyeShell runs. Keeping
    the tab open also preserves the status chip (Connected / Failed) as evidence.
-4. Note the wall-clock time and what the last visible output was.
+5. Note the wall-clock time and what the last visible output was.
 
 Nothing else is required. If the whole application (not just the tab) is unresponsive, the log still
 holds the last lines written before it froze.
@@ -71,6 +77,8 @@ path. **Treat that file as sensitive**: it is terminal output and may contain wh
 | `stalled … at TerminalTextBuffer.lock` / `modify` | Lock contention on the buffer (paint, export, or highlight scan). Only possible while a highlight rule exists. | Check whether the tab had rules; the snapshot path is otherwise unused. |
 | `stalled … at SessionTtyConnector.readLoop` → `MinaSshTerminalSession.read` | The channel stopped delivering bytes while the window still looked open. | The 60-second line reports `localWindow`; near 0 means the server was blocked on us. |
 | No `stalled` line, but `No terminal output for 60s … (localWindow=0/…)` | The emulator kept polling while the peer was blocked: the classic back-pressure loop where the terminal stops consuming and the whole SSH connection (Monitor included) goes silent. | The tab is marked Failed only after the watchdog confirms; otherwise report the log as-is. |
+| Screen updates but new lines overwrite the last row, Enter does not advance, typed letters restart at column 0 | The terminal model's cursor/scroll state is wrong (scroll region, cursor row, or viewport), not the stream: characters are received and painted. | The manual diagnostics snapshot prints `cursor`, `scrollTop`, `visibleRows`, `screenLines`, `historyLines`, and `alternate`; those six values identify the state. |
+| `Terminal output is being consumed but the panel has not repainted` | A renderer failure: the model advances but the panel never paints. | The accompanying dump names the paint path; the tab stays Connected by design until a stall is confirmed. |
 | `Uncaught exception in thread "…"` on the EDT | A failing paint or event handler: the screen stops updating while the tab still says **Connected**. | Send that stack; it names the exact component. |
 | `emulator stopped` + `Exception running terminal` with a stack trace | The emulator threw while parsing output. | The stack trace names the failing component; add the raw byte capture to reproduce it. |
 
