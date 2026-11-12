@@ -26,21 +26,25 @@ A freeze produces these lines without any user action:
 | Message | Meaning |
 |---|---|
 | `Terminal emulator stalled on <session>; the tab stopped updating` + stack frames | The watchdog saw the emulator thread repeat a blocked stack for 15 s. A `thread-dump-*.txt` is written next to the log, the tab is marked **Failed**, and the SSH channel is closed. |
+| `Terminal emulator thread <session> has not moved for 5s (<state>)` + stack frames | The first repeated blocked sample. Recorded even if the tab is closed before the 15-second confirmation. |
 | `Terminal emulator stopped while <session> reported the session still open` | The emulator thread died (usually on a parse exception); the tab is marked **Failed**. |
 | `Terminal read failed on <session>` with a stack trace | The channel or the decoder threw while the session was open. |
-| `No terminal output for <n>s on <session>; …` | The emulator is alive and polling but the server sent nothing for a minute (once per silent episode). |
-| `Exception running terminal` with a stack trace | JediTerm's own report for the same failure; the file handler captures what a packaged build would otherwise print to a nonexistent console. |
+| `No terminal output for <n>s on <session>; … (localWindow=…, remoteWindow=…)` | The emulator is alive and polling but no bytes arrived for a minute. `localWindow` at or near 0 means the server is blocked because eyeShell stopped consuming; a healthy `localWindow` means the peer simply had nothing to send. |
+| `Uncaught exception in thread "…"` with a stack trace | Any uncaught failure, including a Swing paint that threw. Previously this went to a stderr nobody can read in a packaged build. |
+| `Terminal session attached/ended/closed …` | Lifecycle timeline: when a tab started, when the remote side ended it (`exitStatus=`), and when the user closed it. |
 
 A failed tab keeps its scrollback and can be reconnected in place with Enter. When it fails, the
 session is closed, so a keystroke can no longer reach a remote shell the user cannot see.
 
 ## What to send after a freeze
 
-1. Reproduce the freeze (for example `sudo apt dist-upgrade` on the host).
-2. Note the wall-clock time and what the last visible output was.
-3. Close the frozen tab (or press Enter to reconnect) and stop eyeShell normally so the log is fully
-   flushed.
-4. Zip `%LOCALAPPDATA%\eyeShell\logs\` and attach it, together with the two notes above.
+1. Reproduce the freeze (for example `sudo apt autoremove` on the host).
+2. **Wait 20–30 seconds** before copying: the watchdog confirms a stall after 15 s and writes the
+   stack, and the 60-second silence warning adds the channel windows.
+3. Copy the whole `%LOCALAPPDATA%\eyeShell\logs\` folder. Closing the tab first is **not** required —
+   the file handler flushes after every record, so the log is current while eyeShell runs. Keeping
+   the tab open also preserves the status chip (Connected / Failed) as evidence.
+4. Note the wall-clock time and what the last visible output was.
 
 Nothing else is required. If the whole application (not just the tab) is unresponsive, the log still
 holds the last lines written before it froze.
@@ -65,9 +69,10 @@ path. **Treat that file as sensitive**: it is terminal output and may contain wh
 |---|---|---|
 | `stalled … at SynchronizedOutput.await` → `TerminalDataStream.getChar` | A `CSI ? 2026` synchronized-update block was entered and the stream went quiet. JediTerm 3.76 starts a block only on `CSI ? 2026 h`; a regression means the submodule was pinned back. | Confirm with the optional `script` capture below; otherwise upgrade. |
 | `stalled … at TerminalTextBuffer.lock` / `modify` | Lock contention on the buffer (paint, export, or highlight scan). Only possible while a highlight rule exists. | Check whether the tab had rules; the snapshot path is otherwise unused. |
-| `stalled … at SessionTtyConnector.readLoop` → `MinaSshTerminalSession.read` | The channel stopped delivering bytes. | Look at the host's sshd and the network. |
+| `stalled … at SessionTtyConnector.readLoop` → `MinaSshTerminalSession.read` | The channel stopped delivering bytes while the window still looked open. | The 60-second line reports `localWindow`; near 0 means the server was blocked on us. |
+| No `stalled` line, but `No terminal output for 60s … (localWindow=0/…)` | The emulator kept polling while the peer was blocked: the classic back-pressure loop where the terminal stops consuming and the whole SSH connection (Monitor included) goes silent. | The tab is marked Failed only after the watchdog confirms; otherwise report the log as-is. |
+| `Uncaught exception in thread "…"` on the EDT | A failing paint or event handler: the screen stops updating while the tab still says **Connected**. | Send that stack; it names the exact component. |
 | `emulator stopped` + `Exception running terminal` with a stack trace | The emulator threw while parsing output. | The stack trace names the failing component; add the raw byte capture to reproduce it. |
-| No message but the tab is frozen | The dump was written before the stall threshold (15 s), or the tab was closed. | Reproduce again; the report is automatic. |
 
 ## Appendix: cross-check on the SSH host
 
