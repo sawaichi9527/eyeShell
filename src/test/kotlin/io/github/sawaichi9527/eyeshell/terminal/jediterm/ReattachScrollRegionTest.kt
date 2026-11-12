@@ -8,14 +8,32 @@ import org.junit.jupiter.api.Test
  * A program that exits while a scroll region is active leaves the terminal drawing every new line on
  * that region's bottom row. Reusing the widget for a reconnect inherited the state, so the tab stayed
  * "frozen" even after a fresh SSH session.
+ *
+ * DECSTBM also requires the top margin to be strictly above the bottom one; xterm, Ghostty, and
+ * Windows Terminal ignore a one-line region, and so does the patched JediTerm.
  */
 class ReattachScrollRegionTest {
+    @Test
+    fun `a one-line scroll region is ignored like xterm`() {
+        val view = onEdt { JediTermTerminalView(columns = 80, rows = 10) }
+        try {
+            onEdt { view.setScrollRegionForTest(top = 10, bottom = 10) }
+
+            assertTrue(
+                view.terminalState().contains("scrollTop=1"),
+                "a region that never scrolls must not be applied: ${view.terminalState()}",
+            )
+        } finally {
+            onEdt { view.close() }
+        }
+    }
+
     @Test
     fun `reattaching restores a full-height scroll region`() {
         val view = onEdt { JediTermTerminalView(columns = 80, rows = 10) }
         try {
-            onEdt { view.setScrollRegionForTest(top = 10, bottom = 10) }
-            assertTrue(view.terminalState().contains("scrollTop=10"), view.terminalState())
+            onEdt { view.setScrollRegionForTest(top = 5, bottom = 10) }
+            assertTrue(view.terminalState().contains("scrollTop=5"), view.terminalState())
 
             onEdt { view.resetForReattach() }
 

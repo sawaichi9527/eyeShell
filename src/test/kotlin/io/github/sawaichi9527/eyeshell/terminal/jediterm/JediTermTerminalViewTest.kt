@@ -581,6 +581,7 @@ class JediTermTerminalViewTest {
                     "Add Color Highlight Rule...",
                     "Manage Color Highlight Rules...",
                     "Clear Buffer",
+                    "Reset Terminal",
                 ), actions.map { it.name })
                 assertEquals(listOf(2, 6, 9), actions.indices.filter { actions[it].isSeparated })
                 assertFalse(actions.single { it.name == "Copy" }.isEnabled(null))

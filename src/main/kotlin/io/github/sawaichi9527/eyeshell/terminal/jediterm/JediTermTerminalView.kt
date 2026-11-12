@@ -58,7 +58,7 @@ class JediTermTerminalView(
     private val widget = EyeShellTerminalWidget(columns, rows, settings)
     private val searchController = JediTermSearchController(widget)
     private val highlightController = JediTermHighlightController(widget)
-    private val contextActionProvider = ContextActionProvider(widget, searchController::show)
+    private val contextActionProvider = ContextActionProvider(widget, searchController::show, ::resetTerminalState)
     @Volatile
     private var activeConnector: SessionTtyConnector? = null
 
@@ -302,6 +302,21 @@ class JediTermTerminalView(
         widget.terminal.setScrollingRegion(top, bottom)
     }
 
+    /**
+     * User-visible reset for a program that left the terminal in a strange state. Mature terminals
+     * offer the same escape hatch; the scrollback and the screen content are kept.
+     */
+    private fun resetTerminalState() {
+        check(SwingUtilities.isEventDispatchThread()) { "Terminal reset must run on the Swing EDT" }
+        val terminal = widget.terminal
+        val cursorX = terminal.cursorX
+        val cursorY = terminal.cursorY
+        terminal.setModeEnabled(com.jediterm.terminal.TerminalMode.OriginMode, false)
+        terminal.resetScrollRegions()
+        terminal.cursorPosition(cursorX + 1, cursorY)
+        logger.info("Terminal state reset from the context menu (origin mode and scroll region restored)")
+    }
+
     override fun resetForReattach() {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal reattach preparation must run on the Swing EDT" }
         if (widget.terminalTextBuffer.isUsingAlternateBuffer) {
@@ -478,6 +493,7 @@ class JediTermTerminalView(
 private class ContextActionProvider(
     private val widget: JediTermWidget,
     private val showSearch: () -> Unit,
+    private val resetTerminal: () -> Unit,
 ) : TerminalActionProvider {
     var actions: TerminalContextActions? = null
     var hasSession: Boolean = false
@@ -515,6 +531,12 @@ private class ContextActionProvider(
             hasSession && !widget.terminalTextBuffer.isUsingAlternateBuffer
         }) {
             if (!widget.terminalTextBuffer.isUsingAlternateBuffer) widget.terminalPanel.clearBuffer()
+        },
+        // The standard escape hatch every mature terminal offers (xterm's reset menu entry, VTE's
+        // "Reset", Windows Terminal's reset action) for a program that left the terminal in a
+        // strange state, typically a scroll region or origin mode.
+        action(I18n.t("terminal.resetTerminal"), enabled = { hasSession }) {
+            resetTerminal()
         },
     )
 
