@@ -10,6 +10,7 @@ import java.nio.charset.Charset
 import java.nio.charset.CharsetDecoder
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
+import java.util.logging.Logger
 import java.nio.file.Files
 import java.security.KeyPair
 import java.time.Duration
@@ -486,6 +487,7 @@ private class MinaSshTerminalSession(
     private val input = channel.invertedOut
     private val output = channel.invertedIn
     private val rawLog = RawOutputLog()
+    private val lastInputWarningAt = AtomicLong(0)
 
     /** Guards the decoder state so a Settings change can land between two reads. */
     private val stateLock = Any()
@@ -562,8 +564,28 @@ private class MinaSshTerminalSession(
 
     @Synchronized
     override fun write(bytes: ByteArray) {
+        warnWhenInputIsQueued()
         output.write(bytes)
         output.flush()
+    }
+
+    /**
+     * A remote window at zero means the server has not consumed our stdin, so the channel queues the
+     * bytes and the keystroke never reaches the shell — the user types into a tab that looks alive
+     * while the remote bash is still idle at its prompt. Logged once per half minute while it lasts.
+     */
+    private fun warnWhenInputIsQueued() {
+        val size = runCatching { channel.remoteWindow.size }.getOrNull() ?: return
+        if (size > 0) return
+        val now = System.currentTimeMillis()
+        val previous = lastInputWarningAt.get()
+        if (now - previous < INPUT_WARNING_INTERVAL_MILLIS || !lastInputWarningAt.compareAndSet(previous, now)) {
+            return
+        }
+        LOGGER.warning(
+            "Terminal input is queued on $name: the SSH remote window is 0, so the server has not " +
+                "consumed the previous bytes",
+        )
     }
 
     override fun write(text: String) {
@@ -668,6 +690,11 @@ private class MinaSshTerminalSession(
     private companion object {
         const val READ_BUFFER_SIZE = 8 * 1024
         const val DECODE_BUFFER_SIZE = 16 * 1024
+
+        /** One warning per half minute is enough to prove the state without flooding the log. */
+        const val INPUT_WARNING_INTERVAL_MILLIS = 30_000L
+
+        val LOGGER: Logger = Logger.getLogger("io.github.sawaichi9527.eyeshell.ssh.terminal")
 
         fun newDecoder(charset: Charset): CharsetDecoder = charset.newDecoder()
             .onMalformedInput(CodingErrorAction.REPLACE)
