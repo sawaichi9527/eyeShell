@@ -37,6 +37,10 @@ fun main(arguments: Array<String>) {
         ),
     )
     ShutdownNoiseFilter.install()
+    val captureTerminalBytes = arguments.contains(CAPTURE_TERMINAL_BYTES_FLAG)
+    if (captureTerminalBytes) {
+        LoggingSetup.logStartup(mapOf("terminalByteCapture" to "enabled"))
+    }
     val safeMode = SafeMode.detect(
         arguments,
         EyeShellTerminalSettings.MAX_SCROLLBACK_LINES,
@@ -88,12 +92,14 @@ fun main(arguments: Array<String>) {
                     ),
                     colorScheme = TerminalColorSchemes.fromId(appSettings.terminalColorSchemeId),
                     cjkFontFamily = appSettings.terminalFontCjkFamily.ifBlank { null },
+                    diagnosticsDirectory = logDirectory,
                 )
             },
             connectAction = { owner -> connectionController.connect(owner) },
             hostsAction = hostCatalogController::open,
             commandsController = commandsController,
             appSettings = appSettings,
+            captureRawBytes = captureTerminalBytes,
             closeAction = {
                 commandsController.close()
                 hostCatalogController.close()
@@ -103,6 +109,9 @@ fun main(arguments: Array<String>) {
         ).isVisible = true
     }
 }
+
+/** Opt-in terminal byte capture for diagnosing a freeze; see `docs/DIAGNOSTICS.md`. */
+internal const val CAPTURE_TERMINAL_BYTES_FLAG = "--capture-terminal-bytes"
 
 /**
  * Turns on the bundled `bg1` preset for a fresh profile, and restores a bundled preset whose file was

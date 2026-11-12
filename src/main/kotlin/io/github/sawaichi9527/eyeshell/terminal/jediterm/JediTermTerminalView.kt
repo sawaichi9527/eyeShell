@@ -15,6 +15,7 @@ import com.jediterm.terminal.ui.TerminalActionProvider
 import com.jediterm.terminal.ui.JediTermWidget
 import com.jediterm.terminal.ui.settings.DefaultSettingsProvider
 import com.jediterm.terminal.util.CharUtils
+import io.github.sawaichi9527.eyeshell.platform.Diagnostics
 import io.github.sawaichi9527.eyeshell.platform.I18n
 import io.github.sawaichi9527.eyeshell.terminal.TerminalBackgroundImage
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorScheme
@@ -22,6 +23,7 @@ import io.github.sawaichi9527.eyeshell.terminal.TerminalColorSchemes
 import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
 import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
 import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputSnapshot
+import io.github.sawaichi9527.eyeshell.terminal.EmulatorWatchdog
 import io.github.sawaichi9527.eyeshell.terminal.TerminalReadStall
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
@@ -42,6 +44,8 @@ class JediTermTerminalView(
     font: java.awt.Font = TerminalTypography.defaultFont(),
     colorScheme: TerminalColorScheme = TerminalColorSchemes.DEFAULT,
     cjkFontFamily: String? = null,
+    /** Where a stall writes its thread dump; null keeps diagnostics out of tests and other embeddings. */
+    private val diagnosticsDirectory: java.nio.file.Path? = null,
 ) : TerminalView {
     private val settings = EyeShellTerminalSettings(scrollbackLines, maxRefreshRate, font, colorScheme, cjkFontFamily)
     private val widget = EyeShellTerminalWidget(columns, rows, settings)
@@ -53,6 +57,7 @@ class JediTermTerminalView(
 
     @Volatile
     private var emulatorStopHandler: ((unexpected: Boolean) -> Unit)? = null
+    private var watchdog: EmulatorWatchdog? = null
 
     init {
         widget.terminalPanel.setPopupMenuActionProvider(contextActionProvider)
@@ -76,6 +81,7 @@ class JediTermTerminalView(
         activeConnector = connector
         widget.setTtyConnector(connector)
         widget.start()
+        startWatchdog()
     }
 
     override fun canAttach(): Boolean = widget.canOpenSession()
@@ -98,11 +104,51 @@ class JediTermTerminalView(
         }
         activeConnector = null
         contextActionProvider.hasSession = false
+        stopWatchdog()
         return true
     }
 
     override fun setEmulatorStopHandler(handler: ((unexpected: Boolean) -> Unit)?) {
         emulatorStopHandler = handler
+    }
+
+    /**
+     * Watches the emulator thread from outside. A thread that is blocked cannot report its own
+     * stall, and the tab would simply stop updating while the SSH channel stays open — including
+     * the input path, which is why a frozen tab must be treated as unsafe to type into.
+     */
+    private fun startWatchdog() {
+        stopWatchdog()
+        watchdog = EmulatorWatchdog(
+            thread = { activeConnector?.emulatorThread },
+            onStall = ::handleEmulatorStall,
+        ).also { it.start() }
+    }
+
+    private fun stopWatchdog() {
+        watchdog?.stop()
+        watchdog = null
+    }
+
+    private fun handleEmulatorStall(frames: List<String>) {
+        val connector = activeConnector ?: return
+        connector.markStallReported()
+        logger.severe(
+            buildString {
+                append("Terminal emulator stalled on ${connector.sessionName}; the tab stopped updating")
+                frames.forEach { frame -> append("\n    at ").append(frame) }
+            },
+        )
+        diagnosticsDirectory?.let { directory ->
+            Diagnostics.write(
+                directory = directory,
+                reason = "terminal-stall-${connector.sessionName}",
+                sessions = listOf("session=${connector.sessionName} state=stalled"),
+            )
+        }
+        // The page closes the session and shows the failure; closing the channel is what makes a
+        // keystroke in a frozen tab harmless instead of a command the user cannot see.
+        emulatorStopHandler?.invoke(true)
     }
 
     /**
@@ -112,14 +158,18 @@ class JediTermTerminalView(
      * reported and, from there, surfaced to the user and the log.
      */
     private fun handleEmulatorStopped() {
+        stopWatchdog()
         val connector = activeConnector
-        val unexpected = connector != null && !connector.expectedEnd
-        if (unexpected) {
-            logger.warning(
-                "Terminal emulator stopped while ${connector.sessionName} reported the session still open",
-            )
+        if (connector != null && !connector.expectedEnd) {
+            if (!connector.stallReported) {
+                logger.warning(
+                    "Terminal emulator stopped while ${connector.sessionName} reported the session still open",
+                )
+            }
+            emulatorStopHandler?.invoke(true)
+            return
         }
-        emulatorStopHandler?.invoke(unexpected)
+        emulatorStopHandler?.invoke(false)
     }
 
     override fun resetForReattach() {
@@ -252,6 +302,7 @@ class JediTermTerminalView(
         get() = widget.terminalPanel as EyeShellTerminalPanel
 
     override fun close() {
+        stopWatchdog()
         highlightController.close()
         searchController.close()
         widget.close()
@@ -323,7 +374,7 @@ private class ContextActionProvider(
     }
 }
 
-private class SessionTtyConnector(
+internal class SessionTtyConnector(
     private val session: TerminalSession,
 ) : TtyConnector {
     @Volatile
@@ -340,6 +391,20 @@ private class SessionTtyConnector(
 
     val sessionName: String
         get() = session.name
+
+    /** The emulator thread, captured from the first read so the watchdog can sample it. */
+    @Volatile
+    var emulatorThread: Thread? = null
+        private set
+
+    /** Set when the watchdog already reported this stall, so the later stop is not logged twice. */
+    @Volatile
+    var stallReported = false
+        private set
+
+    fun markStallReported() {
+        stallReported = true
+    }
 
     private val stall = TerminalReadStall()
 
@@ -375,6 +440,7 @@ private class SessionTtyConnector(
     }
 
     private fun readLoop(buffer: CharArray, offset: Int, length: Int): Int {
+        if (emulatorThread == null) emulatorThread = Thread.currentThread()
         while (true) {
             if (detached) return -1
             // Drain buffered output before reporting the end of a closed session, so the last chunk
@@ -398,9 +464,20 @@ private class SessionTtyConnector(
         }
     }
 
-    override fun write(bytes: ByteArray) = session.write(bytes)
+    /**
+     * Input is dropped once the session is over. A frozen tab must not pass keystrokes to a remote
+     * shell the user cannot see, and a closed channel would only raise an IOException inside
+     * JediTerm's writer anyway.
+     */
+    override fun write(bytes: ByteArray) {
+        if (!session.isOpen) return
+        session.write(bytes)
+    }
 
-    override fun write(string: String) = session.write(string)
+    override fun write(string: String) {
+        if (!session.isOpen) return
+        session.write(string)
+    }
 
     override fun isConnected(): Boolean = session.isOpen
 

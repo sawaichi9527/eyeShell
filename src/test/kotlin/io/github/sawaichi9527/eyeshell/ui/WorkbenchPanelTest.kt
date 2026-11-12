@@ -73,6 +73,38 @@ class WorkbenchPanelTest {
     }
 
     @Test
+    fun `an emulator failure closes the session and reports failed`() {
+        lateinit var panel: WorkbenchPanel
+        lateinit var page: TerminalSessionPage
+        lateinit var view: TestTerminalView
+        val session = CloseTrackingSession()
+
+        SwingUtilities.invokeAndWait {
+            panel = WorkbenchPanel()
+            view = TestTerminalView(JPanel())
+            page = TerminalSessionPage(panel, view, TestHostSession(session), session)
+            page.attach(reconnectPreset()) { true }
+            panel.addSession("frozen", page.component, page::close)
+            page.startEmulatorMonitor {
+                panel.updateSessionStatus(page.component, SessionStatus.FAILED)
+            }
+        }
+
+        try {
+            SwingUtilities.invokeAndWait {
+                view.emulatorStopCallback?.invoke(true)
+            }
+            // The status update is posted to the EDT, so flush the queue before asserting.
+            SwingUtilities.invokeAndWait { }
+
+            assertTrue(session.closed, "a frozen tab must close its channel so blind typing cannot execute")
+            assertTrue(panel.isSessionExited(page.component), "the tab must show the failure")
+        } finally {
+            SwingUtilities.invokeAndWait { panel.closeSessions() }
+        }
+    }
+
+    @Test
     fun `a failed session is reconnectable with enter`() {
         val reconnects = AtomicInteger()
         lateinit var panel: WorkbenchPanel
@@ -1082,9 +1114,14 @@ class WorkbenchPanelTest {
         var attachedSession: TerminalSession? = null
         var closeCount = 0
         var canAttachValue: Boolean = true
+        var emulatorStopCallback: ((Boolean) -> Unit)? = null
 
         override fun attach(session: TerminalSession) {
             attachedSession = session
+        }
+
+        override fun setEmulatorStopHandler(handler: ((unexpected: Boolean) -> Unit)?) {
+            emulatorStopCallback = handler
         }
 
         override fun canAttach(): Boolean = canAttachValue
@@ -1129,6 +1166,34 @@ class WorkbenchPanelTest {
         override fun awaitExit(): Int = 0
 
         override fun close() = Unit
+    }
+
+    /** An open session that records the close the failure path is supposed to perform. */
+    private class CloseTrackingSession : TerminalSession {
+        private val closedFlag = java.util.concurrent.atomic.AtomicBoolean()
+
+        val closed: Boolean
+            get() = closedFlag.get()
+
+        override val name: String = "frozen-session"
+        override val isOpen: Boolean
+            get() = !closedFlag.get()
+
+        override fun read(buffer: CharArray, offset: Int, length: Int): Int = -1
+
+        override fun write(bytes: ByteArray) = Unit
+
+        override fun write(text: String) = Unit
+
+        override fun resize(columns: Int, rows: Int) = Unit
+
+        override fun ready(): Boolean = false
+
+        override fun awaitExit(): Int = 0
+
+        override fun close() {
+            closedFlag.set(true)
+        }
     }
 
     private class TestHostSession(

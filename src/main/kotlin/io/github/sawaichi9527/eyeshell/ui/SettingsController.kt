@@ -4,6 +4,8 @@ import io.github.sawaichi9527.eyeshell.platform.AboutComponents
 import io.github.sawaichi9527.eyeshell.platform.AppInfo
 import io.github.sawaichi9527.eyeshell.platform.AppSettings
 import io.github.sawaichi9527.eyeshell.platform.BackgroundImages
+import io.github.sawaichi9527.eyeshell.platform.Diagnostics
+import io.github.sawaichi9527.eyeshell.platform.EyeShellPaths
 import io.github.sawaichi9527.eyeshell.platform.I18n
 import io.github.sawaichi9527.eyeshell.platform.OpenSourceComponent
 import io.github.sawaichi9527.eyeshell.terminal.TerminalBackgroundImage
@@ -44,6 +46,7 @@ import javax.swing.JDialog
 import javax.swing.JFileChooser
 import javax.swing.JLabel
 import javax.swing.JList
+import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JScrollPane
 import javax.swing.JSpinner
@@ -517,6 +520,20 @@ internal class SettingsController(
             JLabel("${System.getProperty("os.name").orEmpty()} ${System.getProperty("os.arch").orEmpty()}"),
             null,
         )
+        addRow(this, I18n.t("settings.about.logs"), JLabel(EyeShellPaths.logDirectory().toString()), null)
+        val openLogs = JButton(I18n.t("settings.about.openLogs")).apply { name = "settingsAboutOpenLogs" }
+        val writeDiagnostics = JButton(I18n.t("settings.about.diagnostics")).apply {
+            name = "settingsAboutDiagnostics"
+        }
+        val diagnosticsActions = JPanel().apply {
+            alignmentX = Component.LEFT_ALIGNMENT
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+            add(openLogs)
+            add(Box.createHorizontalStrut(8))
+            add(writeDiagnostics)
+            add(Box.createHorizontalGlue())
+        }
+        add(diagnosticsActions)
 
         addHeading(this, I18n.t("settings.about.components"))
         val components = AboutComponents.load()
@@ -549,6 +566,32 @@ internal class SettingsController(
         add(notices)
         val page = this
         notices.addActionListener { showNotices(page) }
+        openLogs.addActionListener { openLogDirectory(page) }
+        writeDiagnostics.addActionListener { writeDiagnostics(page) }
+    }
+
+    /** Opens the log directory in the desktop file manager, falling back to the path in a dialog. */
+    private fun openLogDirectory(parent: Component) {
+        val directory = EyeShellPaths.logDirectory()
+        runCatching { Files.createDirectories(directory) }
+        val desktop = if (java.awt.Desktop.isDesktopSupported()) java.awt.Desktop.getDesktop() else null
+        if (desktop != null && desktop.isSupported(java.awt.Desktop.Action.OPEN)) {
+            val opened = runCatching { desktop.open(directory.toFile()) }.isSuccess
+            if (opened) return
+        }
+        JOptionPane.showMessageDialog(parent, directory.toString(), I18n.t("settings.about.logs"), JOptionPane.INFORMATION_MESSAGE)
+    }
+
+    /** Writes a thread dump next to the log so a frozen tab can be reported without any tooling. */
+    private fun writeDiagnostics(parent: Component) {
+        val file = Diagnostics.write(EyeShellPaths.logDirectory(), "manual", emptyList())
+        val detail = file?.toString() ?: EyeShellPaths.logDirectory().toString()
+        JOptionPane.showMessageDialog(
+            parent,
+            I18n.t("settings.about.diagnosticsWritten", detail),
+            I18n.t("settings.about.diagnostics"),
+            JOptionPane.INFORMATION_MESSAGE,
+        )
     }
 
     private fun showNotices(parent: Component) {

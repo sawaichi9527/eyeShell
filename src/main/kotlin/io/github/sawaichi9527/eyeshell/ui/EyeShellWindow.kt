@@ -69,6 +69,8 @@ class EyeShellWindow(
     commandsController: CommandsController? = null,
     private val closeAction: () -> Unit = {},
     private val appSettings: AppSettings = AppSettings.inMemory(),
+    /** Captures the retained terminal bytes when a tab fails; opt-in, see `docs/DIAGNOSTICS.md`. */
+    private val captureRawBytes: Boolean = false,
     /**
      * Asked before the window closes while sessions are open. The default implementation shows a
      * localized confirmation; tests inject a stub so they never open a modal dialog.
@@ -197,7 +199,7 @@ class EyeShellWindow(
         val terminalView = terminalViewFactory()
         terminalView.setBackgroundImage(terminalBackgroundImage)
         val page = try {
-            TerminalSessionPage(this, terminalView, hostSession, terminal)
+            TerminalSessionPage(this, terminalView, hostSession, terminal, captureRawBytes)
         } catch (failure: Throwable) {
             try {
                 terminalView.close()
@@ -399,6 +401,7 @@ internal class TerminalSessionPage(
     private val terminalView: TerminalView,
     hostSession: HostSession,
     session: TerminalSession = hostSession.openTerminal(),
+    private val captureRawBytes: Boolean = false,
 ) : AutoCloseable {
     private var hostSession: HostSession = hostSession
     private var session: TerminalSession = session
@@ -449,9 +452,42 @@ internal class TerminalSessionPage(
     private fun onEmulatorStopped(unexpected: Boolean) {
         if (!unexpected || closed.get()) return
         emulatorFailed.set(true)
+        // Closing the channel is what makes a keystroke in a frozen tab harmless instead of a
+        // command the user cannot see; it also unblocks a reader stuck in a channel read.
+        runCatching { session.close() }
+        if (captureRawBytes) captureTerminalBytes()
         val callback = emulatorStopCallback ?: return
         SwingUtilities.invokeLater {
             if (!closed.get()) callback()
+        }
+    }
+
+    /**
+     * Writes the tail of the retained raw output next to the log. The bytes are part of the terminal
+     * stream, so this only runs when the user opted in with `--capture-terminal-bytes`.
+     */
+    private fun captureTerminalBytes() {
+        val captured = runCatching { session.rawOutput() }.getOrNull() ?: return
+        if (captured.isEmpty()) return
+        val name = session.name
+        val tail = if (captured.size > CAPTURE_LIMIT_BYTES) {
+            captured.copyOfRange(captured.size - CAPTURE_LIMIT_BYTES, captured.size)
+        } else {
+            captured
+        }
+        Thread.ofVirtual().name("eyeshell-terminal-capture").start {
+            runCatching {
+                val directory = io.github.sawaichi9527.eyeshell.platform.EyeShellPaths.logDirectory()
+                java.nio.file.Files.createDirectories(directory)
+                val file = directory.resolve(
+                    "terminal-${io.github.sawaichi9527.eyeshell.platform.Diagnostics.sanitize(name)}-" +
+                        "${io.github.sawaichi9527.eyeshell.platform.Diagnostics.timestamp()}.bin",
+                )
+                java.nio.file.Files.write(file, tail)
+                logger.warning("Wrote ${tail.size} bytes of terminal output to $file")
+            }.onFailure { failure ->
+                logger.log(java.util.logging.Level.WARNING, "Could not capture terminal output", failure)
+            }
         }
     }
 
@@ -719,6 +755,9 @@ internal class TerminalSessionPage(
 
         /** Clears the visible screen and the scrollback before the re-decoded history replays. */
         const val REDECODE_RESET = "\u001B[3J\u001B[H"
+
+        /** Enough to contain the sequence that broke the emulator, small enough to attach to a report. */
+        const val CAPTURE_LIMIT_BYTES = 256 * 1024
     }
 }
 
