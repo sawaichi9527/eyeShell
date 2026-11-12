@@ -2,9 +2,14 @@ package io.github.sawaichi9527.eyeshell.platform
 
 import java.util.logging.Level
 import java.util.logging.LogRecord
+import java.nio.file.Files
+import java.nio.file.Path
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 
 class LoggingSetupTest {
     private fun record(message: String, thrown: Throwable? = null) = LogRecord(Level.INFO, message).apply {
@@ -41,5 +46,40 @@ class LoggingSetupTest {
         val formatters = java.util.logging.Logger.getLogger("").handlers.map { it.formatter }
         assertTrue(formatters.isNotEmpty())
         assertTrue(formatters.all { it is LoggingSetup.PlainFormatter }, formatters.toString())
+    }
+
+    @Test
+    fun `a log directory receives the formatted records`(@TempDir directory: Path) {
+        val root = java.util.logging.Logger.getLogger("")
+        val before = root.handlers.toList()
+        try {
+            val handler = checkNotNull(LoggingSetup.installFileHandler(directory)) {
+                "the file handler should open $directory"
+            }
+            assertEquals(1, root.handlers.count { it is java.util.logging.FileHandler })
+
+            java.util.logging.Logger.getLogger("io.github.sawaichi9527.eyeshell.test")
+                .info("terminal froze at 12:00")
+            handler.flush()
+
+            val text = Files.readString(directory.resolve(LoggingSetup.LOG_FILE_NAME))
+            assertTrue(
+                text.contains("INFO io.github.sawaichi9527.eyeshell.test - terminal froze at 12:00"),
+                text,
+            )
+        } finally {
+            root.handlers.toList().filter { it !in before }.forEach { handler ->
+                root.removeHandler(handler)
+                handler.close()
+            }
+        }
+    }
+
+    @Test
+    fun `an unusable log directory never prevents startup`(@TempDir directory: Path) {
+        val blocker = Files.writeString(directory.resolve("blocker"), "not a directory")
+
+        assertNull(LoggingSetup.installFileHandler(blocker.resolve("logs")))
+        assertFalse(java.util.logging.Logger.getLogger("").handlers.any { it is java.util.logging.FileHandler })
     }
 }

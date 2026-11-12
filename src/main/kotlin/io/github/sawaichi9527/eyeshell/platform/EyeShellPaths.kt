@@ -24,6 +24,17 @@ object EyeShellPaths {
         xdgConfigHome = System.getenv("XDG_CONFIG_HOME"),
     )
 
+    /**
+     * Directory holding the rotating diagnostic log. Kept outside the settings directory so a log
+     * never shows up next to user preferences, and never contains secrets (see `docs/DIAGNOSTICS.md`).
+     */
+    fun logDirectory(): Path = resolveLogDirectory(
+        osName = System.getProperty("os.name"),
+        userHome = System.getProperty("user.home"),
+        localAppData = System.getenv("LOCALAPPDATA"),
+        xdgStateHome = System.getenv("XDG_STATE_HOME"),
+    )
+
     /** Directory holding imported terminal background images (non-secret preferences). */
     fun backgroundDirectory(): Path = configDirectory(
         osName = System.getProperty("os.name"),
@@ -45,6 +56,27 @@ object EyeShellPaths {
         appData: String?,
         xdgConfigHome: String?,
     ): Path = configDirectory(osName, userHome, appData, xdgConfigHome).resolve("known_hosts")
+
+    /**
+     * Logs live under the state directory on Linux (`$XDG_STATE_HOME`, default
+     * `~/.local/state`) and under local app data on Windows, matching the platform convention for
+     * data a user never edits by hand.
+     */
+    internal fun resolveLogDirectory(
+        osName: String,
+        userHome: String,
+        localAppData: String?,
+        xdgStateHome: String?,
+    ): Path {
+        val baseDirectory = if (osName.startsWith("Windows", ignoreCase = true)) {
+            localAppData?.takeIf(String::isNotBlank)?.let(Path::of)
+                ?: Path.of(userHome, "AppData", "Local")
+        } else {
+            xdgStateHome?.takeIf(String::isNotBlank)?.let(Path::of)?.takeIf(Path::isAbsolute)
+                ?: Path.of(userHome, ".local", "state")
+        }
+        return baseDirectory.resolve(APP_DIRECTORY).resolve("logs")
+    }
 
     private fun configDirectory(
         osName: String,

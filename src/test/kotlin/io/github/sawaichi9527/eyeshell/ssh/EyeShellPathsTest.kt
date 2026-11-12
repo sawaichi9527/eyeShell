@@ -71,4 +71,33 @@ class EyeShellPathsTest {
             EyeShellPaths.resolveCatalogDatabaseFile("Linux", "/home/user", null, "relative/data"),
         )
     }
+
+    @Test
+    fun `uses an absolute XDG state home for the log`() {
+        assertEquals(
+            temporaryDirectory.resolve("eyeShell/logs"),
+            EyeShellPaths.resolveLogDirectory("Linux", "/home/user", null, temporaryDirectory.toString()),
+        )
+    }
+
+    @Test
+    fun `ignores relative XDG state home`() {
+        assertEquals(
+            Path.of("/home/user/.local/state/eyeShell/logs"),
+            EyeShellPaths.resolveLogDirectory("Linux", "/home/user", null, "relative/state"),
+        )
+    }
+
+    @Test
+    fun `uses local app data for the log on Windows`() {
+        assertEquals(
+            Path.of("C:/Users/test/AppData/Local/eyeShell/logs"),
+            EyeShellPaths.resolveLogDirectory(
+                "Windows 11",
+                "C:/Users/test",
+                "C:/Users/test/AppData/Local",
+                null,
+            ),
+        )
+    }
 }

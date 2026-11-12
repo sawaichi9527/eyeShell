@@ -65,6 +65,13 @@ interface TerminalView : AutoCloseable {
     fun setBackgroundImage(image: TerminalBackgroundImage?) = Unit
 
     /**
+     * Reports that the terminal emulator stopped. [unexpected] is `true` when the session was still
+     * open and no end of stream had been read, i.e. the emulator died instead of the remote shell
+     * closing or the tab being closed deliberately. Views without an emulator thread never call it.
+     */
+    fun setEmulatorStopHandler(handler: ((unexpected: Boolean) -> Unit)?) = Unit
+
+    /**
      * Stops consuming the attached session without closing it, so the same widget can replay
      * retained output and then continue with the live session.
      *

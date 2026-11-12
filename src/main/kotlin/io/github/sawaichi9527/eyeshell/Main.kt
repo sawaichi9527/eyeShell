@@ -9,6 +9,7 @@ import io.github.sawaichi9527.eyeshell.platform.LaunchStrategy
 import io.github.sawaichi9527.eyeshell.platform.LoggingSetup
 import io.github.sawaichi9527.eyeshell.platform.SafeMode
 import io.github.sawaichi9527.eyeshell.platform.ShutdownNoiseFilter
+import io.github.sawaichi9527.eyeshell.platform.AppInfo
 import io.github.sawaichi9527.eyeshell.platform.AppSettings
 import io.github.sawaichi9527.eyeshell.platform.BackgroundImages
 import io.github.sawaichi9527.eyeshell.platform.I18n
@@ -25,7 +26,16 @@ import io.github.sawaichi9527.eyeshell.ui.SshConnectionController
 import javax.swing.SwingUtilities
 
 fun main(arguments: Array<String>) {
-    LoggingSetup.apply()
+    val logDirectory = EyeShellPaths.logDirectory()
+    LoggingSetup.apply(logDirectory)
+    LoggingSetup.logStartup(
+        mapOf(
+            "eyeShell" to AppInfo.rawVersion.ifBlank { "unknown" },
+            "java" to System.getProperty("java.version").orEmpty(),
+            "os" to "${System.getProperty("os.name").orEmpty()} ${System.getProperty("os.version").orEmpty()}",
+            "logDirectory" to logDirectory.toString(),
+        ),
+    )
     ShutdownNoiseFilter.install()
     val safeMode = SafeMode.detect(
         arguments,

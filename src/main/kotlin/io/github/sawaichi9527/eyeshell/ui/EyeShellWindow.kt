@@ -224,8 +224,11 @@ class EyeShellWindow(
             }
             throw failure
         }
+        page.startEmulatorMonitor {
+            workbench.updateSessionStatus(component, SessionStatus.FAILED)
+        }
         page.startExitMonitor {
-            workbench.updateSessionStatus(component, SessionStatus.EXITED)
+            workbench.updateSessionStatus(component, page.exitStatus)
         }
     }
 
@@ -414,10 +417,46 @@ internal class TerminalSessionPage(
     private var reconnectPreset: HostConnectionPreset? = null
     private var reconnectRequest: ((HostConnectionPreset) -> Boolean)? = null
     private val redecodeLock = Any()
+
+    /**
+     * Set when the terminal emulator stopped while the session was still open, which is the case
+     * that used to leave a tab looking connected but frozen forever.
+     */
+    private val emulatorFailed = AtomicBoolean()
+    private var emulatorStopCallback: (() -> Unit)? = null
+
+    init {
+        terminalView.setEmulatorStopHandler(::onEmulatorStopped)
+    }
+
+    val hasEmulatorFailed: Boolean
+        get() = emulatorFailed.get()
+
+    /** Status to publish when the session ends: an emulator crash is a failure, not a clean exit. */
+    val exitStatus: SessionStatus
+        get() = if (emulatorFailed.get()) SessionStatus.FAILED else SessionStatus.EXITED
+
     val component: JComponent = JPanel(BorderLayout()).apply {
         name = "terminalWorkspace"
         getAccessibleContext().accessibleName = "Terminal workspace"
         add(terminalView.component, BorderLayout.CENTER)
+    }
+
+    /**
+     * Reports an emulator that stopped without reaching the end of the stream. The handler runs on
+     * the emulator thread, so the callback is delivered on the EDT like every other status update.
+     */
+    private fun onEmulatorStopped(unexpected: Boolean) {
+        if (!unexpected || closed.get()) return
+        emulatorFailed.set(true)
+        val callback = emulatorStopCallback ?: return
+        SwingUtilities.invokeLater {
+            if (!closed.get()) callback()
+        }
+    }
+
+    fun startEmulatorMonitor(onUnexpectedStop: () -> Unit) {
+        emulatorStopCallback = onUnexpectedStop
     }
 
     fun applyFontSize(size: Float) = terminalView.setFontSize(size)
@@ -566,6 +605,7 @@ internal class TerminalSessionPage(
         if (closed.get() || !terminalView.canAttach()) return false
         terminalView.resetForReattach()
         terminalView.attach(newSession)
+        emulatorFailed.set(false)
 
         exitGeneration.incrementAndGet()
         monitorStarted.set(false)
@@ -860,8 +900,14 @@ class WorkbenchPanel(
     internal fun isSelectedSession(component: Component): Boolean =
         sessionTabs.selectedComponent === component
 
+    /**
+     * A tab whose emulator failed is just as reconnectable as one whose shell exited: the session
+     * is gone either way, and Enter is the user's remedy for both.
+     */
     internal fun isSessionExited(component: Component): Boolean =
-        sessions[component]?.status == SessionStatus.EXITED
+        sessions[component]?.status.let {
+            it == SessionStatus.EXITED || it == SessionStatus.FAILED
+        }
 
     internal fun commandsPanel(): CommandsPanel = toolDock.commandsPanel()
 

@@ -22,12 +22,17 @@ import io.github.sawaichi9527.eyeshell.terminal.TerminalColorSchemes
 import io.github.sawaichi9527.eyeshell.terminal.TerminalContextActions
 import io.github.sawaichi9527.eyeshell.terminal.TerminalHighlightRule
 import io.github.sawaichi9527.eyeshell.terminal.TerminalOutputSnapshot
+import io.github.sawaichi9527.eyeshell.terminal.TerminalReadStall
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalTypography
 import io.github.sawaichi9527.eyeshell.terminal.TerminalView
 import java.io.Writer
 import javax.swing.JComponent
 import javax.swing.SwingUtilities
+
+/** Shared by the view and its connector; a packaged build has no console, only the log file. */
+private val logger: java.util.logging.Logger =
+    java.util.logging.Logger.getLogger("io.github.sawaichi9527.eyeshell.terminal")
 
 class JediTermTerminalView(
     columns: Int = TerminalTypography.INITIAL_COLUMNS,
@@ -43,7 +48,11 @@ class JediTermTerminalView(
     private val searchController = JediTermSearchController(widget)
     private val highlightController = JediTermHighlightController(widget)
     private val contextActionProvider = ContextActionProvider(widget, searchController::show)
+    @Volatile
     private var activeConnector: SessionTtyConnector? = null
+
+    @Volatile
+    private var emulatorStopHandler: ((unexpected: Boolean) -> Unit)? = null
 
     init {
         widget.terminalPanel.setPopupMenuActionProvider(contextActionProvider)
@@ -51,6 +60,9 @@ class JediTermTerminalView(
             contextActionProvider.actions?.copyAllOutput?.invoke()
         }
         widget.setFindActionHandler(::showSearch)
+        // Fires on the emulator pool thread after the widget closed its session; the callback only
+        // reports whether the end was expected, and the caller marshals it onto its own thread.
+        widget.addListener { handleEmulatorStopped() }
     }
 
     override val component: JComponent
@@ -87,6 +99,27 @@ class JediTermTerminalView(
         activeConnector = null
         contextActionProvider.hasSession = false
         return true
+    }
+
+    override fun setEmulatorStopHandler(handler: ((unexpected: Boolean) -> Unit)?) {
+        emulatorStopHandler = handler
+    }
+
+    /**
+     * The emulator ends for two very different reasons: the remote shell closed (or the tab was
+     * closed) and the connector saw the end of the stream, or the emulator died on an exception.
+     * Only the second case leaves a tab that looks connected but never updates again, so it is
+     * reported and, from there, surfaced to the user and the log.
+     */
+    private fun handleEmulatorStopped() {
+        val connector = activeConnector
+        val unexpected = connector != null && !connector.expectedEnd
+        if (unexpected) {
+            logger.warning(
+                "Terminal emulator stopped while ${connector.sessionName} reported the session still open",
+            )
+        }
+        emulatorStopHandler?.invoke(unexpected)
     }
 
     override fun resetForReattach() {
@@ -296,26 +329,71 @@ private class SessionTtyConnector(
     @Volatile
     private var detached = false
 
+    /**
+     * Set when this connector delivered an end of stream, or was detached on purpose. When it is
+     * still false after the emulator thread stops, the emulator ended on its own (an exception)
+     * while the session was open.
+     */
+    @Volatile
+    var expectedEnd = false
+        private set
+
+    val sessionName: String
+        get() = session.name
+
+    private val stall = TerminalReadStall()
+
     fun detach() {
+        expectedEnd = true
         detached = true
     }
 
     fun resume() {
         detached = false
+        expectedEnd = false
     }
 
     /**
      * Polls instead of blocking so [detach] can stop the emulator thread without closing the SSH
      * session; a terminal that would otherwise wait forever in a read must be interruptible for the
      * encoding replay to work.
+     *
+     * An exception raised while the session is still open is logged here, because the emulator
+     * thread reports it through JediTerm's `LOG.error` and a packaged build has no console to show
+     * it. The polling loop also records a stall so a connected-but-silent terminal leaves a
+     * timestamped line instead of looking like a dead tab.
      */
-    override fun read(buffer: CharArray, offset: Int, length: Int): Int {
+    override fun read(buffer: CharArray, offset: Int, length: Int): Int = try {
+        readLoop(buffer, offset, length)
+    } catch (failure: InterruptedException) {
+        throw failure
+    } catch (failure: Exception) {
+        if (session.isOpen) {
+            logger.log(java.util.logging.Level.SEVERE, "Terminal read failed on ${session.name}", failure)
+        }
+        throw failure
+    }
+
+    private fun readLoop(buffer: CharArray, offset: Int, length: Int): Int {
         while (true) {
             if (detached) return -1
             // Drain buffered output before reporting the end of a closed session, so the last chunk
             // is not lost when a stream reports closed while its reader still has characters.
-            if (session.ready()) return session.read(buffer, offset, length)
-            if (!session.isOpen) return -1
+            if (session.ready()) {
+                val count = session.read(buffer, offset, length)
+                if (count > 0) stall.progress()
+                return count
+            }
+            if (!session.isOpen) {
+                expectedEnd = true
+                return -1
+            }
+            if (stall.shouldReport()) {
+                logger.warning(
+                    "No terminal output for ${stall.silenceMillis() / 1000}s on ${session.name}; " +
+                        "the session is still open and the emulator is waiting",
+                )
+            }
             Thread.sleep(READ_POLL_MILLIS)
         }
     }

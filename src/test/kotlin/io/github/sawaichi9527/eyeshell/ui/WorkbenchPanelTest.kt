@@ -73,6 +73,38 @@ class WorkbenchPanelTest {
     }
 
     @Test
+    fun `a failed session is reconnectable with enter`() {
+        val reconnects = AtomicInteger()
+        lateinit var panel: WorkbenchPanel
+        lateinit var page: TerminalSessionPage
+        lateinit var view: TestTerminalView
+
+        SwingUtilities.invokeAndWait {
+            panel = WorkbenchPanel()
+            view = TestTerminalView(JPanel())
+            val session = TestTerminalSession("failed")
+            page = TerminalSessionPage(panel, view, TestHostSession(session), session)
+            page.attach(reconnectPreset()) {
+                reconnects.incrementAndGet() > 0
+            }
+            panel.addSession("failed", page.component, page::close)
+            // A dead emulator is reported as FAILED, not as a clean exit.
+            panel.updateSessionStatus(page.component, SessionStatus.FAILED)
+            assertTrue(panel.isSessionExited(page.component), "a failed tab must offer the reconnect path")
+        }
+
+        try {
+            SwingUtilities.invokeAndWait {
+                val focusManager = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager()
+                assertTrue(focusManager.dispatchEvent(enterKey(view.component)))
+                assertEquals(1, reconnects.get())
+            }
+        } finally {
+            SwingUtilities.invokeAndWait { panel.closeSessions() }
+        }
+    }
+
+    @Test
     fun `a cancelled reconnect attempt can be retried with enter`() {
         val attempts = AtomicInteger()
         lateinit var view: TestTerminalView
