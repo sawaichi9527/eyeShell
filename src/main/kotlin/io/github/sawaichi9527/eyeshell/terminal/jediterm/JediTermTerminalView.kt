@@ -66,6 +66,7 @@ class JediTermTerminalView(
     private var emulatorStopHandler: ((unexpected: Boolean) -> Unit)? = null
     private var watchdog: EmulatorWatchdog? = null
     private var repaintWatchdog: RepaintWatchdog? = null
+    private var flowWatchdog: io.github.sawaichi9527.eyeshell.terminal.FlowControlWatchdog? = null
 
     init {
         widget.terminalPanel.setPopupMenuActionProvider(contextActionProvider)
@@ -145,6 +146,11 @@ class JediTermTerminalView(
             intervalMillis = emulatorStallSampleMillis,
             onStuck = ::handleRepaintStuck,
         ).also { it.start() }
+        flowWatchdog = io.github.sawaichi9527.eyeshell.terminal.FlowControlWatchdog(
+            sample = { activeConnector?.flowControl() },
+            intervalMillis = emulatorStallSampleMillis,
+            onStuck = ::handleFlowStuck,
+        ).also { it.start() }
     }
 
     private fun stopWatchdog() {
@@ -152,6 +158,36 @@ class JediTermTerminalView(
         watchdog = null
         repaintWatchdog?.stop()
         repaintWatchdog = null
+        flowWatchdog?.stop()
+        flowWatchdog = null
+    }
+
+    /**
+     * A channel whose flow-control credit is gone in either direction cannot recover on its own: the
+     * peer is blocked on us and we are blocked on it. Closing the session makes the tab recoverable
+     * (Enter reconnects in place, scrollback kept) instead of leaving a tab that accepts invisible
+     * input forever.
+     */
+    private fun handleFlowStuck(flow: io.github.sawaichi9527.eyeshell.terminal.TerminalFlowControl) {
+        val connector = activeConnector ?: return
+        connector.markStallReported()
+        logger.severe(
+            "Terminal channel flow control is exhausted on ${connector.sessionName} " +
+                "(localWindow=${flow.localWindow}/${flow.localWindowMax}, " +
+                "remoteWindow=${flow.remoteWindow}/${flow.remoteWindowMax}); closing the session so the tab can reconnect",
+        )
+        diagnosticsDirectory?.let { directory ->
+            Diagnostics.write(
+                directory = directory,
+                reason = "terminal-flow-${connector.sessionName}",
+                sessions = listOf(
+                    "session=${connector.sessionName} state=flow-control-exhausted" +
+                        " localWindow=${flow.localWindow}/${flow.localWindowMax}" +
+                        " remoteWindow=${flow.remoteWindow}/${flow.remoteWindowMax}",
+                ),
+            )
+        }
+        emulatorStopHandler?.invoke(true)
     }
 
     /**
@@ -223,11 +259,26 @@ class JediTermTerminalView(
         emulatorStopHandler?.invoke(false)
     }
 
+    /** Test hook: applies a scroll region the way a program's DECSTBM would. */
+    internal fun setScrollRegionForTest(top: Int, bottom: Int) {
+        widget.terminal.setScrollingRegion(top, bottom)
+    }
+
     override fun resetForReattach() {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal reattach preparation must run on the Swing EDT" }
         if (widget.terminalTextBuffer.isUsingAlternateBuffer) {
             widget.terminalTextBuffer.useAlternateBuffer(false)
         }
+        // A program that died inside a full-screen or progress mode can leave a shortened scroll
+        // region (or origin mode) behind. Every new line is then drawn on that region's bottom row,
+        // which looks exactly like a frozen tab — and a reconnect into the same widget inherits it.
+        // Restoring a full-height region is safe for a fresh shell and keeps the scrollback.
+        val terminal = widget.terminal
+        val cursorX = terminal.cursorX
+        val cursorY = terminal.cursorY
+        terminal.setModeEnabled(com.jediterm.terminal.TerminalMode.OriginMode, false)
+        terminal.resetScrollRegions()
+        terminal.cursorPosition(cursorX + 1, cursorY)
     }
 
     override fun captureAllOutput(): TerminalOutputSnapshot {
@@ -470,6 +521,9 @@ internal class SessionTtyConnector(
         " localWindow=${flow.localWindow}/${flow.localWindowMax}" +
             " remoteWindow=${flow.remoteWindow}/${flow.remoteWindowMax}"
     }.orEmpty()
+
+    fun flowControl(): io.github.sawaichi9527.eyeshell.terminal.TerminalFlowControl? =
+        session.flowControl()
 
     /** The emulator thread, captured from the first read so the watchdog can sample it. */
     @Volatile

@@ -70,8 +70,7 @@ class EmulatorWatchdogTest {
     }
 }
 
-class RepaintWatchdogTest {
-    @Test
+class RepaintWatchdogTest {    @Test
     fun `output consumed without a paint is reported`() {
         val consumed = java.util.concurrent.atomic.AtomicLong(100)
         val reports = AtomicInteger()
@@ -126,5 +125,59 @@ class RepaintWatchdogTest {
         } finally {
             watchdog.stop()
         }
+    }
+}
+
+class FlowControlWatchdogTest {
+    private fun flow(local: Long, remote: Long) = TerminalFlowControl(
+        localWindow = local,
+        localWindowMax = 2_097_152,
+        remoteWindow = remote,
+        remoteWindowMax = 2_097_152,
+    )
+
+    @Test
+    fun `an exhausted window is reported once`() {
+        val reports = AtomicInteger()
+        val watchdog = FlowControlWatchdog(
+            sample = { flow(local = 0, remote = 1_000_000) },
+            intervalMillis = 10,
+            requiredSamples = 2,
+            onStuck = { reports.incrementAndGet() },
+        )
+        watchdog.start()
+        try {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
+            while (reports.get() == 0 && System.nanoTime() < deadline) Thread.sleep(10)
+            Thread.sleep(80)
+            assertEquals(1, reports.get(), "one report per exhausted episode")
+        } finally {
+            watchdog.stop()
+        }
+    }
+
+    @Test
+    fun `healthy windows are never reported`() {
+        val reports = AtomicInteger()
+        val watchdog = FlowControlWatchdog(
+            sample = { flow(local = 2_097_152, remote = 2_097_152) },
+            intervalMillis = 10,
+            requiredSamples = 2,
+            onStuck = { reports.incrementAndGet() },
+        )
+        watchdog.start()
+        try {
+            Thread.sleep(120)
+            assertEquals(0, reports.get())
+        } finally {
+            watchdog.stop()
+        }
+    }
+
+    @Test
+    fun `a missing transport is ignored`() {
+        assertEquals(false, FlowControlWatchdog.isExhausted(flow(local = 1, remote = 1)))
+        assertEquals(true, FlowControlWatchdog.isExhausted(flow(local = 0, remote = 1)))
+        assertEquals(true, FlowControlWatchdog.isExhausted(flow(local = 1, remote = 0)))
     }
 }

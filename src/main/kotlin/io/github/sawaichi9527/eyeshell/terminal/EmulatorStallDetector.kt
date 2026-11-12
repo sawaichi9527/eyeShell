@@ -169,6 +169,65 @@ internal class EmulatorWatchdog(
 internal data class RepaintSample(val consumedCharacters: Long, val paints: Long)
 
 /**
+ * Detects a channel that has exhausted its flow-control credit in both directions: nothing arrives,
+ * our input is queued, and the peer is blocked on us while we are blocked on it. Sampling uses the
+ * channel windows rather than thread state, because both threads are "healthy" (idle) in that state.
+ *
+ * The caller decides how to recover; eyeShell closes the session and marks the tab `Failed`, which
+ * keeps the scrollback and lets Enter reconnect in place.
+ */
+internal class FlowControlWatchdog(
+    private val sample: () -> io.github.sawaichi9527.eyeshell.terminal.TerminalFlowControl?,
+    private val intervalMillis: Long = SAMPLE_INTERVAL_MILLIS,
+    private val requiredSamples: Int = REQUIRED_SAMPLES,
+    private val onStuck: (io.github.sawaichi9527.eyeshell.terminal.TerminalFlowControl) -> Unit,
+) {
+    private val running = java.util.concurrent.atomic.AtomicBoolean()
+    private var worker: Thread? = null
+
+    fun start() {
+        if (!running.compareAndSet(false, true)) return
+        worker = Thread.ofVirtual().name("eyeshell-flow-watchdog").start {
+            var stuckSamples = 0
+            var reported = false
+            while (running.get()) {
+                try {
+                    Thread.sleep(intervalMillis)
+                } catch (_: InterruptedException) {
+                    return@start
+                }
+                val flow = sample()
+                if (flow == null || !isExhausted(flow)) {
+                    stuckSamples = 0
+                    reported = false
+                    continue
+                }
+                stuckSamples += 1
+                if (stuckSamples >= requiredSamples && !reported) {
+                    reported = true
+                    onStuck(flow)
+                }
+            }
+        }
+    }
+
+    fun stop() {
+        running.set(false)
+        worker?.interrupt()
+        worker = null
+    }
+
+    internal companion object {
+        const val SAMPLE_INTERVAL_MILLIS = 5_000L
+        const val REQUIRED_SAMPLES = 12
+
+        /** The peer cannot send (local credit gone) or we cannot send (remote credit gone). */
+        fun isExhausted(flow: io.github.sawaichi9527.eyeshell.terminal.TerminalFlowControl): Boolean =
+            flow.localWindow <= 0 || flow.remoteWindow <= 0
+    }
+}
+
+/**
  * Detects the "consumed but never painted" state: output keeps arriving and the emulator keeps
  * parsing it, yet the panel does not repaint, so the user sees a frozen screen while the tab still
  * says Connected and the rest of the window works.
