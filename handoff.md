@@ -301,7 +301,7 @@ Cumulative project usage (each line = one session/milestone):
 
 Active work is validation, quality debt, and documentation (2026-10-24 decision).
 
-- Linux AppImage for `0.2.0`: build it on the Ubuntu 26.04 development host from tag `v0.2.0` (`./scripts/gradlew-local.sh appImage`), smoke test it, and attach the image plus its `.sha256` to release `443746263`.
+- Linux AppImage for `0.2.0`: the owner builds it at home on the Ubuntu development platform, then it is uploaded from this Windows host. On that machine: `git fetch --tags --prune; git checkout v0.2.0; git submodule update --init --recursive; ./scripts/bootstrap-jdk.sh; ./scripts/bootstrap-appimagetool.sh; ./scripts/gradlew-local.sh test check --console=plain; ./scripts/gradlew-local.sh appImage`, then smoke test the image (title `eyeShell v0.2.0`, one SSH session, `exit` clears the sidebar and file pane), copy `build/package/eyeShell-0.2.0-x86_64.AppImage` to `D:\workspace\eyeShell\build\package\` on this host, and attach it plus its `.sha256` to release `443746263`.
 
 - Owner smoke test of the released `eyeShell-0.2.0.zip` (extracted, no JDK): confirm the window titles itself `eyeShell v0.2.0` and run one SSH session through it, including the `exit` path that the release fixes.
 
