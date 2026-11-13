@@ -9,6 +9,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -78,6 +79,25 @@ class MonitorSamplerTest {
         Thread.sleep(100)
         assertEquals(afterClose, count.get(), "sampler kept sampling after close")
         assertTrue(afterClose >= 1)
+    }
+
+    @Test
+    fun `stop ends the sampler without waiting and refuses to start it again`() {
+        val session = ScriptedHostSession(
+            systemInfo = "Linux lab 6.8.0 x86_64 GNU/Linux\n1000\n",
+            sample = sampleOutput(),
+        )
+        val sampler = MonitorSampler(session, interval = Duration.ofMillis(20), backoff = Duration.ofMillis(20))
+        val count = java.util.concurrent.atomic.AtomicInteger()
+
+        assertTrue(sampler.start { count.incrementAndGet() }, "a fresh sampler must start")
+        assertFalse(sampler.start { count.incrementAndGet() }, "a running sampler must not start twice")
+        Thread.sleep(100)
+        sampler.stop()
+        val afterStop = count.get()
+        Thread.sleep(100)
+        assertEquals(afterStop, count.get(), "sampler kept sampling after stop")
+        assertFalse(sampler.start { count.incrementAndGet() }, "a stopped sampler must not restart")
     }
 
     @Test

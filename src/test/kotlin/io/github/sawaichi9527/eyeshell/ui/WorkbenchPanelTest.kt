@@ -531,6 +531,144 @@ class WorkbenchPanelTest {
 
 
     @Test
+    fun `a session that ends stops its monitor and clears the panes bound to it`() {
+        val session = BlockingExitTerminalSession("ended")
+        val host = TestHostSession(session)
+        lateinit var window: EyeShellWindow
+        lateinit var view: TestTerminalView
+
+        onEdt {
+            view = TestTerminalView(JPanel())
+            window = EyeShellWindow(
+                terminalViewFactory = { view },
+                connectAction = {},
+                closeAction = {},
+                monitorInterval = Duration.ofMillis(30),
+            )
+            window.attachTerminal(host, session, reconnectPreset())
+        }
+
+        try {
+            val panel = onEdt { window.findByName("workbench") as WorkbenchPanel }
+            val tabs = onEdt { window.findByName("sessionTabs") as JTabbedPane }
+            val component = onEdt { tabs.getComponentAt(0) as JComponent }
+
+            // The first tab is selected on attach, which binds and starts the monitor.
+            await(Duration.ofSeconds(5)) { host.executeCount.get() >= 2 }
+            await(Duration.ofSeconds(5)) { onEdt { !panel.isMonitorIdle() } }
+
+            session.signalNaturalExit()
+            await(Duration.ofSeconds(5)) { onEdt { panel.isSessionExited(component) } }
+
+            val samplesAtExit = host.executeCount.get()
+            Thread.sleep(300)
+            assertEquals(
+                samplesAtExit,
+                host.executeCount.get(),
+                "the monitor kept sampling a host whose shell had exited",
+            )
+            assertTrue(
+                onEdt { panel.isMonitorIdle() },
+                "the sidebar must return to its idle skeleton once the session is gone",
+            )
+            assertTrue(
+                onEdt { panel.isSftpDisconnected() },
+                "the SFTP pane must be cleared once the session is gone",
+            )
+        } finally {
+            onEdt { window.dispose() }
+        }
+    }
+
+    @Test
+    fun `an ended background session leaves the visible session's monitor running`() {
+        val firstSession = BlockingExitTerminalSession("first")
+        val firstHost = TestHostSession(firstSession)
+        val secondSession = BlockingExitTerminalSession("second")
+        val secondHost = TestHostSession(secondSession)
+        lateinit var window: EyeShellWindow
+
+        onEdt {
+            window = EyeShellWindow(
+                terminalViewFactory = { TestTerminalView(JPanel()) },
+                connectAction = {},
+                closeAction = {},
+                monitorInterval = Duration.ofMillis(30),
+            )
+            window.attachTerminal(firstHost, firstSession, reconnectPreset())
+            window.attachTerminal(secondHost, secondSession, reconnectPreset())
+        }
+
+        try {
+            val panel = onEdt { window.findByName("workbench") as WorkbenchPanel }
+            val tabs = onEdt { window.findByName("sessionTabs") as JTabbedPane }
+            val firstComponent = onEdt { tabs.getComponentAt(0) as JComponent }
+            await(Duration.ofSeconds(5)) { firstHost.executeCount.get() >= 2 }
+            await(Duration.ofSeconds(5)) { secondHost.executeCount.get() >= 2 }
+
+            firstSession.signalNaturalExit()
+            await(Duration.ofSeconds(5)) { onEdt { panel.isSessionExited(firstComponent) } }
+
+            val firstSamples = firstHost.executeCount.get()
+            val secondSamples = secondHost.executeCount.get()
+            Thread.sleep(300)
+            assertEquals(
+                firstSamples,
+                firstHost.executeCount.get(),
+                "the ended background session's monitor kept sampling",
+            )
+            assertTrue(
+                secondHost.executeCount.get() > secondSamples,
+                "the visible session's monitor must keep running when another tab ends",
+            )
+            assertFalse(
+                onEdt { panel.isMonitorIdle() },
+                "the visible session's sidebar must not be reset by another tab ending",
+            )
+        } finally {
+            onEdt { window.dispose() }
+        }
+    }
+
+    @Test
+    fun `an ended session closes the SFTP subsystem it had opened`() {
+        val client = CloseTrackingSftpClient()
+        val session = BlockingExitTerminalSession("sftp-ended")
+        val host = TestHostSession(session, sftpClient = client)
+        val panel = onEdt { WorkbenchPanel() }
+        lateinit var page: TerminalSessionPage
+        val sftpBound = CountDownLatch(1)
+
+        onEdt {
+            page = TerminalSessionPage(
+                panel,
+                TestTerminalView(JPanel()),
+                host,
+                session,
+                monitorInterval = Duration.ofMillis(30),
+            )
+            page.attach()
+            panel.addSession(session.name, page.component, page::close)
+            page.startExitMonitor { panel.sessionStopped(page.component, SessionStatus.EXITED) }
+            page.loadSftp { controller, _ ->
+                if (controller != null) {
+                    panel.bindSftp(controller)
+                    sftpBound.countDown()
+                }
+            }
+        }
+
+        try {
+            assertTrue(sftpBound.await(5, TimeUnit.SECONDS), "the SFTP subsystem never bound")
+            session.signalNaturalExit()
+            await(Duration.ofSeconds(5)) { client.closed }
+            assertTrue(onEdt { panel.isSftpDisconnected() }, "the file pane must not stay bound after the session ended")
+        } finally {
+            onEdt { page.close() }
+        }
+    }
+
+    @Test
     fun `sends a saved command to the terminal with a carriage return`() {
         SwingUtilities.invokeAndWait {
             val panel = WorkbenchPanel()
@@ -1240,12 +1378,16 @@ class WorkbenchPanelTest {
         private val terminal: TerminalSession,
         override val endpoint: io.github.sawaichi9527.eyeshell.ssh.SshEndpoint =
             io.github.sawaichi9527.eyeshell.ssh.SshEndpoint("test.example", 22, "operator"),
+        private val sftpClient: io.github.sawaichi9527.eyeshell.sftp.SftpClient? = null,
     ) : HostSession {
         private var closed = false
         var openTerminalCount = 0
             private set
         var sftpCalls = 0
             private set
+
+        /** Every `execute` is one monitor/owner-name sample over the still-open transport. */
+        val executeCount = java.util.concurrent.atomic.AtomicInteger()
 
         val isClosed: Boolean
             get() = closed
@@ -1255,16 +1397,56 @@ class WorkbenchPanelTest {
             return terminal
         }
 
-        override fun execute(command: String): ExecResult = ExecResult(0, "")
+        override fun execute(command: String): ExecResult {
+            executeCount.incrementAndGet()
+            return ExecResult(0, "")
+        }
 
         override fun sftp(): io.github.sawaichi9527.eyeshell.sftp.SftpClient {
             sftpCalls++
-            throw UnsupportedOperationException("SFTP is not supported by this test session")
+            return sftpClient
+                ?: throw UnsupportedOperationException("SFTP is not supported by this test session")
         }
 
         override fun isOpen(): Boolean = !closed
 
         override fun close() { closed = true }
+    }
+
+    /** Records the close so the test proves the subsystem is released, not just unbound. */
+    private class CloseTrackingSftpClient : io.github.sawaichi9527.eyeshell.sftp.SftpClient {
+        private val closedFlag = java.util.concurrent.atomic.AtomicBoolean()
+
+        val closed: Boolean
+            get() = closedFlag.get()
+
+        override fun list(path: String): List<io.github.sawaichi9527.eyeshell.sftp.RemoteFile> = emptyList()
+
+        override fun stat(path: String): io.github.sawaichi9527.eyeshell.sftp.RemoteFile? = null
+
+        override fun makeDirectory(path: String) = Unit
+
+        override fun rename(from: String, to: String) = Unit
+
+        override fun delete(path: String) = Unit
+
+        override fun download(
+            remotePath: String,
+            localFile: java.nio.file.Path,
+            overwrite: Boolean,
+            onProgress: (Long, Long) -> Unit,
+        ) = Unit
+
+        override fun upload(
+            localFile: java.nio.file.Path,
+            remotePath: String,
+            overwrite: Boolean,
+            onProgress: (Long, Long) -> Unit,
+        ) = Unit
+
+        override fun close() {
+            closedFlag.set(true)
+        }
     }
 
     private class BlockingExitTerminalSession(
