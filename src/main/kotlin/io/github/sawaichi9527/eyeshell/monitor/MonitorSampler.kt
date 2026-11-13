@@ -3,6 +3,7 @@ package io.github.sawaichi9527.eyeshell.monitor
 import io.github.sawaichi9527.eyeshell.ssh.HostSession
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.logging.Logger
 
 class MonitorSampler(
     private val hostSession: HostSession,
@@ -12,6 +13,7 @@ class MonitorSampler(
     private val processLimit: Int = 10,
 ) : AutoCloseable {
     private val closed = AtomicBoolean()
+    private val started = AtomicBoolean()
     private var thread: Thread? = null
     private var previousCpu: MonitorParsers.CpuRaw? = null
     private var previousNetwork: MonitorParsers.NetworkRaw? = null
@@ -19,8 +21,15 @@ class MonitorSampler(
     private var previousProcessSampleNanos: Long = 0L
     private var currentBackoff = backoff
 
-    fun start(onSnapshot: (MonitorSnapshot) -> Unit) {
-        if (!closed.compareAndSet(false, false)) return
+    /** Set while a sample keeps failing so the first failure and the recovery are logged once each. */
+    private var failing = false
+
+    /**
+     * Starts the background sampler. Returns false when it is already running or has been stopped,
+     * so a caller can tell "started now" from "there is nothing to start".
+     */
+    fun start(onSnapshot: (MonitorSnapshot) -> Unit): Boolean {
+        if (closed.get() || !started.compareAndSet(false, true)) return false
         thread = Thread.ofVirtual().name("eyeShell-monitor").start {
             var systemInfo: SystemInfo? = null
             while (!closed.get()) {
@@ -32,15 +41,40 @@ class MonitorSampler(
                         }
                     }
                     sampleOnce(systemInfo)
-                } catch (_: Throwable) {
+                } catch (failure: Throwable) {
                     failed = true
                     currentBackoff = (currentBackoff.multipliedBy(2)).coerceAtMost(backoffLimit)
+                    reportFailure(failure)
                     MonitorSnapshot(endpoint = hostSession.endpoint.host, unsupported = true)
                 }
+                if (!failed) reportRecovery()
                 if (!closed.get()) onSnapshot(snapshot)
                 sleep(waitDuration(failed))
             }
+            logger.info("Monitor sampling stopped on ${hostSession.endpoint.host}")
         }
+        return true
+    }
+
+    /**
+     * The sample just failed. The first failure of an episode is logged with its cause, because the
+     * sidebar then shows "unsupported" and the log is the only place that can explain why.
+     */
+    private fun reportFailure(failure: Throwable) {
+        if (failing) return
+        failing = true
+        logger.log(
+            java.util.logging.Level.WARNING,
+            "Monitor sampling failed on ${hostSession.endpoint.host}; the next attempt follows in " +
+                "${currentBackoff.toMillis()} ms",
+            failure,
+        )
+    }
+
+    private fun reportRecovery() {
+        if (!failing) return
+        failing = false
+        logger.info("Monitor sampling recovered on ${hostSession.endpoint.host}")
     }
 
     private fun waitDuration(failed: Boolean): Duration =
@@ -147,9 +181,23 @@ class MonitorSampler(
         }
     }
 
-    override fun close() {
+    /**
+     * Signals the sampler to stop without waiting for it. A sample already in flight is abandoned:
+     * its snapshot is discarded and the channel closes when the command finishes.
+     *
+     * This is the variant UI code uses, because it runs on the Swing EDT and must never block there.
+     */
+    fun stop() {
         if (!closed.compareAndSet(false, true)) return
         thread?.interrupt()
+    }
+
+    override fun close() {
+        stop()
         thread?.join(Duration.ofSeconds(2))
+    }
+
+    private companion object {
+        val logger: Logger = Logger.getLogger(MonitorSampler::class.java.name)
     }
 }

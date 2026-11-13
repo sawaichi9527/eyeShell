@@ -196,6 +196,10 @@ class MonitorPanel(
     internal val processTableComponent: JTable
         get() = processTable
 
+    /** Test hook: true while the idle skeleton is shown, i.e. no session is bound to the sidebar. */
+    internal val isIdle: Boolean
+        get() = lastSnapshot == null
+
     fun resetToIdle() {
         content.removeAll()
         selectedInterface = null

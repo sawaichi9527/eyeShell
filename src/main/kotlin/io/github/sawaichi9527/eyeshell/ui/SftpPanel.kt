@@ -32,6 +32,7 @@ class SftpPanel(
 ) : JPanel(BorderLayout()) {
     private var controller: SftpController? = null
     private var currentDirectory = "/"
+    private var shownCard: String? = null
     private val cardLayout = CardLayout()
     private val cards = JPanel(cardLayout)
     private val pathField = JTextField("/").apply {
@@ -177,6 +178,10 @@ class SftpPanel(
         showDisconnected()
     }
 
+    /** Test hook: true while the "not connected" card is shown, i.e. no subsystem is bound. */
+    internal val isDisconnected: Boolean
+        get() = shownCard == "disconnected"
+
     fun bind(controller: SftpController?) {
         val sameController = controller != null && controller === rememberedController
         rememberedController = controller
@@ -265,6 +270,7 @@ class SftpPanel(
     }
 
     private fun showCard(name: String) {
+        shownCard = name
         cardLayout.show(cards, name)
         revalidate()
         repaint()

@@ -36,6 +36,7 @@ import java.awt.event.MouseEvent
 import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
 import java.nio.charset.Charset
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.BorderFactory
@@ -76,6 +77,8 @@ class EyeShellWindow(
      * localized confirmation; tests inject a stub so they never open a modal dialog.
      */
     private val confirmClose: ((sessionCount: Int) -> Boolean)? = null,
+    /** Monitor sampling interval for the sessions this window opens; tests shorten the 2 s default. */
+    private val monitorInterval: Duration = Duration.ofSeconds(2),
 ) : JFrame(AppInfo.windowTitle) {
     private val closed = AtomicBoolean()
     private val pagesByComponent = mutableMapOf<JComponent, TerminalSessionPage>()
@@ -200,7 +203,7 @@ class EyeShellWindow(
         val terminalView = terminalViewFactory()
         terminalView.setBackgroundImage(terminalBackgroundImage)
         val page = try {
-            TerminalSessionPage(this, terminalView, hostSession, terminal, captureRawBytes)
+            TerminalSessionPage(this, terminalView, hostSession, terminal, captureRawBytes, monitorInterval)
         } catch (failure: Throwable) {
             try {
                 terminalView.close()
@@ -228,11 +231,22 @@ class EyeShellWindow(
             throw failure
         }
         page.startEmulatorMonitor {
-            workbench.updateSessionStatus(component, SessionStatus.FAILED)
+            onSessionStopped(component, page.exitStatus)
         }
         page.startExitMonitor {
-            workbench.updateSessionStatus(component, page.exitStatus)
+            onSessionStopped(component, page.exitStatus)
         }
+    }
+
+    /**
+     * A session that ended (the remote shell exited, or the emulator failed) is more than a status
+     * change: the monitor sidebar and the SFTP pane were bound to that session, and the SSH
+     * transport they talk over stays open until the tab is closed. The page has already stopped its
+     * sampler and dropped its SFTP subsystem; this resets the panes when the tab is the visible one,
+     * so the sidebar matches the terminal instead of sampling a shell that is gone.
+     */
+    private fun onSessionStopped(component: Component, status: SessionStatus) {
+        workbench.sessionStopped(component, status)
     }
 
     internal fun attachTerminal(
@@ -279,12 +293,16 @@ class EyeShellWindow(
 
     private fun bindMonitorFor(component: Component, resetFirst: Boolean = false) {
         val page = pagesByComponent[component]
-        if (page == null) {
+        // An ended session has no shell left to monitor; rebinding it would either restart the
+        // sampler or leave the previous tab's snapshot on screen.
+        if (page == null || workbench.isSessionExited(component)) {
             if (initialized) workbench.monitorIdle()
             return
         }
         if (resetFirst && initialized) workbench.monitorIdle()
         try {
+            // A false result only means the sampler was already running for this tab; its next
+            // snapshot fills the pane, and resetting here would blank it on every tab switch.
             page.startMonitor { snapshot ->
                 SwingUtilities.invokeLater {
                     if (!closed.get() && workbench.isSelectedSession(component)) {
@@ -299,8 +317,12 @@ class EyeShellWindow(
 
     private fun bindSftpFor(component: Component?) {
         try {
-            val page = component?.let(pagesByComponent::get)
-            if (page == null) {
+            if (component == null) {
+                if (initialized) workbench.bindSftp(null)
+                return
+            }
+            val page = pagesByComponent[component]
+            if (page == null || workbench.isSessionExited(component)) {
                 if (initialized) workbench.bindSftp(null)
                 return
             }
@@ -409,16 +431,25 @@ internal class TerminalSessionPage(
     hostSession: HostSession,
     session: TerminalSession = hostSession.openTerminal(),
     private val captureRawBytes: Boolean = false,
+    /** Sampling interval of the monitor sidebar; tests shorten the 2 s default. */
+    private val monitorInterval: Duration = Duration.ofSeconds(2),
 ) : AutoCloseable {
     private var hostSession: HostSession = hostSession
     private var session: TerminalSession = session
     private val closed = AtomicBoolean()
+
+    /**
+     * Set once the remote shell ended or the emulator failed. A session that is over must not keep
+     * monitoring the host over the still-open transport, and it must not reopen SFTP on it; the flag
+     * is cleared by an in-place reconnect, which brings a fresh session into the same tab.
+     */
+    private val sessionEnded = AtomicBoolean()
     private val monitorStarted = AtomicBoolean()
     private val exitGeneration = AtomicInteger()
     private var exitCallback: (() -> Unit)? = null
     private val outputController = TerminalOutputController(terminalView)
     private val highlightController = TerminalHighlightController(terminalView)
-    private var monitorSampler = MonitorSampler(hostSession)
+    private var monitorSampler = MonitorSampler(hostSession, interval = monitorInterval)
     private val sftpLock = Any()
     private var sftpLoading = false
     private var sftpController: io.github.sawaichi9527.eyeshell.sftp.SftpController? = null
@@ -462,11 +493,25 @@ internal class TerminalSessionPage(
         // Closing the channel is what makes a keystroke in a frozen tab harmless instead of a
         // command the user cannot see; it also unblocks a reader stuck in a channel read.
         runCatching { session.close() }
+        markSessionEnded()
         if (captureRawBytes) captureTerminalBytes()
         val callback = emulatorStopCallback ?: return
         SwingUtilities.invokeLater {
             if (!closed.get()) callback()
         }
+    }
+
+    /**
+     * Releases everything that belongs to the shell session rather than to the tab: the monitor
+     * sampler and the cached SFTP subsystem. Both run over the SSH transport, which stays open after
+     * `exit` (it is closed with the tab), so without this the sidebar keeps sampling a host whose
+     * shell is gone and the file pane keeps offering a session that no longer exists.
+     */
+    private fun markSessionEnded() {
+        if (!sessionEnded.compareAndSet(false, true)) return
+        logger.info("Session ended; releasing the monitor and SFTP of ${session.name}")
+        stopMonitor()
+        stopSftp()
     }
 
     /**
@@ -571,6 +616,9 @@ internal class TerminalSessionPage(
      */
     fun loadSftp(onResult: (controller: io.github.sawaichi9527.eyeshell.sftp.SftpController?, failure: String?) -> Unit) {
         check(SwingUtilities.isEventDispatchThread()) { "SFTP binding must start on the Swing EDT" }
+        // The session is over: its SFTP pane has already been cleared, so opening a subsystem on the
+        // still-open transport would bind a file browser to a shell that no longer exists.
+        if (sessionEnded.get()) return
         val host = synchronized(sftpLock) {
             sftpController?.let {
                 onResult(it, null)
@@ -598,7 +646,7 @@ internal class TerminalSessionPage(
             val failure = outcome.exceptionOrNull()?.let(::describeFailureChain)
             if (controller != null) {
                 val keep = synchronized(sftpLock) {
-                    if (closed.get()) false else true.also { sftpController = controller }
+                    if (closed.get() || sessionEnded.get()) false else true.also { sftpController = controller }
                 }
                 if (!keep) {
                     runCatching { controller.close() }
@@ -657,19 +705,15 @@ internal class TerminalSessionPage(
 
         exitGeneration.incrementAndGet()
         monitorStarted.set(false)
-        monitorSampler.close()
-        synchronized(sftpLock) {
-            sftpController?.close()
-            sftpController = null
-            sftpFailure = null
-            sftpLoading = false
-        }
+        monitorSampler.stop()
+        stopSftp()
+        sessionEnded.set(false)
 
         val previousSession = session
         val previousHostSession = hostSession
         session = newSession
         hostSession = newHostSession
-        monitorSampler = MonitorSampler(newHostSession)
+        monitorSampler = MonitorSampler(newHostSession, interval = monitorInterval)
         reconnectPreset = newPreset
 
         // The new session is already attached to the view, so a failure to release the replaced
@@ -682,18 +726,35 @@ internal class TerminalSessionPage(
     }
 
     fun startMonitor(onSnapshot: (MonitorSnapshot) -> Unit): Boolean {
+        if (sessionEnded.get()) return false
         if (!monitorStarted.compareAndSet(false, true)) return false
         return try {
             monitorSampler.start(onSnapshot)
-            true
         } catch (_: Throwable) {
-            monitorSampler.close()
+            monitorSampler.stop()
             false
         }
     }
 
+    /**
+     * Stops the monitor sampler without waiting for a sample in flight. Called on the Swing EDT
+     * whenever the session ends or the tab closes, so it must not block.
+     */
     fun stopMonitor() {
-        monitorSampler.close()
+        monitorSampler.stop()
+    }
+
+    /**
+     * Drops the cached SFTP subsystem after the session ended. The close runs off the EDT because it
+     * closes a channel, and a subsystem opened concurrently is discarded instead of being cached.
+     */
+    fun stopSftp() {
+        val controller = synchronized(sftpLock) {
+            sftpFailure = null
+            sftpLoading = false
+            sftpController.also { sftpController = null }
+        } ?: return
+        Thread.ofVirtual().name("sftp-close").start { runCatching { controller.close() } }
     }
 
     fun sendCommand(command: String) {
@@ -719,6 +780,9 @@ internal class TerminalSessionPage(
                 "Terminal session ended: ${watched.name} exitStatus=$status " +
                     "outcome=${if (failure) "failed" else "closed"}",
             )
+            // The SSH transport outlives the shell, so the monitor and SFTP must be released here
+            // rather than waiting for the tab to be closed.
+            markSessionEnded()
             SwingUtilities.invokeLater {
                 if (!closed.get() && exitGeneration.get() == generation) callback()
             }
@@ -758,8 +822,10 @@ internal class TerminalSessionPage(
         logger.info("Terminal session closed from the user interface: ${session.name} (emulatorFailed=$hasEmulatorFailed)")
         exitGeneration.incrementAndGet()
         removeReconnectOnEnter()
-        monitorSampler.close()
-        synchronized(sftpLock) { sftpController?.close() }
+        // Neither stop waits for a sample in flight: this runs on the Swing EDT when the user closes
+        // the tab, and a blocked sampler must not freeze the window for its two-second join.
+        monitorSampler.stop()
+        stopSftp()
         outputController.close(terminalView::close)
         try {
             session.close()
@@ -952,6 +1018,24 @@ class WorkbenchPanel(
     internal fun monitorIdle() {
         check(SwingUtilities.isEventDispatchThread()) { "Monitor state must reset on the Swing EDT" }
         monitorPanel.resetToIdle()
+    }
+
+    /** Test hook: true while the monitor sidebar shows its idle skeleton. */
+    internal fun isMonitorIdle(): Boolean = monitorPanel.isIdle
+
+    /** Test hook: true while the SFTP pane shows its "not connected" card. */
+    internal fun isSftpDisconnected(): Boolean = toolDock.isSftpDisconnected()
+
+    /**
+     * Applies the end of a session: the status chip changes, and the monitor sidebar and SFTP pane —
+     * which were bound to that session over a transport that outlives its shell — are reset to their
+     * unbound state when the tab is the visible one.
+     */
+    internal fun sessionStopped(component: Component, status: SessionStatus) {
+        updateSessionStatus(component, status)
+        if (!isSelectedSession(component)) return
+        monitorIdle()
+        bindSftp(null)
     }
 
     internal fun isSelectedSession(component: Component): Boolean =
@@ -1194,6 +1278,9 @@ private class CollapsibleToolDock(commandsController: CommandsController?) : JPa
     fun bindSftp(controller: io.github.sawaichi9527.eyeshell.sftp.SftpController?) {
         sftpPanel.bind(controller)
     }
+
+    /** Test hook: true while the SFTP pane shows its "not connected" card. */
+    fun isSftpDisconnected(): Boolean = sftpPanel.isDisconnected
 
     fun bindSftpUnavailable(reason: String, retry: () -> Unit) {
         sftpPanel.showUnavailable(reason, retry)
