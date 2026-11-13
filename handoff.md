@@ -428,6 +428,19 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 
 ## Validation Evidence
 
+### 2026-11-13 session close (monitor/SFTP fix, 0.2.0 released on Windows, 0.2.1-dev started)
+
+- Commands: `git status --short --branch`; `git diff --stat`; `scripts\gradlew-local.cmd test check --console=plain` (returned `:test UP-TO-DATE` because the tree was unchanged since the last run, so the suite was forced); `scripts\gradlew-local.cmd test check --rerun-tasks --console=plain`; `git diff --check`.
+- Executed at: 2026-11-13T11:05+08:00 (forced suite: build 1 m 9 s).
+- Exit codes: 0 for the forced suite and `check`; `git diff --check` reported no whitespace errors; `git status` clean with `main` in sync with `origin/main` at `d3ddca4`.
+- Result: **509 tests: 509 executed, 0 failures, 0 errors, 25 skipped** and `check` passes at the current HEAD. A known warning is reported while recompiling the pinned fork (`TerminalKeyEventProcessor.kt: 'when' is exhaustive so 'else' is redundant`); it comes from `third-party/jediterm`, is not a failure, and does not affect the eyeShell modules.
+- Session commits: `1c152fe` (monitor/SFTP release on session end), `905ca83` (lifecycle tests), `809bab9` (fix + owner evidence), `13e0895` (release 0.2.0, tag `v0.2.0`), `c8a327a` (start 0.2.1-dev, tag `v0.2.1-dev`), `0ece2e3` and `d3ddca4` (release evidence and AppImage handoff).
+- Release state: `0.2.0` is published for Windows as release `443746263` with `eyeShell-0.2.0.zip` (asset `741967088`, 72,821,997 bytes, digest `sha256:7b015288…9fb1`) and its `.sha256` (asset `741967664`). The Linux AppImage is still pending: the owner builds it at home on the Ubuntu platform and it is uploaded from this host afterwards.
+- Test environment: Windows x64 (`ACUBENS`), Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 with caches under `.local/gradle-home`, Kotlin 2.4.10, JediTerm 3.76 (`f2b0f53`).
+- Artifacts: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`; `build/package/eyeShell-0.2.0.zip` and `.sha256`; release https://github.com/sawaichi9527/eyeShell/releases/tag/v0.2.0.
+- Not verified in this entry: the Linux AppImage (not built yet), the window title of the packaged Windows ZIP, and a live SSH session driven through that ZIP (the owner exercised the same fix through the development build).
+- Security note: a fine-grained GitHub personal access token was pasted into the session chat. It was not written to disk, the repository, or the log; uploads used the machine's stored Git credential instead. The owner was asked to revoke the pasted token.
+
 ### Release 0.2.0 (Windows portable ZIP, 2026-11-13)
 
 - Commands: `scripts\gradlew-local.cmd test check --console=plain` at version `0.2.0`; `scripts\gradlew-local.cmd jpackagePortable --console=plain`; archive inspection through `System.IO.Compression`; `Expand-Archive` into `%TEMP%\opencode\eyeshell-020-release`; launch of `eyeShell.exe` with `JAVA_HOME`/`JDK_HOME` cleared and an isolated `LOCALAPPDATA`; `Get-FileHash -Algorithm SHA256`; REST create-release and asset upload for tag `v0.2.0`; then the same `test check` at `0.2.1-dev`.
