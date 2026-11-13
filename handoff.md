@@ -415,6 +415,17 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 
 ## Validation Evidence
 
+### 2026-11-13 session close (0.1.9 released on both platforms, 0.2.0-dev started)
+
+- Commands: `git status --short --branch`; `git diff --stat`; `git fetch origin --tags --prune`; `git merge --ff-only origin/main`; `scripts\gradlew-local.cmd test check --no-build-cache --rerun-tasks --console=plain` (forced, because the build cache otherwise satisfied the task unchanged since the release commit).
+- Executed at: 2026-11-12T18:25+08:00 (suite); the close was recorded on 2026-11-13 after fast-forwarding to `eabc3ef`.
+- Exit codes: 0 for the fetch/merge, the full suite, and `check`; `git status` clean and `main` in sync with `origin/main` at `eabc3ef`.
+- Result: **505 tests: 505 executed, 0 failures, 0 errors, 25 skipped** (test duration 32.1 s; build 1 m 20 s) and `check` passes. The suite ran at `ca301cb`; the only commits between that tree and `eabc3ef` touch `handoff.md` (docs-only, verified with `git show --stat`), so the evidence applies to the current HEAD code.
+- Release state: `0.1.9` is published on both platforms — release `442733045` carries the Windows ZIP, its `.sha256`, `eyeShell-0.1.9-x86_64.AppImage` (asset `739551594`), and the AppImage `.sha256` (asset `739574800`). Development continues as `0.2.0-dev` (`a446081`, tag `v0.2.0-dev`).
+- Test environment: Windows 11 x64, Temurin 21.0.12+8 under `.local/jdk-21`, Gradle 9.5.0 with caches under `.local/gradle-home`, Kotlin 2.4.10, JediTerm 3.76 (`f2b0f53`).
+- Artifacts: `build/reports/tests/test/index.html`; XML results under `build/test-results/test/`; release archive `build/package/eyeShell-0.1.9.zip`; VM clone kept at `sqa@192.168.23.46:~/workspace/eyeShell-0.1.9-smoke` with the project-local JDK and Gradle caches.
+- Not verified in this entry: the owner's Windows GUI acceptance of `0.1.9`; a live SSH session through the packaged Windows ZIP (the VM smoke test built the release *source*, while the live session was driven through the AppImage); an `apt`-induced scroll region was not observed again (the synthetic reproduction passes); Monitor, SFTP, and a non-UTF-8 host were not exercised through the `0.1.9` AppImage.
+
 - Linux smoke test on the local VM (2026-11-12, tag `v0.1.9`, host `w540vm01` 192.168.23.46, Ubuntu 24.04.5 / kernel 7.0.0-43, 2 vCPU, 7 GB): cloned the release tag with its submodule (fork `f2b0f53`), bootstrapped Temurin 21.0.12+8 and Gradle 9.5.0, then ran `./scripts/gradlew-local.sh test check`. A plain SSH session (no `DISPLAY`) produced **35 `HeadlessException` failures in Swing tests**; re-running under `xvfb-run -a` produced **505 tests: 1 failed, 0 errors, 22 skipped**. The single failure is `EyeShellWindowPlacementTest > a maximized window is restored maximized`: Xvfb has no window manager, so `setExtendedState(MAXIMIZED_BOTH)` never reaches a WM and `extendedState` stays 0. No product defect was found on Linux; the release code compiles and runs under the project-local toolchain.
 
 ### 0.1.9 Linux AppImage (Ubuntu 26.04.1, 2026-11-12)
