@@ -296,7 +296,7 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 
 - Owner GUI acceptance of the 0.1.8 Windows ZIP: resize/move/maximize then close and restart, the `X`/Alt+F4 confirmation (Cancel keeps every session), and the left-aligned port field in the Saved Host editor and the SSH dialog.
 
-- Re-run the 0.1.9 VM smoke test on `192.168.23.46` (Ubuntu 24.04.5) once port 22 is reachable from the Windows host. The Linux AppImage itself is done: it was built from tag `v0.1.9`, attached to release `442733045`, and smoke tested on the Ubuntu 26.04 development host (2026-11-12).
+- A live SSH session through the packaged **Windows ZIP** is still pending (the AppImage already had one, and the VM smoke test built the release source). The 0.1.9 VM smoke test itself was completed on 2026-11-12: `xvfb-run -a ./scripts/gradlew-local.sh test check` on Ubuntu 24.04.5 gave 505 tests with one environment-only failure (maximize without a window manager), and the clone is kept at `sqa@192.168.23.46:~/workspace/eyeShell-0.1.9-smoke`.
 
 - Diagnose the terminal-tab freeze seen during kernel package work (2026-11-09 and 2026-11-12): the confirmed mechanism is a scroll region left behind by a program, which is now prevented for invalid DECSTBM regions, reversible with `Reset Terminal`, and auto-recovered after 30 s for a valid but abandoned region. Still to confirm: whether the `apt` trigger was an invalid (now ignored) or a valid short region; if the log shows `Restoring a shortened terminal scroll region (N..N of M)`, the latter is confirmed and per-buffer scroll margins (the Windows Terminal approach) would be the next step.
 
