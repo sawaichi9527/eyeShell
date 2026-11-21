@@ -2,10 +2,10 @@
 set -euo pipefail
 
 readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-readonly JDK_VERSION="21.0.12+8"
-readonly ARCHIVE_NAME="OpenJDK21U-jdk_x64_linux_hotspot_21.0.12_8.tar.gz"
-readonly DOWNLOAD_URL="https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12%2B8/${ARCHIVE_NAME}"
-readonly EXPECTED_SHA256="e4446ff06a276155697597cc0f1b15da004ff083f4964a35271ecee567177370"
+readonly JDK_VERSION="21.0.13.1+2"
+readonly ARCHIVE_NAME="OpenJDK21U-jdk_x64_linux_hotspot_21.0.13.1_2.tar.gz"
+readonly DOWNLOAD_URL="https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13.1%2B2/${ARCHIVE_NAME}"
+readonly EXPECTED_SHA256="bb8a93f9ae6e7a693b2b721e85dbeff26ae1a77447985a8d7afcdd9c7cf6222e"
 readonly LOCAL_DIR="${ROOT_DIR}/.local"
 readonly JDK_DIR="${LOCAL_DIR}/jdk-21"
 readonly DOWNLOAD_DIR="${LOCAL_DIR}/downloads"
@@ -19,7 +19,7 @@ fi
 if [[ -x "${JDK_DIR}/bin/java" ]]; then
     if [[ -f "${JDK_DIR}/release" ]] &&
         grep -Fxq 'IMPLEMENTOR="Eclipse Adoptium"' "${JDK_DIR}/release" &&
-        grep -Fxq 'IMPLEMENTOR_VERSION="Temurin-21.0.12+8"' "${JDK_DIR}/release"; then
+        grep -Fxq 'IMPLEMENTOR_VERSION="Temurin-21.0.13.1+2"' "${JDK_DIR}/release"; then
         if ! "${JDK_DIR}/bin/java" -version >/dev/null 2>&1; then
             printf 'The pinned JDK metadata is present, but java could not execute.\n' >&2
             exit 1

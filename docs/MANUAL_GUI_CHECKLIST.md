@@ -88,6 +88,7 @@ Automated tests cover layout construction, controller wiring, and terminal buffe
 - Add/Manage highlight rules: colors, bold/italic/underline, priority, and Merge/Override all render as chosen.
 - Select Visible, Select All Output, Copy All Output (8,388,608 limit prompt), and Save All Output behave as documented, including on the alternate screen.
 - `Clear Buffer` empties the visible screen and the scrollback, keeps the last line, and is disabled while an alternate-screen application is running.
+- After a program that owns a scroll region exits (for example a long `apt dist-upgrade` that fills the screen), the next prompt line still advances: pressing Enter adds a line, typed text does not overwrite the last row, and the log carries one `Repaired scroll margins left behind by a program …` line. The manual `Reset Terminal` action still exists in the context menu and logs `… ; before: …` before it repairs anything.
 - Connecting to a Password host with nothing saved does not raise an OS keyring password prompt; connecting to a host with a saved password raises it only when the keyring must be unlocked to read the secret.
 - CJK and wide characters select and copy correctly.
 - The terminal uses the selected color scheme (`eyeShell Dark` by default); light text sits on the scheme background rather than white-on-black.

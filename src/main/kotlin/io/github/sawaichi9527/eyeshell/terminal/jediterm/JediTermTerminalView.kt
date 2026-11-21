@@ -62,6 +62,12 @@ class JediTermTerminalView(
     @Volatile
     private var activeConnector: SessionTtyConnector? = null
 
+    /** How many stale scroll regions the emulator had to repair; observable for tests and dumps. */
+    private val staleRegionRepairs = java.util.concurrent.atomic.AtomicLong()
+
+    internal val staleRegionRepairCount: Long
+        get() = staleRegionRepairs.get()
+
     @Volatile
     private var emulatorStopHandler: ((unexpected: Boolean) -> Unit)? = null
     private var watchdog: EmulatorWatchdog? = null
@@ -78,6 +84,24 @@ class JediTermTerminalView(
         // Fires on the emulator pool thread after the widget closed its session; the callback only
         // reports whether the end was expected, and the caller marshals it onto its own thread.
         widget.addListener { handleEmulatorStopped() }
+        // A program that exits while it owns a scroll region leaves margins that stop the shell's line
+        // feed from scrolling (the reported "Enter no longer adds a line"). The fork repairs the state
+        // on the spot and reports it here, so the event stays in the log instead of looking like a tab
+        // that healed itself for no reason.
+        (widget.terminal as? com.jediterm.terminal.model.JediTerminal)?.setStaleScrollRegionListener {
+                cursorY: Int,
+                regionTop: Int,
+                regionBottom: Int,
+                terminalHeight: Int,
+            ->
+            staleRegionRepairs.incrementAndGet()
+            logger.warning(
+                "Repaired scroll margins left behind by a program on " +
+                    "${activeConnector?.sessionName ?: "the terminal"}: the cursor was on row $cursorY, " +
+                    "below the region $regionTop..$regionBottom of $terminalHeight, so a line feed " +
+                    "could not scroll; the full height is restored",
+            )
+        }
     }
 
     override val component: JComponent
@@ -166,6 +190,8 @@ class JediTermTerminalView(
             bottom = terminal.scrollRegionBottom,
             height = terminal.terminalHeight,
             alternateScreen = widget.terminalTextBuffer.isUsingAlternateBuffer,
+            cursorY = terminal.cursorY,
+            originMode = terminal.isOriginMode(),
         )
     }
 
@@ -179,8 +205,9 @@ class JediTermTerminalView(
         val connector = activeConnector
         logger.warning(
             "Restoring a shortened terminal scroll region (${sample.top}..${sample.bottom} of " +
-                "${sample.height}) on ${connector?.sessionName ?: "the terminal"}; " +
-                "new output was confined to that row",
+                "${sample.height}) on ${connector?.sessionName ?: "the terminal"}; cursor was on row " +
+                "${sample.cursorY} (outside=${sample.cursorOutsideRegion}) originMode=${sample.originMode}, " +
+                "so new output was confined to the region's bottom row",
         )
         val terminal = widget.terminal as? com.jediterm.terminal.model.JediTerminal ?: return
         val cursorX = terminal.cursorX
@@ -310,12 +337,45 @@ class JediTermTerminalView(
         widget.terminal.cursorPosition(x, y)
     }
 
+    /** Test hook: performs the line feed a shell issues when it prints its next line. */
+    internal fun lineFeedForTest() {
+        widget.terminal.index()
+    }
+
+    /** Test hook: enables the origin mode a full-screen program can leave behind. */
+    internal fun setOriginModeForTest(enabled: Boolean) {
+        widget.terminal.setModeEnabled(com.jediterm.terminal.TerminalMode.OriginMode, enabled)
+    }
+
+    /**
+     * The terminal state that decides whether a tab can still scroll: the scroll margins, origin
+     * mode, and whether the cursor sits outside the margins. It is logged *before* every reset,
+     * because the reset is exactly what destroys the evidence of a program that exited mid-screen —
+     * and until now that evidence was all anyone had to go on.
+     */
+    private fun regionState(): String {
+        val terminal = widget.terminal as? com.jediterm.terminal.model.JediTerminal
+            ?: return "region=unavailable"
+        val top = terminal.scrollRegionTop
+        val bottom = terminal.scrollRegionBottom
+        val height = terminal.terminalHeight
+        val cursorY = terminal.cursorY
+        return "scrollRegion=$top..$bottom of $height" +
+            " originMode=${terminal.isOriginMode()}" +
+            " cursor=${terminal.cursorX},$cursorY" +
+            " cursorBelowRegion=${cursorY > bottom}" +
+            " alternate=${widget.terminalTextBuffer.isUsingAlternateBuffer}" +
+            " repairs=$staleRegionRepairCount"
+    }
+
     /**
      * User-visible reset for a program that left the terminal in a strange state. Mature terminals
      * offer the same escape hatch; the scrollback and the screen content are kept.
      */
     private fun resetTerminalState() {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal reset must run on the Swing EDT" }
+        val before = regionState()
+        captureResetEvidence(before)
         val terminal = widget.terminal
         val cursorX = terminal.cursorX
         val cursorY = terminal.cursorY
@@ -325,11 +385,35 @@ class JediTermTerminalView(
         // passing cursorX unchanged restores the exact column. Adding one shifted the cursor right
         // on every reset.
         terminal.cursorPosition(cursorX, cursorY)
-        logger.info("Terminal state reset from the context menu (origin mode and scroll region restored)")
+        logger.info(
+            "Terminal state reset from the context menu (origin mode and scroll region restored); before: $before",
+        )
     }
+
+    /**
+     * Writes a diagnostics snapshot for a reset that found a terminal which could not scroll, so the
+     * state that caused the freeze survives the workaround that fixed it.
+     */
+    private fun captureResetEvidence(before: String) {
+        val directory = diagnosticsDirectory ?: return
+        val terminal = widget.terminal as? com.jediterm.terminal.model.JediTerminal ?: return
+        if (!cannotScroll(terminal)) return
+        Diagnostics.write(
+            directory = directory,
+            reason = "reset-${activeConnector?.sessionName ?: "terminal"}",
+            sessions = listOf("session=${activeConnector?.sessionName ?: "none"} $before"),
+        )
+    }
+
+    /** True when the margins or origin mode would stop a line feed from scrolling. */
+    private fun cannotScroll(terminal: com.jediterm.terminal.model.JediTerminal): Boolean =
+        terminal.isOriginMode() ||
+            terminal.scrollRegionTop > 1 ||
+            terminal.scrollRegionBottom < terminal.terminalHeight
 
     override fun resetForReattach() {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal reattach preparation must run on the Swing EDT" }
+        val before = regionState()
         if (widget.terminalTextBuffer.isUsingAlternateBuffer) {
             widget.terminalTextBuffer.useAlternateBuffer(false)
         }
@@ -338,8 +422,13 @@ class JediTermTerminalView(
         // which looks exactly like a frozen tab — and a reconnect into the same widget inherits it.
         // Restoring a full-height region is safe for a fresh shell and keeps the scrollback.
         val terminal = widget.terminal
+        val model = terminal as? com.jediterm.terminal.model.JediTerminal
         val cursorX = terminal.cursorX
         val cursorY = terminal.cursorY
+        if (model != null && cannotScroll(model)) {
+            logger.warning("Reattaching over a terminal state that could not scroll; before: $before")
+            captureResetEvidence(before)
+        }
         terminal.setModeEnabled(com.jediterm.terminal.TerminalMode.OriginMode, false)
         terminal.resetScrollRegions()
         // getCursorX() is already 1-based (myCursorX + 1) and cursorPosition() subtracts one, so
@@ -473,11 +562,15 @@ class JediTermTerminalView(
     override fun terminalState(): String = runCatching {
         val terminal = widget.terminal
         val buffer = widget.terminalTextBuffer
+        val model = terminal as? com.jediterm.terminal.model.JediTerminal
         buildString {
             append("size=").append(terminal.terminalWidth).append('x').append(terminal.terminalHeight)
             append(" cursor=").append(terminal.cursorX).append(',').append(terminal.cursorY)
-            append(" scrollTop=").append((terminal as? com.jediterm.terminal.model.JediTerminal)?.scrollRegionTop ?: -1)
-            append(" scrollBottom=").append((terminal as? com.jediterm.terminal.model.JediTerminal)?.scrollRegionBottom ?: -1)
+            append(" scrollTop=").append(model?.scrollRegionTop ?: -1)
+            append(" scrollBottom=").append(model?.scrollRegionBottom ?: -1)
+            append(" originMode=").append(model?.isOriginMode() ?: false)
+            append(" cursorBelowRegion=").append(model != null && terminal.cursorY > model.scrollRegionBottom)
+            append(" repairs=").append(staleRegionRepairCount)
             append(" visibleRows=").append(widget.terminalPanel.visibleStartRow)
                 .append("..").append(widget.terminalPanel.visibleEndRow)
             append(" screenLines=").append(buffer.screenLinesCount)

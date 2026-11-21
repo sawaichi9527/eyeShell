@@ -69,6 +69,27 @@ class ReattachScrollRegionTest {
         }
     }
 
+    @Test
+    fun `origin mode left behind by a program is visible and cleared on reattach`() {
+        val view = onEdt { JediTermTerminalView(columns = 80, rows = 10) }
+        try {
+            onEdt { view.setOriginModeForTest(enabled = true) }
+            assertTrue(
+                view.terminalState().contains("originMode=true"),
+                "the dump must name origin mode: ${view.terminalState()}",
+            )
+
+            onEdt { view.resetForReattach() }
+
+            assertTrue(
+                view.terminalState().contains("originMode=false"),
+                "a fresh session must start without origin mode: ${view.terminalState()}",
+            )
+        } finally {
+            onEdt { view.close() }
+        }
+    }
+
     private fun cursorColumn(view: JediTermTerminalView): String =
         view.terminalState().substringAfter("cursor=").substringBefore(",")
 

@@ -170,7 +170,7 @@
 | 主要語言 | Kotlin/JVM 2.4.10 |
 | Build | Gradle 9.5.0 + Kotlin DSL |
 | Bytecode baseline | Java 21 |
-| Development JDK | Eclipse Temurin 21.0.12+8 x64 |
+| Development JDK | Eclipse Temurin 21.0.13.1+2 x64 |
 | Windows Runtime | 經驗證的 JBR/OpenJDK 21 x64 |
 | Linux Runtime | 支援 WLToolkit 的經驗證 JBR 25 x64，或後續等效 Runtime |
 | UI | Swing + FlatLaf 3.7.2 |
@@ -233,8 +233,8 @@ M0 toolchain checksum：
 
 | Artifact | SHA-256 |
 |---|---|
-| Temurin 21.0.12+8 Linux x64 tar.gz | `e4446ff06a276155697597cc0f1b15da004ff083f4964a35271ecee567177370` |
-| Temurin 21.0.12+8 Windows x64 ZIP | `9ba963ee2371874a74185d18bc7bb2ab9407df7683300855ed7606e0662321d0` |
+| Temurin 21.0.13.1+2 Linux x64 tar.gz | `bb8a93f9ae6e7a693b2b721e85dbeff26ae1a77447985a8d7afcdd9c7cf6222e` |
+| Temurin 21.0.13.1+2 Windows x64 ZIP | `bbebea1469996b276683c9299c227b294f85c847039c82633218186a4ad4fbf2` |
 | Gradle 9.5.0 binary distribution | `553c78f50dafcd54d65b9a444649057857469edf836431389695608536d6b746` |
 | Gradle 9.5.0 Wrapper JAR | `497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7` |
 
@@ -524,6 +524,11 @@ Background-image patch：
 
 - Commit：`4ab49e9`
 - 內容：`TerminalPanel.paintComponent` 的底色填滿改走可覆寫的 `paintTerminalBackground`；`drawCharacters` 與 `drawMargins` 依 `isDefaultBackgroundPainted` 決定是否填滿預設背景，使嵌入端可在預設背景色儲存格後方繪製圖片，同時保留 ANSI 色彩、Selection、Search、Highlight 與 Cursor 的不透明底色。
+
+Scroll-region patch：
+
+- Commits：`3fdbdda`（`getScrollRegionBottom()`）、`f2b0f53`（無效 DECSTBM 依 xterm／Ghostty／Windows Terminal 忽略）、`3d93082`（修復程式結束後留下的非全高 margin）。
+- 理由：程式把最後一列當狀態列時會設定未涵蓋全高的捲動區；若程式結束未還原，shell 在真正最後一列換行時無法滾動，新行覆蓋舊行、Enter 看似無效。`index()`／`nextLine()` 在主畫面、游標位於最後一列且低於 bottom margin 時還原全高後再滾動，並透過 `StaleScrollRegionListener` 回報；仍在持有區域的程式因游標仍在區域內而不受影響。
 
 ### 9.2 Terminal 抽象介面
 

@@ -1,10 +1,10 @@
 $ErrorActionPreference = "Stop"
 
 $RootDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$JdkVersion = "21.0.12+8"
-$ArchiveName = "OpenJDK21U-jdk_x64_windows_hotspot_21.0.12_8.zip"
-$DownloadUrl = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.12%2B8/$ArchiveName"
-$ExpectedSha256 = "9ba963ee2371874a74185d18bc7bb2ab9407df7683300855ed7606e0662321d0"
+$JdkVersion = "21.0.13.1+2"
+$ArchiveName = "OpenJDK21U-jdk_x64_windows_hotspot_21.0.13.1_2.zip"
+$DownloadUrl = "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13.1%2B2/$ArchiveName"
+$ExpectedSha256 = "bbebea1469996b276683c9299c227b294f85c847039c82633218186a4ad4fbf2"
 $LocalDir = Join-Path $RootDir ".local"
 $JdkDir = Join-Path $LocalDir "jdk-21"
 $DownloadDir = Join-Path $LocalDir "downloads"
@@ -20,7 +20,7 @@ if (Test-Path $JavaPath) {
     $ReleaseMetadata = if (Test-Path $ReleasePath) { Get-Content $ReleasePath } else { @() }
     if (
         $ReleaseMetadata -contains 'IMPLEMENTOR="Eclipse Adoptium"' -and
-        $ReleaseMetadata -contains 'IMPLEMENTOR_VERSION="Temurin-21.0.12+8"'
+        $ReleaseMetadata -contains 'IMPLEMENTOR_VERSION="Temurin-21.0.13.1+2"'
     ) {
         & $JavaPath -version 2>$null
         if ($LASTEXITCODE -ne 0) {

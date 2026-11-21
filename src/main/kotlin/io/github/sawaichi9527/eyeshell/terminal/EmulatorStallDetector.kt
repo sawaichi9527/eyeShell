@@ -233,10 +233,17 @@ internal data class ScrollRegionSample(
     val bottom: Int,
     val height: Int,
     val alternateScreen: Boolean,
+    /** One-based cursor row, used to tell a region the program still owns from an abandoned one. */
+    val cursorY: Int = top,
+    val originMode: Boolean = false,
 ) {
     /** A program that exited mid-screen leaves a region that does not cover the whole screen. */
     val isShortened: Boolean
         get() = !alternateScreen && (top > 1 || bottom < height)
+
+    /** True when the cursor sits outside the region, where a line feed can no longer scroll. */
+    val cursorOutsideRegion: Boolean
+        get() = cursorY > bottom || cursorY < top
 }
 
 /**
