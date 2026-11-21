@@ -4,6 +4,8 @@ Older milestone plans and superseded validation evidence are archived in `docs/H
 
 ## Current Status
 
+Version `0.2.3-dev` starts from the released `0.2.2` tree (2026-11-22) with no functional change.
+
 Version `0.2.2` is cut (2026-11-22) and published for Windows as `eyeShell-0.2.2.zip` (release id `453810654`, tag `v0.2.2`, ZIP asset `776106780`, 72,956,910 bytes, SHA-256 `e539e9faa812192626b912f6aae95306ac98f26afc98eda02221bf934b61adfe`, plus `.sha256` asset `776107140`, both `state=uploaded` with the expected digest; `app/eyeShell-0.2.2.jar` with `version=0.2.2`, bundled Apache MINA SSHD `2.20.0`, bundled runtime `21.0.13.1`). It carries the scroll-margin repair that ended the terminal "semi freeze", the pre-reset evidence logging, the Temurin 21.0.13.1+2 bump for CVE-2026-114938, and the Apache MINA SSHD 2.19.0 → 2.20.0 bump for CVE-2026-77185 and CVE-2026-93994. Full suite passes with 515 tests, 0 failures and 25 skips, and `check` passes. Development continues as `0.2.3-dev`.
 
 `0.2.2-dev` (2026-11-21 → 2026-11-22) started from the released `0.2.1` tree and added the MINA SSHD bump; both server-side CVEs it fixes were unreachable from this client, so it is baseline hygiene rather than a response to a live exposure.
