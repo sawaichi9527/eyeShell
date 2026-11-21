@@ -10,7 +10,7 @@ a vendor advisory names a component below.
 | Component | Version | Ships as | Notes |
 |---|---|---|---|
 | Eclipse Temurin JDK/JRE (`java.base`, HotSpot) | 21.0.13.1+2 | `runtime/` in the portable ZIP and the AppImage | Pinned in `scripts/bootstrap-jdk.{ps1,sh}`; checksums in `docs/PRODUCT_SPEC.md` |
-| Apache MINA SSHD (`sshd-core`, `sshd-sftp`) | 2.19.0 | `app/eyeShell-*.jar` dependencies | SSH transport and SFTP; pure Java |
+| Apache MINA SSHD (`sshd-core`, `sshd-sftp`) | 2.20.0 | `app/eyeShell-*.jar` dependencies | SSH transport and SFTP; pure Java |
 | JediTerm (`jediterm-core`, `jediterm-ui`, fork `sawaichi9527/jediterm`) | 3.76 (`f2b0f53` + eyeShell patches) | Same | Terminal emulation; pure Java |
 | Xerial SQLite JDBC | 3.53.2.1 | Same | Bundles a native SQLite build |
 | FlatLaf | 3.7.2 | Same | Look and feel; no network or crypto |
@@ -65,12 +65,13 @@ artifact.
   SQLite *before* 3.53.2; this driver already bundles 3.53.2, so the catalog is not affected. The
   schema also creates no FTS5 tables and eyeShell executes only its own statements, never SQL from a
   peer. Re-check at the next sqlite-jdbc bump.
-* **MINA SSHD 2.19.0**: `CVE-2026-77185` (asynchronous authentication can skip signature verification)
-  and `CVE-2026-93994` (a duplicate public key can satisfy multi-key authentication) both live in the
-  **server-side** authentication path, and both are fixed in 2.20.0. eyeShell is a pure client: it
-  presents credentials and never verifies a peer's signature, so neither is reachable here. Bumping to
-  2.20.0 is still recommended hygiene and is tracked as a follow-up because it changes the strict
-  dependency-verification metadata.
+* **MINA SSHD 2.20.0**: `CVE-2026-77185` (asynchronous authentication can skip signature
+  verification) and `CVE-2026-93994` (a duplicate public key can satisfy multi-key authentication) both
+  live in the **server-side** authentication path, and eyeShell's client never executes either. The
+  bump from 2.19.0 was taken anyway as baseline hygiene: the two new artifact families were verified
+  against an independent Maven Central download before their SHA-256 values entered
+  `gradle/verification-metadata.xml`, and the embedded-client/server SSH tests pass unchanged on
+  2.20.0.
 * **Gradle 9.5.0 / Kotlin 2.4.10**: build-time only; they never run in a user's process.
 * **JediTerm**: the fork tracks upstream 3.76 with local patches; it parses untrusted terminal output
   by design, so a parser CVE in upstream is in scope. Watch upstream releases together with the
@@ -90,6 +91,5 @@ artifact.
 1. Read the Oracle CPU advisory for the pinned Java line and bump the pin if a security release exists.
 2. Read <https://openssl-library.org/news/vulnerabilities/> — even though OpenSSL is not shipped, a
    High/Critical entry is worth recording here with the reason it does not apply.
-3. Re-check MINA SSHD (bump to 2.20.0 is queued), SQLite JDBC, FlatLaf, and JediTerm upstream for
-   advisories.
+3. Re-check MINA SSHD, SQLite JDBC, FlatLaf, and JediTerm upstream for advisories.
 4. Record the outcome in this file with the review date and the artifact versions of that release.

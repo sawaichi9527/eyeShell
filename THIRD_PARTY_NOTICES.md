@@ -35,7 +35,7 @@ eyeShell compiles only JediTerm's `core` and `ui` source directories. The fork a
 
 - Project: Apache MINA SSHD
 - Source: https://github.com/apache/mina-sshd
-- Version: 2.19.0
+- Version: 2.20.0
 - Copyright: The Apache Software Foundation
 - License: Apache License 2.0
 - License text: https://www.apache.org/licenses/LICENSE-2.0

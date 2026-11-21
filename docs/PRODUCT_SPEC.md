@@ -177,7 +177,7 @@
 | Test | JUnit Jupiter 6.1.2 |
 | Layout | MigLayout 或自有 Layout abstraction |
 | Terminal | JediTerm 3.74 pinned core/ui source |
-| SSH/SFTP | Apache MINA SSHD 2.19.0 |
+| SSH/SFTP | Apache MINA SSHD 2.20.0 |
 | 即時 Regex | Google RE2/J 1.8 |
 | Database | SQLite + Xerial SQLite JDBC 3.53.2.1 |
 | Windows Secret | Windows Credential Manager |
@@ -372,7 +372,7 @@ optional-relay-api
 
 ### 8.1 SSH Engine
 
-採用 Apache MINA SSHD 2.19.0 作為主要 SSH/SFTP Engine。
+採用 Apache MINA SSHD 2.20.0 作為主要 SSH/SFTP Engine。
 
 ### 8.2 驗證方式
 
@@ -1165,7 +1165,7 @@ Repaint
 | 32-bit | 完全移除 |
 | 主 UI | Swing + FlatLaf |
 | Terminal | JediTerm 3.74 project fork pinned at `38413f9` (upstream base `377b76e`) |
-| SSH/SFTP | Apache MINA SSHD 2.19.0 |
+| SSH/SFTP | Apache MINA SSHD 2.20.0 |
 | 即時 Regex | Google RE2/J 1.8 |
 | Database | SQLite via Xerial SQLite JDBC 3.53.2.1 |
 | Cloud backend | 不建立 |

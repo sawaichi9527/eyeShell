@@ -35,8 +35,8 @@ dependencies {
     } else {
         runtimeOnly("de.swiesend:secret-service:1.8.1-jdk17")
     }
-    implementation("org.apache.sshd:sshd-core:2.19.0")
-    implementation("org.apache.sshd:sshd-sftp:2.19.0")
+    implementation("org.apache.sshd:sshd-core:2.20.0")
+    implementation("org.apache.sshd:sshd-sftp:2.20.0")
     implementation("org.xerial:sqlite-jdbc:3.53.2.1") {
         artifact { classifier = "without-natives" }
     }

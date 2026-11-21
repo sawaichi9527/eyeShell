@@ -67,7 +67,7 @@ RDP 與雲端 SSH Relay 暫列低優先，首版不實作。
 - Java 21 bytecode baseline
 - Swing + FlatLaf
 - JediTerm minimal fork
-- Apache MINA SSHD 2.19.0
+- Apache MINA SSHD 2.20.0
 - SQLite + Xerial JDBC
 - Google RE2/J 1.8
 - Windows Credential Manager
@@ -98,7 +98,7 @@ Pinned M0 development versions:
 | FlatLaf | 3.7.2 |
 | JUnit Jupiter | 6.1.2 |
 | JediTerm | 3.74 (`377b76e682a5f86bcbb18a318386f530dbebf5c1`) |
-| Apache MINA SSHD | 2.19.0 |
+| Apache MINA SSHD | 2.20.0 |
 | Google RE2/J | 1.8 |
 | Xerial SQLite JDBC | 3.53.2.1 |
 | JNA | 5.19.1 |
