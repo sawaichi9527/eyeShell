@@ -6,7 +6,7 @@ Older milestone plans and superseded validation evidence are archived in `docs/H
 
 Version `0.2.2-dev` starts from the released `0.2.1` tree (2026-11-21) with no functional change. Development remains on the scroll-margin fix pending the owner's real `apt dist-upgrade` pass and the Linux AppImage for `0.2.1`.
 
-Version `0.2.1` is cut (2026-11-21) and its Windows portable ZIP is `eyeShell-0.2.1.zip` (72,949,440 bytes, SHA-256 `3a5fde49d1fbdaecd776a24b6960b494edbcc5434f80c1118242d6b878cde645`, `app/eyeShell-0.2.1.jar` whose `eyeshell-build.properties` report `version=0.2.1`, bundled runtime `21.0.13.1`, tag `v0.2.1`). It carries the scroll-margin repair that ended the terminal "semi freeze", the pre-reset evidence logging, and the Temurin 21.0.13.1+2 bump for CVE-2026-114938. The GitHub release asset and the Linux AppImage are still to be attached (see In Progress). Full suite passes with 515 tests, 0 failures and 25 skips, and `check` passes.
+Version `0.2.1` is cut (2026-11-21) and published for Windows as `eyeShell-0.2.1.zip` (release id `453785448`, release tag `v0.2.1`, ZIP asset `776001110`, 72,949,440 bytes, SHA-256 `3a5fde49d1fbdaecd776a24b6960b494edbcc5434f80c1118242d6b878cde645`, plus `.sha256` asset `776001624`, both `state=uploaded` with the expected digest; `app/eyeShell-0.2.1.jar` reports `version=0.2.1`, bundled runtime `21.0.13.1`). It carries the scroll-margin repair that ended the terminal "semi freeze", the pre-reset evidence logging, and the Temurin 21.0.13.1+2 bump for CVE-2026-114938. The Linux AppImage is still to be built from tag `v0.2.1` (see In Progress). Full suite passes with 515 tests, 0 failures and 25 skips, and `check` passes.
 
 `0.2.1-dev` (2026-11-21) fixed the terminal "semi freeze" that was reported four times during kernel package work. Root cause, confirmed from the code and the owner's description: a program that owns a scroll region (a status line on the last row, seen in the field as `1..38 of 39`) exits without restoring the margins, the shell keeps writing on the real last row — which is *below* the bottom margin — and no line feed can scroll there, so every new line overwrites the last one and `Enter` appears to do nothing. `JediTerminal.index()`/`nextLine()` now detect that exact state, restore the full height and scroll (`Repaired scroll margins left behind by a program …`), and both reset paths record the state they found (`… ; before: …`) plus a `thread-dump-reset-*.txt`, so the evidence survives the workaround that used to destroy it. The bundled runtime moved to Temurin `21.0.13.1+2` for CVE-2026-114938 ("Java4Shell"), and the new `docs/SECURITY.md` records the component review (OpenSSL is not shipped). The fork `eyeshell-main-buffer-read` now carries eleven patches on top of upstream `1b354a6`; the newest is `3d93082` (repair scroll margins a program leaves behind).
 
@@ -278,10 +278,10 @@ The SFTP file pane was then brought closer to FinalShell (2026-10-28): six colum
 
 ## In Progress
 
-`0.2.1` is released for Windows (2026-11-21, tag `v0.2.1`). Two release steps are still open:
+`0.2.1` is released for Windows (2026-11-21, tag `v0.2.1`, release `453785448`, ZIP asset `776001110`, `.sha256` asset `776001624`). Two steps are still open:
 
-- **Publish the GitHub release**: this host has no `gh` CLI and no GitHub token, so the ZIP and its `.sha256` (`build\package\eyeShell-0.2.1.zip` and `build\package\eyeShell-0.2.1.zip.sha256`, prepared in the `<hash>  <file name>` format) still have to be attached to a `v0.2.1` release.
 - **Linux AppImage**: build it on the Ubuntu 26.04 development host from tag `v0.2.1` (`git fetch --tags --prune; git checkout v0.2.1; git submodule update --init --recursive; ./scripts/bootstrap-jdk.sh; ./scripts/gradlew-local.sh test check --console=plain; ./scripts/gradlew-local.sh appImage`) and attach `eyeShell-0.2.1-x86_64.AppImage` plus its `.sha256` to the same release.
+- **Owner pass**: run a real `apt dist-upgrade` / `apt autoremove` and confirm the tab recovers without `Reset Terminal`.
 
 What is still open for the fix itself: the owner pass on a real `apt dist-upgrade` / `apt autoremove` to confirm the tab recovers without `Reset Terminal`. Development continues as `0.2.2-dev`.
 
@@ -319,7 +319,7 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 
 - **Owner pass on the scroll-margin repair (0.2.1)**: run `sudo apt dist-upgrade` (or `apt autoremove`) long enough to fill the screen, then type at the prompt. The expected result is that the next line feeds scroll normally and the log carries one `Repaired scroll margins left behind by a program on …` line per episode; `Reset Terminal` must no longer be necessary. Also record whether the tab needed any attention at all, and keep the log if it did.
 
-- **Publish the `v0.2.1` release assets** (blocked on credentials here): attach `build\package\eyeShell-0.2.1.zip` and the prepared `eyeShell-0.2.1.zip.sha256` to a `v0.2.1` GitHub release, then the AppImage from the Ubuntu host. This host has no `gh` CLI and no GitHub token.
+- **Publish `0.2.1` assets: done (2026-11-21)** — release `453785448` carries `eyeShell-0.2.1.zip` (`776001110`) and `eyeShell-0.2.1.zip.sha256` (`776001624`); only the AppImage upload remains.
 
 - Package `0.2.2` when the owner pass is clean: `test check` is green on Temurin 21.0.13.1+2, so only `jpackagePortable` (and the Linux AppImage on the Ubuntu 26.04 host) remain.
 
@@ -453,6 +453,7 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 - Artifact: `build\package\eyeShell-0.2.1.zip`, **72,949,440 bytes**, 370 files extracted, SHA-256 `3a5fde49d1fbdaecd776a24b6960b494edbcc5434f80c1118242d6b878cde645`. Root layout `eyeShell.exe` + `app/` + `runtime/`; `app/eyeShell-0.2.1.jar` (7,259,138 bytes) whose `eyeshell-build.properties` report `version=0.2.1`; `runtime/release` reports `JAVA_VERSION="21.0.13.1"`.
 - Smoke test: extracted to `%TEMP%\opencode\eyeshell-021`, started with `JAVA_HOME`/`JDK_HOME` unset and `PATH` limited to `System32`, `LOCALAPPDATA` redirected to an isolated directory. Startup log line: `2026-11-21 23:23:52.408 INFO io.github.sawaichi9527.eyeshell - eyeShell=0.2.1 java=21.0.13.1 os=Windows 10 10.0 logDirectory=…\eyeshell-021-profile\eyeShell\logs`; the isolated profile created `eyeshell.db` and `logs`; the process stopped cleanly.
 - Not verified: the window title on screen, a live SSH session through this ZIP, and the Linux AppImage (built on the Ubuntu 26.04 host from tag `v0.2.1`).
+- Published 2026-11-21 as GitHub release `453785448` (`v0.2.1`, name `eyeShell 0.2.1`, not a draft or prerelease) through the REST API: `eyeShell-0.2.1.zip` asset `776001110` (72,949,440 bytes, `digest=sha256:3a5fde49…cde645`, `state=uploaded`) and `eyeShell-0.2.1.zip.sha256` asset `776001624` (84 bytes, `state=uploaded`); a read-back of the release shows both assets and the expected body.
 
 ### 2026-11-21 scroll-margin repair, reset evidence, and Temurin 21.0.13.1+2 (0.2.1-dev)
 
