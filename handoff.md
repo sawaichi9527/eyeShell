@@ -452,6 +452,16 @@ Active work is validation, quality debt, and documentation (2026-10-24 decision)
 
 ## Validation Evidence
 
+### 2026-11-22 session close (MINA SSHD 2.20.0, 0.2.2 released and published, 0.2.3-dev started)
+
+- Date: 2026-11-22 00:16 +08:00. Working tree clean before the closing entry (`main` = `origin/main` = `50c5b59`, tag `v0.2.3-dev`); `build.gradle.kts` reports `version = "0.2.3-dev"`.
+- Command: `.\scripts\gradlew-local.ps1 cleanTest test check --no-build-cache --rerun-tasks --console=plain` → **exit 0**, `BUILD SUCCESSFUL in 1m 11s` (15 tasks: 13 executed, 2 up-to-date).
+- Result: **515 tests, 0 failures, 0 errors, 25 skipped** (`build\reports\tests\test\index.html`, JUnit XML under `build\test-results\test\`). The 25 skips are the pre-existing opt-in/platform-gated cases (Windows clipboard, OpenSSH agent, data-path SQLite, Credential Manager, live Linux Secret Service, heap probe); none belongs to this change.
+- Release-time runs at version `0.2.2`: `test check` (exit 0, 515/0/25) and `jpackagePortable` (exit 0).
+- Environment: Windows x64 (`ACUBENS`, reported by Java as Windows 10 10.0), project-local Temurin **21.0.13.1+2**, Gradle 9.5.0 with caches under `.local/gradle-home`, Kotlin 2.4.10, JediTerm 3.76 + patch `3d93082`, Apache MINA SSHD **2.20.0**.
+- Artifacts: `build\package\eyeShell-0.2.2.zip` (72,956,910 bytes, SHA-256 `e539e9faa812192626b912f6aae95306ac98f26afc98eda02221bf934b61adfe`) with `sshd-*-2.20.0.jar` inside, plus `eyeShell-0.2.2.zip.sha256`; published as GitHub release `453810654` (assets `776106780`, `776107140`), https://github.com/sawaichi9527/eyeShell/releases/tag/v0.2.2. Repository: `488359b` (MINA bump), `7aa4c40` + tag `v0.2.2`, `1ba1992` (release record), `50c5b59` + tag `v0.2.3-dev`.
+- **Not verified**: a live SSH session against a real host with MINA 2.20.0 (only the embedded client/server suites ran); a live SSH session through the packaged `eyeShell-0.2.2.zip`; the window title on screen; the owner's real `apt dist-upgrade` / `apt autoremove` pass; any Linux run; the Linux AppImages for `0.2.1` and `0.2.2`.
+
 ### Release 0.2.2 (Windows portable ZIP, 2026-11-22)
 
 - Build: version `0.2.2` in `build.gradle.kts`; `.\scripts\gradlew-local.ps1 test check --console=plain` (exit 0, **515 tests, 0 failures, 0 errors, 25 skipped**) and `.\scripts\gradlew-local.ps1 jpackagePortable --console=plain` (exit 0).
