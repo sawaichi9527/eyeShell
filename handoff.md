@@ -4,7 +4,9 @@ Older milestone plans and superseded validation evidence are archived in `docs/H
 
 ## Current Status
 
-Version `0.2.1` is cut (2026-11-21) and its Windows portable ZIP is `eyeShell-0.2.1.zip` (72,949,440 bytes, SHA-256 `3a5fde49d1fbdaecd776a24b6960b494edbcc5434f80c1118242d6b878cde645`, `app/eyeShell-0.2.1.jar` whose `eyeshell-build.properties` report `version=0.2.1`, bundled runtime `21.0.13.1`). It carries the scroll-margin repair that ended the terminal "semi freeze", the pre-reset evidence logging, and the Temurin 21.0.13.1+2 bump for CVE-2026-114938. Full suite passes with 515 tests, 0 failures and 25 skips, and `check` passes. Development continues as `0.2.2-dev`.
+Version `0.2.2-dev` starts from the released `0.2.1` tree (2026-11-21) with no functional change. Development remains on the scroll-margin fix pending the owner's real `apt dist-upgrade` pass and the Linux AppImage for `0.2.1`.
+
+Version `0.2.1` is cut (2026-11-21) and its Windows portable ZIP is `eyeShell-0.2.1.zip` (72,949,440 bytes, SHA-256 `3a5fde49d1fbdaecd776a24b6960b494edbcc5434f80c1118242d6b878cde645`, `app/eyeShell-0.2.1.jar` whose `eyeshell-build.properties` report `version=0.2.1`, bundled runtime `21.0.13.1`, tag `v0.2.1`). It carries the scroll-margin repair that ended the terminal "semi freeze", the pre-reset evidence logging, and the Temurin 21.0.13.1+2 bump for CVE-2026-114938. The GitHub release asset and the Linux AppImage are still to be attached (see In Progress). Full suite passes with 515 tests, 0 failures and 25 skips, and `check` passes.
 
 `0.2.1-dev` (2026-11-21) fixed the terminal "semi freeze" that was reported four times during kernel package work. Root cause, confirmed from the code and the owner's description: a program that owns a scroll region (a status line on the last row, seen in the field as `1..38 of 39`) exits without restoring the margins, the shell keeps writing on the real last row — which is *below* the bottom margin — and no line feed can scroll there, so every new line overwrites the last one and `Enter` appears to do nothing. `JediTerminal.index()`/`nextLine()` now detect that exact state, restore the full height and scroll (`Repaired scroll margins left behind by a program …`), and both reset paths record the state they found (`… ; before: …`) plus a `thread-dump-reset-*.txt`, so the evidence survives the workaround that used to destroy it. The bundled runtime moved to Temurin `21.0.13.1+2` for CVE-2026-114938 ("Java4Shell"), and the new `docs/SECURITY.md` records the component review (OpenSSL is not shipped). The fork `eyeshell-main-buffer-read` now carries eleven patches on top of upstream `1b354a6`; the newest is `3d93082` (repair scroll margins a program leaves behind).
 
@@ -276,9 +278,12 @@ The SFTP file pane was then brought closer to FinalShell (2026-10-28): six colum
 
 ## In Progress
 
-`0.2.1` is released for Windows (2026-11-21); its Linux AppImage is pending on the Ubuntu 26.04 development host, to be built from tag `v0.2.1` and attached to the release. Development continues as `0.2.2-dev`.
+`0.2.1` is released for Windows (2026-11-21, tag `v0.2.1`). Two release steps are still open:
 
-What is still open for this fix: the owner pass on a real `apt dist-upgrade` / `apt autoremove` to confirm the tab recovers without `Reset Terminal`.
+- **Publish the GitHub release**: this host has no `gh` CLI and no GitHub token, so the ZIP and its `.sha256` (`build\package\eyeShell-0.2.1.zip` and `build\package\eyeShell-0.2.1.zip.sha256`, prepared in the `<hash>  <file name>` format) still have to be attached to a `v0.2.1` release.
+- **Linux AppImage**: build it on the Ubuntu 26.04 development host from tag `v0.2.1` (`git fetch --tags --prune; git checkout v0.2.1; git submodule update --init --recursive; ./scripts/bootstrap-jdk.sh; ./scripts/gradlew-local.sh test check --console=plain; ./scripts/gradlew-local.sh appImage`) and attach `eyeShell-0.2.1-x86_64.AppImage` plus its `.sha256` to the same release.
+
+What is still open for the fix itself: the owner pass on a real `apt dist-upgrade` / `apt autoremove` to confirm the tab recovers without `Reset Terminal`. Development continues as `0.2.2-dev`.
 
 The `0.2.0` Windows release and its pending Linux AppImage remain as previously recorded.
 
@@ -312,9 +317,11 @@ Cumulative project usage (each line = one session/milestone):
 
 Active work is validation, quality debt, and documentation (2026-10-24 decision).
 
-- **Owner pass on the scroll-margin repair (0.2.1-dev)**: run `sudo apt dist-upgrade` (or `apt autoremove`) long enough to fill the screen, then type at the prompt. The expected result is that the next line feeds scroll normally and the log carries one `Repaired scroll margins left behind by a program on …` line per episode; `Reset Terminal` must no longer be necessary. Also record whether the tab needed any attention at all, and keep the log if it did.
+- **Owner pass on the scroll-margin repair (0.2.1)**: run `sudo apt dist-upgrade` (or `apt autoremove`) long enough to fill the screen, then type at the prompt. The expected result is that the next line feeds scroll normally and the log carries one `Repaired scroll margins left behind by a program on …` line per episode; `Reset Terminal` must no longer be necessary. Also record whether the tab needed any attention at all, and keep the log if it did.
 
-- Package `0.2.1` when the owner pass is clean: `test check` is green on Temurin 21.0.13.1+2, so only `jpackagePortable` (and the Linux AppImage on the Ubuntu 26.04 host) remain.
+- **Publish the `v0.2.1` release assets** (blocked on credentials here): attach `build\package\eyeShell-0.2.1.zip` and the prepared `eyeShell-0.2.1.zip.sha256` to a `v0.2.1` GitHub release, then the AppImage from the Ubuntu host. This host has no `gh` CLI and no GitHub token.
+
+- Package `0.2.2` when the owner pass is clean: `test check` is green on Temurin 21.0.13.1+2, so only `jpackagePortable` (and the Linux AppImage on the Ubuntu 26.04 host) remain.
 
 - Security follow-up (2026-11-21): bump Apache MINA SSHD `2.19.0` → `2.20.0`. `CVE-2026-77185` (asynchronous authentication can skip signature verification) and `CVE-2026-93994` (duplicate public key in multi-key authentication) are server-side paths that eyeShell's client never executes, so this is baseline hygiene rather than a live exposure. The bump needs reviewed `gradle/verification-metadata.xml` entries for `sshd-core`, `sshd-sftp`, and `sshd-common` (jar, pom, and module metadata) and a full `test check`.
 
