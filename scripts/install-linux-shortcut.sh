@@ -7,9 +7,10 @@ set -euo pipefail
 #
 # AppImageLauncher's daemon re-creates its own appimagekit_* entry whenever it is missing, and its
 # icon extraction fails on this image, so deleting that entry is not a stable state. The daemon's
-# entry is therefore kept but hidden (`NoDisplay=true`), and a standalone `eyeshell.desktop` is the
-# only visible shortcut. It starts the AppImage with APPIMAGELAUNCHER_DISABLE=1 so the launcher
-# cannot move the file or add another entry.
+# entry is therefore kept but hidden (`NoDisplay=true`), its `StartupWMClass` is removed (so it
+# cannot compete with the visible entry for window matching), and a standalone
+# `eyeshell.desktop` is the only visible shortcut. It starts the AppImage with
+# APPIMAGELAUNCHER_DISABLE=1 so the launcher cannot move the file or add another entry.
 #
 # Usage:
 #   scripts/install-linux-shortcut.sh [path/to/eyeShell-<version>-x86_64.AppImage]
@@ -87,22 +88,22 @@ for size in "${ICON_SIZES[@]}"; do
     cp -f "${source_icon}" "${ICON_ROOT}/${size}x${size}/apps/${APP_ID}.png"
 done
 
-# Keep the daemon's integration entry (so it does not re-create it) but hide it from GNOME, and
-# correct its fields in case AppImageLauncher rewrote them from the AppImage's embedded desktop file.
+# Keep the daemon's integration entry (so it does not re-create it) but hide it from GNOME, fix its
+# Name/Icon, and drop StartupWMClass so only eyeshell.desktop can match the window.
 for integrated in "${DESKTOP_DIR}"/appimagekit_*eyeShell*.desktop; do
     [[ -e "${integrated}" ]] || continue
     patched="$(mktemp)"
-    awk -v name="${APP_NAME}" -v icon="${APP_ID}" -v wm="${WM_CLASS}" '
+    awk -v name="${APP_NAME}" -v icon="${APP_ID}" '
         /^Name=/ { print "Name=" name; next }
         /^Icon=/ { print "Icon=" icon; next }
-        /^StartupWMClass=/ { print "StartupWMClass=" wm; next }
+        /^StartupWMClass=/ { next }
         /^NoDisplay=/ { next }
         /^Type=/ && !hidden { print; print "NoDisplay=true"; hidden = 1; next }
         { print }
     ' "${integrated}" > "${patched}"
     mv -f "${patched}" "${integrated}"
     chmod 644 "${integrated}"
-    printf 'Hid AppImageLauncher entry %s (NoDisplay=true)\n' "${integrated}"
+    printf 'Hid AppImageLauncher entry %s (NoDisplay=true, StartupWMClass removed)\n' "${integrated}"
 done
 
 # No TryExec: GLib rejects a desktop entry whose quoted TryExec path cannot be resolved, which
