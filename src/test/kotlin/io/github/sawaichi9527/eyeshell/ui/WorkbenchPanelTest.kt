@@ -663,7 +663,9 @@ class WorkbenchPanelTest {
         try {
             assertTrue(sftpBound.await(5, TimeUnit.SECONDS), "the SFTP subsystem never bound")
             session.signalNaturalExit()
-            await(Duration.ofSeconds(5)) { client.closed }
+            // The client closes on the exit-monitor thread, while the pane is unbound from a queued
+            // EDT task; waiting only for `client.closed` can assert before that task has run.
+            await(Duration.ofSeconds(5)) { client.closed && onEdt { panel.isSftpDisconnected() } }
             assertTrue(onEdt { panel.isSftpDisconnected() }, "the file pane must not stay bound after the session ended")
         } finally {
             onEdt { page.close() }
