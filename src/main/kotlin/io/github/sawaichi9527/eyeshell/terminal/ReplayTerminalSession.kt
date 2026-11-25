@@ -51,6 +51,12 @@ class ReplayTerminalSession(
 
     override fun rawOutput(): ByteArray? = delegate.rawOutput()
 
+    override fun inputStats(): InputStats? = delegate.inputStats()
+
+    override fun flowControl(): TerminalFlowControl? = delegate.flowControl()
+
+    override fun reportedExitStatus(): Int? = delegate.reportedExitStatus()
+
     override fun awaitExit(): Int = delegate.awaitExit()
 
     /** The replay prefix belongs to the view, so closing it must not end the live connection. */

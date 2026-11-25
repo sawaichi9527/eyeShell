@@ -1,5 +1,6 @@
 package io.github.sawaichi9527.eyeshell.ui
 
+import io.github.sawaichi9527.eyeshell.platform.I18n
 import io.github.sawaichi9527.eyeshell.ssh.ExecResult
 import io.github.sawaichi9527.eyeshell.ssh.HostSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
@@ -20,6 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JLabel
+import javax.swing.JMenuItem
 import javax.swing.JPanel
 import javax.swing.JSplitPane
 import javax.swing.JTabbedPane
@@ -1547,5 +1549,47 @@ class WorkbenchPanelTest {
                 if (previousLookAndFeel != null) javax.swing.UIManager.setLookAndFeel(previousLookAndFeel)
             }
         }
+    }
+
+    @Test
+    fun `the tab menu offers reconnect, diagnostics, and close`() {
+        lateinit var panel: WorkbenchPanel
+        val content = JPanel()
+        val calls = mutableListOf<String>()
+        SwingUtilities.invokeAndWait {
+            panel = WorkbenchPanel()
+            panel.addSession(
+                title = "ops",
+                component = content,
+                closeAction = { calls += "close" },
+                onReconnect = { calls += "reconnect" },
+                onWriteDiagnostics = { calls += "diagnostics" },
+            )
+        }
+
+        val header = requireNotNull(panel.sessionHeader(content)) { "the tab must have a header" }
+        val menu = requireNotNull(header.componentPopupMenu) { "the tab must have a popup menu" }
+        val items = menu.components.filterIsInstance<JMenuItem>()
+
+        assertEquals(
+            listOf(
+                I18n.t("workbench.tab.reconnect"),
+                I18n.t("workbench.tab.diagnostics"),
+                I18n.t("workbench.tab.close", "ops"),
+            ),
+            items.map { it.text },
+        )
+        items[1].doClick()
+        assertEquals(listOf("diagnostics"), calls)
+        items[2].doClick()
+        assertEquals(listOf("diagnostics", "close"), calls)
+    }
+
+    @Test
+    fun `a tab whose session ended can be reconnected from its menu`() {
+        assertEquals(true, SessionStatus.EXITED.isOver())
+        assertEquals(true, SessionStatus.FAILED.isOver())
+        assertEquals(false, SessionStatus.CONNECTED.isOver())
+        assertEquals(false, SessionStatus.CLOSING.isOver())
     }
 }

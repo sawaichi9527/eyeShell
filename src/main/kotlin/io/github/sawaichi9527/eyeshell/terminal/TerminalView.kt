@@ -96,6 +96,8 @@ data class TerminalContextActions(
     val saveAllOutput: () -> Unit,
     val addHighlightRule: (() -> Unit)? = null,
     val manageHighlightRules: (() -> Unit)? = null,
+    /** Writes the diagnostics dump for this session; the menu item is hidden when null. */
+    val writeDiagnostics: (() -> Unit)? = null,
 )
 
 data class TerminalHighlightRule(

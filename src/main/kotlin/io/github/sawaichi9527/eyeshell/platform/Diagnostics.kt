@@ -23,13 +23,14 @@ object Diagnostics {
 
     /**
      * Full text of a thread dump. [threads] and [properties] are injectable so the format can be
-     * asserted without depending on the test JVM's own threads.
+     * asserted without depending on the test JVM's own threads. [events] is the recent timeline.
      */
     internal fun threadDumpText(
         reason: String,
         sessions: List<String>,
         threads: Map<Thread, Array<StackTraceElement>>,
         properties: Map<String, String>,
+        events: List<String> = emptyList(),
     ): String = buildString {
         appendLine("eyeShell diagnostics")
         appendLine("reason: ${reason.replace('\n', ' ')}")
@@ -37,6 +38,9 @@ object Diagnostics {
         properties.toSortedMap().forEach { (name, value) -> appendLine("$name: $value") }
         appendLine("open sessions:")
         if (sessions.isEmpty()) appendLine("  (none)") else sessions.forEach { appendLine("  $it") }
+        appendLine()
+        appendLine("events:")
+        if (events.isEmpty()) appendLine("  (none)") else events.forEach { appendLine("  $it") }
         appendLine()
         appendLine("threads:")
         threads.entries
@@ -49,17 +53,29 @@ object Diagnostics {
             }
     }
 
+    /** The full dump text, for callers that package it (a report archive) instead of writing a file. */
+    fun dumpText(
+        reason: String,
+        sessions: List<String>,
+        events: List<String> = SessionEvents.snapshot(),
+    ): String = threadDumpText(
+        reason = reason,
+        sessions = sessions,
+        threads = Thread.getAllStackTraces(),
+        properties = runtimeProperties(),
+        events = events,
+    )
+
     /** Writes `<directory>/thread-dump-<reason>-<timestamp>.txt`; returns the file, or null on failure. */
-    fun write(directory: Path, reason: String, sessions: List<String>): Path? = try {
+    fun write(
+        directory: Path,
+        reason: String,
+        sessions: List<String>,
+        events: List<String> = SessionEvents.snapshot(),
+    ): Path? = try {
         Files.createDirectories(directory)
         val file = directory.resolve(fileName(reason, timestamp()))
-        val text = threadDumpText(
-            reason = reason,
-            sessions = sessions,
-            threads = Thread.getAllStackTraces(),
-            properties = runtimeProperties(),
-        )
-        Files.writeString(file, text)
+        Files.writeString(file, dumpText(reason, sessions, events))
         logger.info("Wrote a diagnostics snapshot to $file")
         file
     } catch (failure: Exception) {

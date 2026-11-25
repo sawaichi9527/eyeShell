@@ -255,6 +255,11 @@ internal class ScrollRegionWatchdog(
     private val sample: () -> ScrollRegionSample?,
     private val intervalMillis: Long = SAMPLE_INTERVAL_MILLIS,
     private val requiredSamples: Int = REQUIRED_SAMPLES,
+    /**
+     * A cursor outside the region can never scroll again, so the state is certainly broken; a
+     * program that still owns its region keeps the cursor inside it.
+     */
+    private val requiredSamplesOutsideRegion: Int = REQUIRED_SAMPLES_OUTSIDE_REGION,
     private val onShortened: (ScrollRegionSample) -> Unit,
 ) {
     private val running = java.util.concurrent.atomic.AtomicBoolean()
@@ -278,7 +283,12 @@ internal class ScrollRegionWatchdog(
                     continue
                 }
                 samples += 1
-                if (samples >= requiredSamples && !reported) {
+                val required = if (current.cursorOutsideRegion) {
+                    requiredSamplesOutsideRegion
+                } else {
+                    requiredSamples
+                }
+                if (samples >= required && !reported) {
                     reported = true
                     onShortened(current)
                 }
@@ -297,6 +307,12 @@ internal class ScrollRegionWatchdog(
 
         /** 30 s is long enough that no interactive program is mid-screen by accident. */
         const val REQUIRED_SAMPLES = 6
+
+        /**
+         * 10 s when the cursor already sits outside the region: no line feed can scroll there, so the
+         * only program that could still own it is one that is about to rewrite its own margins.
+         */
+        const val REQUIRED_SAMPLES_OUTSIDE_REGION = 2
     }
 }
 

@@ -228,4 +228,43 @@ class ScrollRegionWatchdogTest {
             watchdog.stop()
         }
     }
+
+    @Test
+    fun `a cursor outside a shortened region is repaired without the full wait`() {
+        val reports = AtomicInteger()
+        val watchdog = ScrollRegionWatchdog(
+            sample = { ScrollRegionSample(top = 1, bottom = 3, height = 10, alternateScreen = false, cursorY = 10) },
+            intervalMillis = 10,
+            requiredSamples = 100,
+            requiredSamplesOutsideRegion = 2,
+            onShortened = { reports.incrementAndGet() },
+        )
+        watchdog.start()
+        try {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2)
+            while (reports.get() == 0 && System.nanoTime() < deadline) Thread.sleep(10)
+            assertEquals(1, reports.get(), "a cursor below the region cannot scroll any more")
+        } finally {
+            watchdog.stop()
+        }
+    }
+
+    @Test
+    fun `a cursor inside a shortened region keeps the long wait`() {
+        val reports = AtomicInteger()
+        val watchdog = ScrollRegionWatchdog(
+            sample = { ScrollRegionSample(top = 1, bottom = 3, height = 10, alternateScreen = false, cursorY = 2) },
+            intervalMillis = 10,
+            requiredSamples = 100,
+            requiredSamplesOutsideRegion = 2,
+            onShortened = { reports.incrementAndGet() },
+        )
+        watchdog.start()
+        try {
+            Thread.sleep(120)
+            assertEquals(0, reports.get(), "a program may still own the region it keeps the cursor in")
+        } finally {
+            watchdog.stop()
+        }
+    }
 }

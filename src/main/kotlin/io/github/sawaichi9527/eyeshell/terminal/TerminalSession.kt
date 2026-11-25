@@ -22,6 +22,21 @@ interface TerminalSession : AutoCloseable {
     fun write(text: String)
 
     /**
+     * Pending input and delivery counters, when the session queues keystrokes instead of writing
+     * them inline. `lastBlockedMillis` above zero means the transport made the writer thread wait,
+     * which is the state in which a tab used to ignore typing.
+     */
+    fun inputStats(): InputStats? = null
+
+    /**
+     * The exit status the remote reported, or `null` when the channel closed without one.
+     *
+     * [awaitExit] answers `0` for both "the shell exited cleanly" and "the transport died", which
+     * makes a dropped connection look like a deliberate `exit` in the log. This distinguishes them.
+     */
+    fun reportedExitStatus(): Int? = null
+
+    /**
      * Switches the encoding of a live session. Bytes that are still undecoded are reinterpreted with
      * the new charset, so only text already written into the buffer keeps its old decoding.
      * Sessions that cannot switch ignore the request.
@@ -58,4 +73,17 @@ data class TerminalFlowControl(
     val localWindowMax: Long,
     val remoteWindow: Long,
     val remoteWindowMax: Long,
+)
+
+/**
+ * Input-path state for a live session. [pendingBytes] is what the writer thread still has to hand
+ * to the transport (a value that grows while a remote stops reading stdin); [droppedBytes] counts
+ * bytes discarded by the bounded queue; [lastBlockedMillis] is the duration of the last transport
+ * write that took longer than the writer's threshold.
+ */
+data class InputStats(
+    val pendingBytes: Int,
+    val queuedChunks: Int,
+    val droppedBytes: Long,
+    val lastBlockedMillis: Long,
 )

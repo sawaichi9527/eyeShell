@@ -5,12 +5,18 @@ import io.github.sawaichi9527.eyeshell.monitor.MonitorSnapshot
 import io.github.sawaichi9527.eyeshell.platform.AppInfo
 import io.github.sawaichi9527.eyeshell.platform.AppSettings
 import io.github.sawaichi9527.eyeshell.platform.AppIcons
+import io.github.sawaichi9527.eyeshell.platform.Diagnostics
+import io.github.sawaichi9527.eyeshell.platform.DiagnosticsBundle
+import io.github.sawaichi9527.eyeshell.platform.EyeShellPaths
 import io.github.sawaichi9527.eyeshell.platform.I18n
+import io.github.sawaichi9527.eyeshell.platform.SessionDumps
+import io.github.sawaichi9527.eyeshell.platform.SessionEvents
 import io.github.sawaichi9527.eyeshell.platform.WindowPlacement
 import io.github.sawaichi9527.eyeshell.platform.resolveWindowPlacement
 import io.github.sawaichi9527.eyeshell.platform.screenWorkAreas
 import io.github.sawaichi9527.eyeshell.ssh.HostSession
 import io.github.sawaichi9527.eyeshell.ssh.SshEndpoint
+import io.github.sawaichi9527.eyeshell.terminal.InputStallWatchdog
 import io.github.sawaichi9527.eyeshell.terminal.ReplayTerminalSession
 import io.github.sawaichi9527.eyeshell.terminal.TerminalBackgroundImage
 import io.github.sawaichi9527.eyeshell.terminal.TerminalCharsets
@@ -39,6 +45,7 @@ import java.nio.charset.Charset
 import java.time.Duration
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import javax.swing.AbstractAction
 import javax.swing.BorderFactory
 import javax.swing.Box
 import javax.swing.BoxLayout
@@ -46,10 +53,13 @@ import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JFrame
 import javax.swing.JLabel
+import javax.swing.JMenuItem
 import javax.swing.JOptionPane
 import javax.swing.JPanel
+import javax.swing.JPopupMenu
 import javax.swing.JSplitPane
 import javax.swing.JTabbedPane
+import javax.swing.KeyStroke
 import javax.swing.SwingConstants
 import javax.swing.SwingUtilities
 
@@ -61,6 +71,10 @@ enum class SessionStatus(
     EXITED("sessionStatus.exited", Color(0x9E9E9E)),
     FAILED("sessionStatus.failed", Color(0xF44336)),
     CLOSING("sessionStatus.closing", Color(0xFF9800)),
+    ;
+
+    /** True once the session is gone and only an in-place reconnect can bring it back. */
+    fun isOver(): Boolean = this == EXITED || this == FAILED
 }
 
 class EyeShellWindow(
@@ -125,7 +139,24 @@ class EyeShellWindow(
                 if (mayCloseWindow()) dispose()
             }
         })
+        installDiagnosticsShortcut()
         initialized = true
+    }
+
+    /**
+     * `Ctrl+Shift+D` writes the diagnostics dump for the visible session. The right-click menu is the
+     * discoverable entry; the shortcut is for the case where the tab misbehaves while the mouse is
+     * busy elsewhere (the same convention desktop IDEs use for a debug dump).
+     */
+    private fun installDiagnosticsShortcut() {
+        val action = "eyeShell.writeSessionDiagnostics"
+        rootPane.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+            .put(KeyStroke.getKeyStroke("control shift D"), action)
+        rootPane.actionMap.put(action, object : AbstractAction() {
+            override fun actionPerformed(event: java.awt.event.ActionEvent) {
+                workbench.selectedSession()?.let { pagesByComponent[it]?.writeDiagnostics() }
+            }
+        })
     }
 
     /**
@@ -218,10 +249,18 @@ class EyeShellWindow(
                 reconnect != null && workbench.isSessionExited(component) && reconnect(reconnectPreset, component)
             }
             pagesByComponent[component] = page
-            workbench.addSession(sessionTitle(preset, hostSession.endpoint), component, {
-                pagesByComponent.remove(component)
-                page.close()
-            }, page::sendCommand, endpointLabel = hostSession.endpoint.displayName)
+            workbench.addSession(
+                sessionTitle(preset, hostSession.endpoint),
+                component,
+                {
+                    pagesByComponent.remove(component)
+                    page.close()
+                },
+                page::sendCommand,
+                endpointLabel = hostSession.endpoint.displayName,
+                onReconnect = { page.requestReconnect() },
+                onWriteDiagnostics = { page.writeDiagnostics() },
+            )
         } catch (failure: Throwable) {
             try {
                 page.close()
@@ -457,6 +496,8 @@ internal class TerminalSessionPage(
     private var reconnectDispatcher: KeyEventDispatcher? = null
     private var reconnectPreset: HostConnectionPreset? = null
     private var reconnectRequest: ((HostConnectionPreset) -> Boolean)? = null
+    private var inputWatchdog: InputStallWatchdog? = null
+    private val lastReconnectAt = java.util.concurrent.atomic.AtomicLong(0)
     private val redecodeLock = Any()
 
     /**
@@ -490,6 +531,7 @@ internal class TerminalSessionPage(
     private fun onEmulatorStopped(unexpected: Boolean) {
         if (!unexpected || closed.get()) return
         emulatorFailed.set(true)
+        SessionEvents.record("emulator-stop", "session" to session.name, "unexpected" to unexpected)
         // Closing the channel is what makes a keystroke in a frozen tab harmless instead of a
         // command the user cannot see; it also unblocks a reader stuck in a channel read.
         runCatching { session.close() }
@@ -510,8 +552,43 @@ internal class TerminalSessionPage(
     private fun markSessionEnded() {
         if (!sessionEnded.compareAndSet(false, true)) return
         logger.info("Session ended; releasing the monitor and SFTP of ${session.name}")
+        stopInputWatchdog()
         stopMonitor()
         stopSftp()
+    }
+
+    /**
+     * Writes an automatic dump for this session. A view that cannot describe its terminal model
+     * (a test double, or a surface without an emulator) is skipped: the file would only repeat the
+     * thread list.
+     */
+    private fun autoDump(kind: String) {
+        if (terminalView.terminalState().isBlank()) return
+        SessionDumps.auto(kind, session.name, listOf(terminalState()))
+    }
+
+    /**
+     * Input that sits in the writer queue is the shape of "typing does nothing": the remote stopped
+     * consuming stdin, and the writer thread is the only thread that can see it. Sampling from outside
+     * lets a dump be written while the queue is still stuck.
+     */
+    private fun armInputWatchdog() {
+        stopInputWatchdog()
+        inputWatchdog = InputStallWatchdog(
+            stats = { session.inputStats() },
+            onStall = { stats ->
+                logger.warning(
+                    "Terminal input is not draining on ${session.name}: ${stats.pendingBytes} bytes " +
+                        "queued; writing a diagnostics dump",
+                )
+                autoDump("input-stall")
+            },
+        ).also { it.start() }
+    }
+
+    private fun stopInputWatchdog() {
+        inputWatchdog?.stop()
+        inputWatchdog = null
     }
 
     /**
@@ -550,7 +627,72 @@ internal class TerminalSessionPage(
     fun applyFontSize(size: Float) = terminalView.setFontSize(size)
 
     /** Terminal model state for the manual diagnostics snapshot. */
-    fun terminalState(): String = terminalView.terminalState()
+    fun terminalState(): String = buildString {
+        // The snapshot used to be anonymous: several identically-shaped lines and no way to tell
+        // which host a broken tab belonged to.
+        append("name=").append(value(session.name))
+        append(" profile=").append(value(reconnectPreset?.displayName ?: "-"))
+        append(" status=").append(statusLabel())
+        append(' ').append(terminalView.terminalState())
+        session.inputStats()?.let { stats ->
+            append(" io.in.pending=").append(stats.pendingBytes)
+            append(" io.in.dropped=").append(stats.droppedBytes)
+            append(" io.in.blockedMs=").append(stats.lastBlockedMillis)
+        }
+        session.flowControl()?.let { flow ->
+            append(" localWindow=").append(flow.localWindow).append('/').append(flow.localWindowMax)
+            append(" remoteWindow=").append(flow.remoteWindow).append('/').append(flow.remoteWindowMax)
+        }
+    }
+
+    /** Diagnostics are `key=value` lines, so a value must not contain whitespace. */
+    private fun value(text: String): String =
+        text.map { if (it.isWhitespace()) '_' else it }.joinToString("")
+
+    private fun statusLabel(): String = when {
+        closed.get() -> "CLOSED"
+        emulatorFailed.get() -> "FAILED"
+        sessionEnded.get() -> "EXITED"
+        !session.isOpen -> "LOST"
+        else -> "CONNECTED"
+    }
+
+    /** Name shown in the tab, and the reason recorded in a per-session diagnostics file. */
+    val sessionName: String
+        get() = session.name
+
+    /**
+     * Runs the same reconnect request the Enter key uses. Returns false when the tab is still
+     * connected or has no saved profile to reconnect with.
+     */
+    fun requestReconnect(): Boolean {
+        if (session.isOpen && !sessionEnded.get()) return false
+        val preset = reconnectPreset ?: return false
+        val request = reconnectRequest ?: return false
+        return request(preset)
+    }
+
+    /**
+     * Writes the diagnostics dump for this session only. Next to the terminal it is one click away
+     * while a tab misbehaves, instead of a trip through Settings → About (which dumps every session).
+     */
+    fun writeDiagnostics() {
+        check(SwingUtilities.isEventDispatchThread()) { "Diagnostics must be written from the Swing EDT" }
+        val file = DiagnosticsBundle.write(
+            directory = EyeShellPaths.logDirectory(),
+            reportText = Diagnostics.dumpText(
+                reason = "session-${Diagnostics.sanitize(session.name)}",
+                sessions = listOf(terminalState()),
+            ),
+        )
+        val detail = file?.toString() ?: EyeShellPaths.logDirectory().toString()
+        JOptionPane.showMessageDialog(
+            owner,
+            I18n.t("settings.about.diagnosticsWritten", detail),
+            I18n.t("settings.about.diagnostics"),
+            JOptionPane.INFORMATION_MESSAGE,
+        )
+    }
 
     /**
      * Moves keyboard focus into the terminal grid.
@@ -676,11 +818,14 @@ internal class TerminalSessionPage(
         requestReconnect: ((HostConnectionPreset) -> Boolean)? = null,
     ) {
         logger.info("Terminal session attached: ${session.name}")
+        SessionEvents.record("attach", "session" to session.name, "profile" to preset?.displayName)
         terminalView.attach(session)
+        armInputWatchdog()
         outputController.install(
             owner,
             addHighlightRule = { highlightController.addRule(owner) },
             manageHighlightRules = { highlightController.manageRules(owner) },
+            writeDiagnostics = ::writeDiagnostics,
         )
         reconnectPreset = preset
         reconnectRequest = requestReconnect
@@ -715,6 +860,14 @@ internal class TerminalSessionPage(
         hostSession = newHostSession
         monitorSampler = MonitorSampler(newHostSession, interval = monitorInterval)
         reconnectPreset = newPreset
+        lastReconnectAt.set(System.currentTimeMillis())
+        armInputWatchdog()
+        SessionEvents.record(
+            "reconnect-ok",
+            "session" to newSession.name,
+            "previous" to previousSession.name,
+            "profile" to newPreset.displayName,
+        )
 
         // The new session is already attached to the view, so a failure to release the replaced
         // connection must not be reported as a failed reconnect; it only leaks the old transport.
@@ -774,12 +927,34 @@ internal class TerminalSessionPage(
         val generation = exitGeneration.incrementAndGet()
         Thread.ofVirtual().name("terminal-exit-${watched.name}").start {
             val status = watched.awaitExit()
+            val reportedStatus = watched.reportedExitStatus()
             if (closed.get() || exitGeneration.get() != generation) return@start
             val failure = emulatorFailed.get()
             logger.info(
                 "Terminal session ended: ${watched.name} exitStatus=$status " +
+                    "reported=${reportedStatus ?: "none"} " +
                     "outcome=${if (failure) "failed" else "closed"}",
             )
+            // A missing exit status is the difference between "the shell exited" and "the transport
+            // went away", which used to look identical in the log.
+            SessionEvents.record(
+                "session-end",
+                "session" to watched.name,
+                "exitStatus" to status,
+                "reported" to (reportedStatus?.toString() ?: "none"),
+                "outcome" to if (failure) "failed" else "closed",
+            )
+            // No exit status means the channel closed without the remote saying why: a dropped
+            // transport, not a shell that exited. Capture the state at that moment.
+            if (reportedStatus == null) {
+                autoDump("transport-lost")
+            }
+            // A session that ends moments after an in-place reconnect is the report that started
+            // this work: keep the evidence of that shape instead of only its timeline entry.
+            val reconnectedAt = lastReconnectAt.get()
+            if (reconnectedAt > 0 && System.currentTimeMillis() - reconnectedAt < RECONNECT_DROP_WINDOW_MILLIS) {
+                autoDump("reconnect-dropped")
+            }
             // The SSH transport outlives the shell, so the monitor and SFTP must be released here
             // rather than waiting for the tab to be closed.
             markSessionEnded()
@@ -820,8 +995,14 @@ internal class TerminalSessionPage(
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         logger.info("Terminal session closed from the user interface: ${session.name} (emulatorFailed=$hasEmulatorFailed)")
+        SessionEvents.record(
+            "close",
+            "session" to session.name,
+            "emulatorFailed" to hasEmulatorFailed,
+        )
         exitGeneration.incrementAndGet()
         removeReconnectOnEnter()
+        stopInputWatchdog()
         // Neither stop waits for a sample in flight: this runs on the Swing EDT when the user closes
         // the tab, and a blocked sampler must not freeze the window for its two-second join.
         monitorSampler.stop()
@@ -842,6 +1023,9 @@ internal class TerminalSessionPage(
 
         /** Enough to contain the sequence that broke the emulator, small enough to attach to a report. */
         const val CAPTURE_LIMIT_BYTES = 256 * 1024
+
+        /** A session that ends this soon after an in-place reconnect is the reported failure shape. */
+        const val RECONNECT_DROP_WINDOW_MILLIS = 30_000L
     }
 }
 
@@ -942,10 +1126,12 @@ class WorkbenchPanel(
         closeAction: () -> Unit,
         sendCommand: ((String) -> Unit)? = null,
         endpointLabel: String? = null,
+        onReconnect: (() -> Unit)? = null,
+        onWriteDiagnostics: (() -> Unit)? = null,
     ) {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal tabs must be added on the Swing EDT" }
         if (sessions.isEmpty()) sessionTabs.remove(emptySession)
-        val tab = SessionTab(title, endpointLabel, closeAction, sendCommand)
+        val tab = SessionTab(title, endpointLabel, closeAction, sendCommand, onReconnect, onWriteDiagnostics)
         sessions[component] = tab
         sessionTabs.addTab(title, component)
         val index = sessionTabs.indexOfComponent(component)
@@ -1041,6 +1227,16 @@ class WorkbenchPanel(
     internal fun isSelectedSession(component: Component): Boolean =
         sessionTabs.selectedComponent === component
 
+    /** Test hook: the visible session tab, or null while the empty state is shown. */
+    internal fun selectedSession(): JComponent? =
+        (sessionTabs.selectedComponent as? JComponent)?.takeIf { sessions.containsKey(it) }
+
+    /** Test hook: the header component of a session tab, so its popup menu can be inspected. */
+    internal fun sessionHeader(component: Component): JComponent? {
+        val index = sessionTabs.indexOfComponent(component)
+        return if (index >= 0) sessionTabs.getTabComponentAt(index) as? JComponent else null
+    }
+
     /**
      * A tab whose emulator failed is just as reconnectable as one whose shell exited: the session
      * is gone either way, and Enter is the user's remedy for both.
@@ -1115,6 +1311,7 @@ class WorkbenchPanel(
         sessions.forEach { (_, tab) ->
             tab.statusLabel.text = I18n.t(tab.status.labelKey)
             tab.closeButton.toolTipText = I18n.t("workbench.tab.close", tab.title)
+            tab.popup?.let { menu -> fillSessionPopup(tab, menu) }
         }
         if (sessions.isEmpty()) {
             if (!connecting) connectionStatus.text = I18n.t("workbench.notConnected")
@@ -1155,7 +1352,47 @@ class WorkbenchPanel(
             it.addActionListener { closeSession(component) }
         })
         header.addMouseListener(selectTab)
+        // Right-clicking the tab is the natural place for "this session" actions once the terminal
+        // area is covered by a tool panel, or when the tab has ended and only its header is left.
+        val menu = createSessionPopup(tab)
+        tab.popup = menu
+        header.componentPopupMenu = menu
+        tab.titleLabel.componentPopupMenu = menu
+        tab.statusLabel.componentPopupMenu = menu
         return header
+    }
+
+    private fun createSessionPopup(tab: SessionTab): JPopupMenu =
+        JPopupMenu().apply {
+            // The listener is installed once; the items are rebuilt by fillSessionPopup on a
+            // language change, so it resolves the item at popup time instead of capturing it.
+            addPopupMenuListener(object : javax.swing.event.PopupMenuListener {
+                override fun popupMenuWillBecomeVisible(event: javax.swing.event.PopupMenuEvent) {
+                    (getComponent(0) as? JMenuItem)?.isEnabled =
+                        tab.reconnectAction != null && tab.status.isOver()
+                }
+
+                override fun popupMenuWillBecomeInvisible(event: javax.swing.event.PopupMenuEvent) = Unit
+
+                override fun popupMenuCanceled(event: javax.swing.event.PopupMenuEvent) = Unit
+            })
+            fillSessionPopup(tab, this)
+        }
+
+    /** (Re)builds the tab menu items, so a language change updates them like the rest of the tab strip. */
+    private fun fillSessionPopup(tab: SessionTab, menu: JPopupMenu) {
+        menu.removeAll()
+        menu.add(JMenuItem(I18n.t("workbench.tab.reconnect")).apply {
+            addActionListener { tab.reconnectAction?.invoke() }
+        })
+        menu.add(JMenuItem(I18n.t("workbench.tab.diagnostics")).apply {
+            isEnabled = tab.diagnosticsAction != null
+            addActionListener { tab.diagnosticsAction?.invoke() }
+        })
+        menu.addSeparator()
+        menu.add(JMenuItem(I18n.t("workbench.tab.close", tab.title)).apply {
+            addActionListener { tab.closeAction() }
+        })
     }
 
     private fun closeSession(component: Component) {
@@ -1222,10 +1459,13 @@ private class SessionTab(
     endpointLabel: String?,
     val closeAction: () -> Unit,
     val sendCommand: ((String) -> Unit)? = null,
+    val reconnectAction: (() -> Unit)? = null,
+    val diagnosticsAction: (() -> Unit)? = null,
 ) {
     var title: String = title
     var endpointLabel: String? = endpointLabel
     var status: SessionStatus = SessionStatus.CONNECTED
+    var popup: JPopupMenu? = null
     val titleLabel = ElidedLabel(title, TAB_TITLE_MAX_WIDTH)
     val statusLabel = JLabel().apply { name = "sessionStatusLabel" }
     val closeButton = JButton("x").apply {

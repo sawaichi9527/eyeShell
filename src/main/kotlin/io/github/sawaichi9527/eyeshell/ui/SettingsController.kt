@@ -5,6 +5,7 @@ import io.github.sawaichi9527.eyeshell.platform.AppInfo
 import io.github.sawaichi9527.eyeshell.platform.AppSettings
 import io.github.sawaichi9527.eyeshell.platform.BackgroundImages
 import io.github.sawaichi9527.eyeshell.platform.Diagnostics
+import io.github.sawaichi9527.eyeshell.platform.DiagnosticsBundle
 import io.github.sawaichi9527.eyeshell.platform.EyeShellPaths
 import io.github.sawaichi9527.eyeshell.platform.I18n
 import io.github.sawaichi9527.eyeshell.platform.OpenSourceComponent
@@ -524,7 +525,7 @@ internal class SettingsController(
         )
         addRow(this, I18n.t("settings.about.logs"), JLabel(EyeShellPaths.logDirectory().toString()), null)
         val openLogs = JButton(I18n.t("settings.about.openLogs")).apply { name = "settingsAboutOpenLogs" }
-        val writeDiagnostics = JButton(I18n.t("settings.about.diagnostics")).apply {
+        val writeDiagnostics = JButton(I18n.t("settings.about.diagnosticsAll")).apply {
             name = "settingsAboutDiagnostics"
         }
         val diagnosticsActions = JPanel().apply {
@@ -584,9 +585,12 @@ internal class SettingsController(
         JOptionPane.showMessageDialog(parent, directory.toString(), I18n.t("settings.about.logs"), JOptionPane.INFORMATION_MESSAGE)
     }
 
-    /** Writes a thread dump next to the log so a frozen tab can be reported without any tooling. */
+    /** Writes the diagnostics bundle (dump + log tail) so one file can be attached to a report. */
     private fun writeDiagnostics(parent: Component) {
-        val file = Diagnostics.write(EyeShellPaths.logDirectory(), "manual", diagnostics())
+        val file = DiagnosticsBundle.write(
+            directory = EyeShellPaths.logDirectory(),
+            reportText = Diagnostics.dumpText("manual", diagnostics()),
+        )
         val detail = file?.toString() ?: EyeShellPaths.logDirectory().toString()
         JOptionPane.showMessageDialog(
             parent,

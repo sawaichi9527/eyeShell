@@ -17,6 +17,7 @@ import com.jediterm.terminal.ui.settings.DefaultSettingsProvider
 import com.jediterm.terminal.util.CharUtils
 import io.github.sawaichi9527.eyeshell.platform.Diagnostics
 import io.github.sawaichi9527.eyeshell.platform.I18n
+import io.github.sawaichi9527.eyeshell.platform.SessionEvents
 import io.github.sawaichi9527.eyeshell.terminal.TerminalBackgroundImage
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorScheme
 import io.github.sawaichi9527.eyeshell.terminal.TerminalColorSchemes
@@ -95,11 +96,19 @@ class JediTermTerminalView(
                 terminalHeight: Int,
             ->
             staleRegionRepairs.incrementAndGet()
+            val sessionName = activeConnector?.sessionName ?: "the terminal"
             logger.warning(
                 "Repaired scroll margins left behind by a program on " +
-                    "${activeConnector?.sessionName ?: "the terminal"}: the cursor was on row $cursorY, " +
+                    "$sessionName: the cursor was on row $cursorY, " +
                     "below the region $regionTop..$regionBottom of $terminalHeight, so a line feed " +
                     "could not scroll; the full height is restored",
+            )
+            SessionEvents.record(
+                "repair",
+                "session" to sessionName,
+                "cursor" to cursorY,
+                "from" to "$regionTop..$regionBottom",
+                "to" to "1..$terminalHeight",
             )
         }
     }
@@ -644,6 +653,11 @@ private class ContextActionProvider(
         // strange state, typically a scroll region or origin mode.
         action(I18n.t("terminal.resetTerminal"), enabled = { hasSession }) {
             resetTerminal()
+        },
+        // The diagnostics dump belongs next to the reset action: it is what a user needs while the
+        // tab misbehaves, and it must not require a trip through Settings.
+        action(I18n.t("terminal.writeDiagnostics"), enabled = { hasSession && actions?.writeDiagnostics != null }) {
+            actions?.writeDiagnostics?.invoke()
         },
     )
 

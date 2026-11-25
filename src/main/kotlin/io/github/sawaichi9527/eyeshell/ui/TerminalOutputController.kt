@@ -37,6 +37,7 @@ internal class TerminalOutputController(
         owner: Component,
         addHighlightRule: (() -> Unit)? = null,
         manageHighlightRules: (() -> Unit)? = null,
+        writeDiagnostics: (() -> Unit)? = null,
     ) {
         check(SwingUtilities.isEventDispatchThread()) { "Terminal output actions must be installed on the Swing EDT" }
         terminalView.setContextActions(TerminalContextActions(
@@ -44,6 +45,7 @@ internal class TerminalOutputController(
             saveAllOutput = { saveAll(owner) },
             addHighlightRule = addHighlightRule,
             manageHighlightRules = manageHighlightRules,
+            writeDiagnostics = writeDiagnostics,
         ))
     }
 

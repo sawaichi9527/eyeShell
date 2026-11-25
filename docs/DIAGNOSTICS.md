@@ -19,6 +19,10 @@ the bundled JediTerm):
   start over. The first line identifies the build (`eyeShell=… java=… os=…`).
 * `Settings → About` shows the folder and offers **Open log folder** and **Write diagnostics**
   (a manual thread dump).
+* A diagnostics dump also carries an in-memory event timeline: `attach`, `reconnect-ok`,
+  `session-end` (with the reported exit status, `none` when the transport died), `emulator-stop`,
+  `repair`, and `input-blocked`/`input-dropped`, up to 256 timestamped entries. A dump taken after a
+  freeze therefore still shows what happened and in which order.
 * The log never contains terminal output, passwords, passphrases, or key material.
 
 A freeze produces these lines without any user action:
@@ -32,12 +36,15 @@ A freeze produces these lines without any user action:
 | `No terminal output for <n>s on <session>; … (localWindow=…, remoteWindow=…)` | The emulator is alive and polling but no bytes arrived for a minute. `localWindow` at or near 0 means the server is blocked because eyeShell stopped consuming; a healthy `localWindow` means the peer simply had nothing to send. |
 | `Uncaught exception in thread "…"` with a stack trace | Any uncaught failure, including a Swing paint that threw. Previously this went to a stderr nobody can read in a packaged build. |
 | `Terminal session attached/ended/closed …` | Lifecycle timeline: when a tab started, when the remote side ended it (`exitStatus=`), and when the user closed it. |
-| `Terminal input is queued on <session>: the SSH remote window is 0 …` | The user typed, but the server has not consumed the previous bytes, so the channel queued them and the shell never saw the keystroke. Logged at most once per 30 s. |
+| `Terminal input is queued on <session>: the SSH remote window is 0 …` | The user typed, but the server has not consumed the previous bytes, so the channel queued them and the shell never saw the keystroke. Logged at most once per 30 s. Keystrokes are now queued per session and written by a dedicated thread, so this state no longer freezes the window. |
+| `Dropped <n> bytes of terminal input on <session>` | The input queue (64 KiB) filled because the transport has not consumed anything for a long time, typically a large paste into a stalled session. The oldest bytes are dropped so the newest keystrokes still arrive; the drop is counted in the diagnostics dump (`io.in.dropped`). |
 | `Terminal output is being consumed but the panel has not repainted` | The repaint watchdog: characters arrive and are parsed, but the panel never paints. A `thread-dump-*.txt` is written. |
 | `Repaired scroll margins left behind by a program on <session>` | A line feed arrived while the cursor sat *below* the scroll region (for example on the real last row after a program left a status-line region behind). Nothing could scroll in that state, so the margins were restored to the full height and the line feed then scrolled the screen. One line per repair; the tab keeps its content and needs no user action. |
+| `Restoring a shortened terminal scroll region (<top>..<bottom> of <height>) on <session>; cursor was on row … originMode=…` | The same defect without a line feed to trigger the repair: the watchdog waited 10 s when the cursor is outside the region (a line feed there can never scroll) or 30 s while it is still inside (a program may own it). The region is restored and the cursor kept. |
+| `Terminal input is not draining on <session>: <n> bytes queued; writing a diagnostics dump` | The writer queue stopped draining for two consecutive seconds: the remote is not consuming stdin. A `thread-dump-input-stall-*.txt` is written while the writer thread is still blocked, which is the evidence a later dump can no longer show. |
 | `Reattaching over a terminal state that could not scroll; before: …` | An in-place reconnect (Enter on an exited tab) found a non-full scroll region or origin mode left by the previous program. The state is logged *before* it is reset, and a `thread-dump-reset-*.txt` is written, so the evidence survives the repair. |
 | `Terminal state reset from the context menu …; before: …` | The same pre-reset record for the manual `Reset Terminal` action. This is the line that names a freeze which the user already fixed. |
-| `Settings → About → Write diagnostics` | Writes every open tab's model state: size, cursor, scroll-region top/bottom, origin mode, whether the cursor is below the region, repair count, visible rows, screen/history line counts, alternate-screen flag, paint counter, last paint age, consumed characters. Use this while the tab is frozen. |
+| `Settings → About → Write diagnostics` | Writes every open tab's identity and state: `name`/`profile`/`status`, size, cursor, scroll-region top/bottom, origin mode, whether the cursor is below the region, repair count, visible rows, screen/history line counts, alternate-screen flag, paint counter, last paint age, consumed characters, the input queue (`io.in.pending`, `io.in.dropped`, `io.in.blockedMs`), the channel windows, and the recent event timeline. Use this while the tab is frozen. |
 
 A failed tab keeps its scrollback and can be reconnected in place with Enter. When it fails, the
 session is closed, so a keystroke can no longer reach a remote shell the user cannot see.
@@ -47,15 +54,27 @@ session is closed, so a keystroke can no longer reach a remote shell the user ca
 1. Reproduce the freeze (for example `sudo apt autoremove` on the host).
 2. **Wait 20–30 seconds** before copying: the watchdog confirms a stall after 15 s and writes the
    stack, and the 60-second silence warning adds the channel windows.
-3. **While the tab is still frozen, use `Settings → About → Write diagnostics`**. A dump taken
+3. **Write the diagnostics while the tab still misbehaves.** Three ways, same content:
+   * right-click in the terminal → **Write diagnostics for this session...** (this tab only);
+   * right-click the tab title → **Write diagnostics...**;
+   * `Ctrl+Shift+D` (the visible tab), or `Settings → About → Write diagnostics (all sessions)`.
+
+   The button writes one archive, `eyeShell-diagnostics-<timestamp>.zip`, holding `report.txt` (state
+   of every tab, the event timeline, and the thread list) plus the tail of `eyeshell.log`. A dump taken
    *after* `Reset Terminal` no longer shows the bad state — the reset is what removes it. Pressing
-   `Reset Terminal` is still safe: eyeShell now records the pre-reset state (`… ; before: …`) and
-   writes a `thread-dump-reset-*.txt` whenever the terminal could not scroll, so the evidence is kept
-   either way. Include that file with the log.
-4. Copy the whole `%LOCALAPPDATA%\eyeShell\logs\` folder. Closing the tab first is **not** required —
-   the file handler flushes after every record, so the log is current while eyeShell runs. Keeping
-   the tab open also preserves the status chip (Connected / Failed) as evidence.
+   `Reset Terminal` is still safe: eyeShell records the pre-reset state (`… ; before: …`) and writes a
+   `thread-dump-reset-*.txt` whenever the terminal could not scroll, so the evidence is kept either way.
+4. Send that archive. Copying the whole `%LOCALAPPDATA%\eyeShell\logs\` folder also works. Closing the
+   tab first is **not** required — the file handler flushes after every record, so the log is current
+   while eyeShell runs. Keeping the tab open also preserves the status chip (Connected / Failed) as
+   evidence.
 5. Note the wall-clock time and what the last visible output was.
+
+Some failures write the dump by themselves, without the button: an input queue that stops draining
+(`thread-dump-input-stall-*.txt`), a channel that closes without an exit status
+(`thread-dump-transport-lost-*.txt`), and a session that ends within 30 s of a reconnect
+(`thread-dump-reconnect-dropped-*.txt`). These are throttled (one per session and kind every five
+minutes, at most 20 per run) and recorded in the event timeline as `auto-dump`.
 
 Nothing else is required. If the whole application (not just the tab) is unresponsive, the log still
 holds the last lines written before it froze.

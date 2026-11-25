@@ -1,6 +1,9 @@
 package io.github.sawaichi9527.eyeshell.ssh
 
+import io.github.sawaichi9527.eyeshell.platform.SessionEvents
 import io.github.sawaichi9527.eyeshell.sftp.SftpClient
+import io.github.sawaichi9527.eyeshell.terminal.InputStats
+import io.github.sawaichi9527.eyeshell.terminal.InputWriter
 import io.github.sawaichi9527.eyeshell.terminal.RawOutputLog
 import io.github.sawaichi9527.eyeshell.terminal.TerminalFlowControl
 import io.github.sawaichi9527.eyeshell.terminal.TerminalSession
@@ -489,6 +492,23 @@ private class MinaSshTerminalSession(
     private val rawLog = RawOutputLog()
     private val lastInputWarningAt = AtomicLong(0)
 
+    /**
+     * Keystrokes are queued and written by a dedicated thread: `ChannelOutputStream.write` waits for
+     * remote window space (30 s by default), and the caller is the Swing EDT.
+     */
+    private val inputWriter = InputWriter(
+        name = name,
+        sink = ::deliverInput,
+        onDropped = { dropped, pending ->
+            SessionEvents.record(
+                "input-dropped",
+                "session" to name,
+                "bytes" to dropped,
+                "pending" to pending,
+            )
+        },
+    )
+
     /** Guards the decoder state so a Settings change can land between two reads. */
     private val stateLock = Any()
     private var activeCharset: Charset = initialCharset
@@ -562,8 +582,19 @@ private class MinaSshTerminalSession(
         )
     }.getOrNull()
 
-    @Synchronized
     override fun write(bytes: ByteArray) {
+        // Queued, not written: `ChannelOutputStream.write` blocks while the peer's window is
+        // exhausted, and this method runs on the Swing EDT for every keystroke.
+        inputWriter.submit(bytes)
+    }
+
+    override fun inputStats(): InputStats = inputWriter.stats()
+
+    /** `null` when the channel closed without an exit-status request, i.e. the transport died. */
+    override fun reportedExitStatus(): Int? = runCatching { channel.exitStatus }.getOrNull()
+
+    /** Runs on the writer thread; this is where a stalled remote window is observed. */
+    private fun deliverInput(bytes: ByteArray) {
         warnWhenInputIsQueued()
         output.write(bytes)
         output.flush()
@@ -585,6 +616,12 @@ private class MinaSshTerminalSession(
         LOGGER.warning(
             "Terminal input is queued on $name: the SSH remote window is 0, so the server has not " +
                 "consumed the previous bytes",
+        )
+        SessionEvents.record(
+            "input-blocked",
+            "session" to name,
+            "remoteWindow" to size,
+            "pending" to inputWriter.stats().pendingBytes,
         )
     }
 
@@ -616,6 +653,8 @@ private class MinaSshTerminalSession(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        // Discards queued keystrokes: the channel is going away, and this runs on the Swing EDT.
+        inputWriter.close()
         channel.close(false)
     }
 

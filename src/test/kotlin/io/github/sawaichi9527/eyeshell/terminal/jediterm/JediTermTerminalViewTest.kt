@@ -551,6 +551,7 @@ class JediTermTerminalViewTest {
         val saveCount = AtomicInteger()
         val addHighlightCount = AtomicInteger()
         val manageHighlightCount = AtomicInteger()
+        val diagnosticsCount = AtomicInteger()
         val view = onEdt {
             JediTermTerminalView().also {
                 it.setContextActions(TerminalContextActions(
@@ -558,6 +559,7 @@ class JediTermTerminalViewTest {
                     saveCount::incrementAndGet,
                     addHighlightCount::incrementAndGet,
                     manageHighlightCount::incrementAndGet,
+                    diagnosticsCount::incrementAndGet,
                 ))
             }
         }
@@ -582,6 +584,7 @@ class JediTermTerminalViewTest {
                     "Manage Color Highlight Rules...",
                     "Clear Buffer",
                     "Reset Terminal",
+                    "Write diagnostics for this session...",
                 ), actions.map { it.name })
                 assertEquals(listOf(2, 6, 9), actions.indices.filter { actions[it].isSeparated })
                 assertFalse(actions.single { it.name == "Copy" }.isEnabled(null))
@@ -595,6 +598,7 @@ class JediTermTerminalViewTest {
                 actions.single { it.name == "Search..." }.actionPerformed(null)
                 actions.single { it.name == "Add Color Highlight Rule..." }.actionPerformed(null)
                 actions.single { it.name == "Manage Color Highlight Rules..." }.actionPerformed(null)
+                actions.single { it.name == "Write diagnostics for this session..." }.actionPerformed(null)
                 assertTrue(view.searchComponent.isVisible)
             }
 
@@ -602,6 +606,7 @@ class JediTermTerminalViewTest {
             assertEquals(1, saveCount.get())
             assertEquals(1, addHighlightCount.get())
             assertEquals(1, manageHighlightCount.get())
+            assertEquals(1, diagnosticsCount.get())
             assertFalse(onEdt { view.contextActions.single { it.name == "Paste" }.isEnabled(null) })
         } finally {
             onEdt { view.close() }
