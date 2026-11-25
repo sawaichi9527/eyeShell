@@ -59,8 +59,9 @@ session is closed, so a keystroke can no longer reach a remote shell the user ca
    * right-click the tab title → **Write diagnostics...**;
    * `Ctrl+Shift+D` (the visible tab), or `Settings → About → Write diagnostics (all sessions)`.
 
-   The button writes one archive, `eyeShell-diagnostics-<timestamp>.zip`, holding `report.txt` (state
-   of every tab, the event timeline, and the thread list) plus the tail of `eyeshell.log`. A dump taken
+   The button writes one archive, `eyeShell-diagnostics-<timestamp>.zip`, holding `report.txt` (the
+   non-secret settings, state of every tab, the event timeline, and the thread list) plus the tail of
+   `eyeshell.log`. A dump taken
    *after* `Reset Terminal` no longer shows the bad state — the reset is what removes it. Pressing
    `Reset Terminal` is still safe: eyeShell records the pre-reset state (`… ; before: …`) and writes a
    `thread-dump-reset-*.txt` whenever the terminal could not scroll, so the evidence is kept either way.

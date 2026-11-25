@@ -19,9 +19,12 @@ class DiagnosticsTest {
             threads = mapOf(main to main.stackTrace),
             properties = mapOf("eyeShell" to "0.1.9", "java" to "21.0.12"),
             events = listOf("2026-11-25T14:07:29.487+08:00 ev=attach session=operator@192.0.2.10:22"),
+            settings = listOf("terminal.charset=UTF-8", "terminal.font.size=16"),
         )
 
         assertTrue(text.contains("reason: terminal-stall-operator@192.0.2.10"), text)
+        assertTrue(text.contains("settings:"), "the settings must be part of the dump")
+        assertTrue(text.contains("terminal.charset=UTF-8"), text)
         assertTrue(text.contains("session=operator@192.0.2.10 state=stalled"), text)
         assertTrue(text.contains("events:"), "the timeline must be part of the dump")
         assertTrue(text.contains("ev=attach session=operator@192.0.2.10:22"), text)
@@ -38,9 +41,11 @@ class DiagnosticsTest {
             threads = emptyMap(),
             properties = emptyMap(),
             events = emptyList(),
+            settings = emptyList(),
         )
 
         assertTrue(text.contains("events:\n  (none)"), text)
+        assertTrue(text.contains("settings:\n  (none)"), text)
     }
 
     @Test

@@ -11,6 +11,7 @@ import io.github.sawaichi9527.eyeshell.platform.EyeShellPaths
 import io.github.sawaichi9527.eyeshell.platform.I18n
 import io.github.sawaichi9527.eyeshell.platform.SessionDumps
 import io.github.sawaichi9527.eyeshell.platform.SessionEvents
+import io.github.sawaichi9527.eyeshell.platform.SettingsReport
 import io.github.sawaichi9527.eyeshell.platform.WindowPlacement
 import io.github.sawaichi9527.eyeshell.platform.resolveWindowPlacement
 import io.github.sawaichi9527.eyeshell.platform.screenWorkAreas
@@ -234,7 +235,15 @@ class EyeShellWindow(
         val terminalView = terminalViewFactory()
         terminalView.setBackgroundImage(terminalBackgroundImage)
         val page = try {
-            TerminalSessionPage(this, terminalView, hostSession, terminal, captureRawBytes, monitorInterval)
+            TerminalSessionPage(
+                owner = this,
+                terminalView = terminalView,
+                hostSession = hostSession,
+                session = terminal,
+                captureRawBytes = captureRawBytes,
+                monitorInterval = monitorInterval,
+                settingsReport = { SettingsReport.lines(appSettings) },
+            )
         } catch (failure: Throwable) {
             try {
                 terminalView.close()
@@ -472,6 +481,8 @@ internal class TerminalSessionPage(
     private val captureRawBytes: Boolean = false,
     /** Sampling interval of the monitor sidebar; tests shorten the 2 s default. */
     private val monitorInterval: Duration = Duration.ofSeconds(2),
+    /** Non-secret settings that change how this session behaves, for the diagnostics report. */
+    private val settingsReport: () -> List<String> = { emptyList() },
 ) : AutoCloseable {
     private var hostSession: HostSession = hostSession
     private var session: TerminalSession = session
@@ -683,6 +694,7 @@ internal class TerminalSessionPage(
             reportText = Diagnostics.dumpText(
                 reason = "session-${Diagnostics.sanitize(session.name)}",
                 sessions = listOf(terminalState()),
+                settings = settingsReport(),
             ),
         )
         val detail = file?.toString() ?: EyeShellPaths.logDirectory().toString()

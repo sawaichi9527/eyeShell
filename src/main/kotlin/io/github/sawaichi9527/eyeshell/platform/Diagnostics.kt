@@ -31,11 +31,16 @@ object Diagnostics {
         threads: Map<Thread, Array<StackTraceElement>>,
         properties: Map<String, String>,
         events: List<String> = emptyList(),
+        settings: List<String> = emptyList(),
     ): String = buildString {
         appendLine("eyeShell diagnostics")
         appendLine("reason: ${reason.replace('\n', ' ')}")
         appendLine("time: ${TIMESTAMP.format(java.time.LocalDateTime.now())}")
         properties.toSortedMap().forEach { (name, value) -> appendLine("$name: $value") }
+        appendLine()
+        appendLine("settings:")
+        if (settings.isEmpty()) appendLine("  (none)") else settings.forEach { appendLine("  $it") }
+        appendLine()
         appendLine("open sessions:")
         if (sessions.isEmpty()) appendLine("  (none)") else sessions.forEach { appendLine("  $it") }
         appendLine()
@@ -58,12 +63,14 @@ object Diagnostics {
         reason: String,
         sessions: List<String>,
         events: List<String> = SessionEvents.snapshot(),
+        settings: List<String> = emptyList(),
     ): String = threadDumpText(
         reason = reason,
         sessions = sessions,
         threads = Thread.getAllStackTraces(),
         properties = runtimeProperties(),
         events = events,
+        settings = settings,
     )
 
     /** Writes `<directory>/thread-dump-<reason>-<timestamp>.txt`; returns the file, or null on failure. */
@@ -72,10 +79,11 @@ object Diagnostics {
         reason: String,
         sessions: List<String>,
         events: List<String> = SessionEvents.snapshot(),
+        settings: List<String> = emptyList(),
     ): Path? = try {
         Files.createDirectories(directory)
         val file = directory.resolve(fileName(reason, timestamp()))
-        Files.writeString(file, dumpText(reason, sessions, events))
+        Files.writeString(file, dumpText(reason, sessions, events, settings))
         logger.info("Wrote a diagnostics snapshot to $file")
         file
     } catch (failure: Exception) {

@@ -8,6 +8,7 @@ import io.github.sawaichi9527.eyeshell.platform.Diagnostics
 import io.github.sawaichi9527.eyeshell.platform.DiagnosticsBundle
 import io.github.sawaichi9527.eyeshell.platform.EyeShellPaths
 import io.github.sawaichi9527.eyeshell.platform.I18n
+import io.github.sawaichi9527.eyeshell.platform.SettingsReport
 import io.github.sawaichi9527.eyeshell.platform.OpenSourceComponent
 import io.github.sawaichi9527.eyeshell.terminal.TerminalBackgroundImage
 import io.github.sawaichi9527.eyeshell.terminal.TerminalCharset
@@ -589,7 +590,11 @@ internal class SettingsController(
     private fun writeDiagnostics(parent: Component) {
         val file = DiagnosticsBundle.write(
             directory = EyeShellPaths.logDirectory(),
-            reportText = Diagnostics.dumpText("manual", diagnostics()),
+            reportText = Diagnostics.dumpText(
+                reason = "manual",
+                sessions = diagnostics(),
+                settings = SettingsReport.lines(settings),
+            ),
         )
         val detail = file?.toString() ?: EyeShellPaths.logDirectory().toString()
         JOptionPane.showMessageDialog(
