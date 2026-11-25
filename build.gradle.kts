@@ -11,7 +11,7 @@ val sqliteNativeClassifier = if (isWindowsBuild) {
 }
 
 group = "io.github.sawaichi9527.eyeshell"
-version = "0.2.3"
+version = "0.2.4-dev"
 
 kotlin {
     jvmToolchain(21)
